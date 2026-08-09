@@ -231,10 +231,8 @@ async def todos_post(payload: dict = Body(...)):
 
 @app.get("/api/cal", dependencies=authed)
 async def cal_get():
-    """读的时候前端可能直接用返回值当 calData，写的时候读 d.cal。
-    两边都给，省得猜。"""
     data = db.cal_all()
-    return {"ok": True, "cal": data, "predict": None, **data}
+    return {"ok": True, "cal": data, "predict": {}, **data}
 
 
 @app.post("/api/cal", dependencies=authed)
