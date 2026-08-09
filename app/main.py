@@ -372,6 +372,87 @@ async def favlines_post(payload: dict = Body(...)):
 @app.get("/api/dreams", dependencies=authed)
 async def dreams_get(limit: int = 200):
     return {"ok": True, "items": db.night_list(limit)}
+    
+# ---------------------------------------------------------------- 聊天那部分的空壳
+#
+# 这些接口前端一打开就要，缺一个它就以为整页坏了。
+# 聊天本体还没接（要串 heartbeat 的网关），先给合理的空壳让界面安静下来。
+# 每一个都得带 ok，前端只认这个字段。
+
+@app.get("/api/status", dependencies=authed)
+async def status_get():
+    return {
+        "ok": True,
+        "online": True,
+        "model": "claude",
+        "name": "Cloudy",
+        "today": db.today_str(),
+    }
+
+
+@app.get("/api/authmode", dependencies=authed)
+async def authmode():
+    return {"ok": True, "mode": "password"}
+
+
+@app.get("/api/model", dependencies=authed)
+async def model_get():
+    return {"ok": True, "model": "claude", "models": ["claude"]}
+
+
+@app.get("/api/messages", dependencies=authed)
+async def messages(limit: int = 400):
+    return {"ok": True, "msgs": [], "seq": 0}
+
+
+@app.get("/api/chats", dependencies=authed)
+async def chats(scope: str = ""):
+    return {"ok": True, "chats": []}
+
+
+@app.get("/api/wake", dependencies=authed)
+async def wake_get():
+    return {"ok": True, "awake": True}
+
+
+@app.get("/api/context", dependencies=authed)
+async def context_get():
+    return {"ok": True, "used": 0, "total": 0}
+
+
+@app.get("/api/usage", dependencies=authed)
+async def usage_get():
+    return {"ok": True, "items": []}
+
+
+@app.get("/api/notes", dependencies=authed)
+async def notes_get():
+    return {"ok": True, "gu": [], "her": []}
+
+
+@app.get("/api/gong", dependencies=authed)
+async def gong_get():
+    return {"ok": True, "msgs": []}
+
+
+@app.get("/api/news", dependencies=authed)
+async def news_get():
+    return {"ok": True, "items": []}
+
+
+@app.get("/api/nook", dependencies=authed)
+async def nook_get():
+    return {"ok": True, "items": []}
+
+
+@app.get("/api/repo", dependencies=authed)
+async def repo_get():
+    return {"ok": True, "items": []}
+
+
+@app.get("/api/watch", dependencies=authed)
+async def watch_get():
+    return {"ok": True, "items": []}
 
 # ---------------------------------------------------------------- 长轮询
 
