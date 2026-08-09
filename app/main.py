@@ -60,7 +60,7 @@ def ensure_frontend():
         # 二、补上游的 bug。作者拆掉生理周期那块时删掉了 const p，
         # 但 renderDayDetail 里还在用它，日历页一打开就 ReferenceError。
         orphan = "  p.appendChild(moodRow);"
-        if orphan in html and "const p = document.createElement" not in html:
+        if orphan in html
             html = html.replace(
                 orphan,
                 "  const p = document.createElement('div'); p.className = 'pbox';\n"
