@@ -31,13 +31,12 @@ FRONTEND_URL = ("https://raw.githubusercontent.com/xinwithyu/"
 
 
 def ensure_frontend():
-    """前端不在就自己去拉一份，并剥掉演示模式。
+    """前端不在就自己去拉一份，剥掉演示模式，顺手补上游的 bug。
 
     那个文件 280KB，不进仓库；容器每次重建都会丢。
     与其让人手动装一遍，不如让它自己长回来。
     拉不到也不致命——接口照样活着，只是没有脸。
     """
-    import re
     import urllib.request
 
     target = STATIC_DIR / "index.html"
@@ -48,7 +47,7 @@ def ensure_frontend():
         STATIC_DIR.mkdir(parents=True, exist_ok=True)
         html = urllib.request.urlopen(FRONTEND_URL, timeout=60).read().decode("utf-8")
 
-        # 演示模式那段 IIFE 会劫持 fetch 喂假数据，必须剥掉。
+        # 一、剥掉演示模式。那段 IIFE 劫持 fetch 喂假数据，不删就连不上后端。
         # 按内容定位而不是行号——行号会随上游改动失效。
         start = html.find("/* \u2500")
         end = html.find("})();", start)
@@ -57,6 +56,18 @@ def ensure_frontend():
             print("[dwell] 演示模式已剥离")
         else:
             print("[dwell] 没找到演示模式的边界，原样保留")
+
+        # 二、补上游的 bug。作者拆掉生理周期那块时删掉了 const p，
+        # 但 renderDayDetail 里还在用它，日历页一打开就 ReferenceError。
+        orphan = "  p.appendChild(moodRow);"
+        if orphan in html and "const p = document.createElement" not in html:
+            html = html.replace(
+                orphan,
+                "  const p = document.createElement('div'); p.className = 'pbox';\n"
+                + orphan,
+                1,
+            )
+            print("[dwell] 补上了日历缺失的容器")
 
         target.write_text(html, encoding="utf-8")
         print(f"[dwell] 前端就位 {target.stat().st_size} 字节")
