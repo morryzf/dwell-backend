@@ -23,6 +23,45 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 @app.on_event("startup")
 def _startup():
     db.init_db()
+    ensure_frontend()
+
+
+FRONTEND_URL = ("https://raw.githubusercontent.com/xinwithyu/"
+                "dwell-on-something/main/web/index.html")
+
+
+def ensure_frontend():
+    """前端不在就自己去拉一份，并剥掉演示模式。
+
+    那个文件 280KB，不进仓库；容器每次重建都会丢。
+    与其让人手动装一遍，不如让它自己长回来。
+    拉不到也不致命——接口照样活着，只是没有脸。
+    """
+    import re
+    import urllib.request
+
+    target = STATIC_DIR / "index.html"
+    if target.exists() and target.stat().st_size > 100_000:
+        return
+
+    try:
+        STATIC_DIR.mkdir(parents=True, exist_ok=True)
+        html = urllib.request.urlopen(FRONTEND_URL, timeout=60).read().decode("utf-8")
+
+        # 演示模式那段 IIFE 会劫持 fetch 喂假数据，必须剥掉。
+        # 按内容定位而不是行号——行号会随上游改动失效。
+        start = html.find("/* \u2500")
+        end = html.find("})();", start)
+        if start != -1 and end != -1:
+            html = html[:start] + html[end + len("})();"):]
+            print("[dwell] 演示模式已剥离")
+        else:
+            print("[dwell] 没找到演示模式的边界，原样保留")
+
+        target.write_text(html, encoding="utf-8")
+        print(f"[dwell] 前端就位 {target.stat().st_size} 字节")
+    except Exception as exc:
+        print(f"[dwell] 前端没拉到：{exc}")
 
 
 # ---------------------------------------------------------------- 登录
