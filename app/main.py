@@ -311,6 +311,67 @@ async def whisper_recent(n: int = 5, mark: int = 0):
     但让它影响我接下来说话的方式。
     """
     return {"items": db.whisper_recent(n, mark_seen=bool(mark))}
+    
+# ---------------------------------------------------------------- 便签墙（前端实际用的名字）
+
+@app.get("/api/wall", dependencies=authed)
+async def wall(lite: int = 0):
+    """日记的便签墙视图。
+
+    前端叫它 wall，字段叫 bricks——文档里写的 diary/items 是作者
+    事后整理时改的名字，以实际代码为准。
+
+    lite=1 只给标记不给正文：全文几十万字，列表页不该背着它跑。
+    """
+    rows = db.diary_list(lite=bool(lite), limit=400)
+    bricks = [
+        {
+            "id": r["id"],
+            "date": r["date"],
+            "title": r.get("title") or "",
+            "kw": r.get("keywords") or "",
+            "s": r.get("strength"),
+            "v": r.get("valence"),
+            "a": r.get("arousal"),
+            "text": r.get("body", ""),
+        }
+        for r in rows
+    ]
+    return {"ok": True, "bricks": bricks}
+
+
+@app.get("/api/herdiary", dependencies=authed)
+async def herdiary_get():
+    return {"ok": True, "items": db.her_diary_list()}
+
+
+@app.post("/api/herdiary", dependencies=authed)
+async def herdiary_post(payload: dict = Body(...)):
+    text = str(payload.get("text", "")).strip()
+    if not text:
+        raise HTTPException(400, "写点什么再记上")
+    item = db.her_diary_add(text)
+    return {"ok": True, **item}
+
+
+@app.get("/api/favlines", dependencies=authed)
+async def favlines_get():
+    return {"ok": True, "items": db.quote_list()}
+
+
+@app.post("/api/favlines", dependencies=authed)
+async def favlines_post(payload: dict = Body(...)):
+    quote = str(payload.get("quote") or payload.get("text") or "").strip()
+    if not quote:
+        raise HTTPException(400, "摘的话不能是空的")
+    item = db.quote_add(quote, str(payload.get("note", "")),
+                        str(payload.get("date", "")))
+    return {"ok": True, **item}
+
+
+@app.get("/api/dreams", dependencies=authed)
+async def dreams_get(limit: int = 200):
+    return {"ok": True, "items": db.night_list(limit)}
 
 # ---------------------------------------------------------------- 长轮询
 
