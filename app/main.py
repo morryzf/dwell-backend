@@ -48,7 +48,6 @@ def ensure_frontend():
         html = urllib.request.urlopen(FRONTEND_URL, timeout=60).read().decode("utf-8")
 
         # 一、剥掉演示模式。那段 IIFE 劫持 fetch 喂假数据，不删就连不上后端。
-        # 按内容定位而不是行号——行号会随上游改动失效。
         start = html.find("/* \u2500")
         end = html.find("})();", start)
         if start != -1 and end != -1:
@@ -58,16 +57,14 @@ def ensure_frontend():
             print("[dwell] 没找到演示模式的边界，原样保留")
 
         # 二、补上游的 bug。作者拆掉生理周期那块时删掉了 const p，
-        # 但 renderDayDetail 里还在用它，日历页一打开就 ReferenceError。
+        # 但 renderDayDetail 里还在用它，日历一打开就 ReferenceError。
         orphan = "  p.appendChild(moodRow);"
-        if orphan in html
-            html = html.replace(
-                orphan,
-                "  const p = document.createElement('div'); p.className = 'pbox';\n"
-                + orphan,
-                1,
-            )
+        patch = "  const p = document.createElement('div'); p.className = 'pbox';\n"
+        if orphan in html:
+            html = html.replace(orphan, patch + orphan, 1)
             print("[dwell] 补上了日历缺失的容器")
+        else:
+            print("[dwell] 没找到日历那处孤儿代码")
 
         target.write_text(html, encoding="utf-8")
         print(f"[dwell] 前端就位 {target.stat().st_size} 字节")
