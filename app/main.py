@@ -231,8 +231,8 @@ async def todos_post(payload: dict = Body(...)):
 
 @app.get("/api/cal", dependencies=authed)
 async def cal_get():
-    data = db.cal_all()
-    return {"ok": True, "period": None, **data}
+    """前端读的是 d.cal 和 d.predict，不是平铺的 events/days。"""
+    return {"ok": True, "cal": db.cal_all(), "predict": None}
 
 
 @app.post("/api/cal", dependencies=authed)
