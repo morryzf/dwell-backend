@@ -231,7 +231,13 @@ async def todos_post(payload: dict = Body(...)):
 
 @app.get("/api/cal", dependencies=authed)
 async def cal_get():
+    """calData.period.days —— 前端心情记录挂在 period 底下。
+
+    上游把生理周期那块拆掉时漏了这一处，心情还留在 period.days，
+    所以这里必须把 days 塞进 period 里，不然日历渲染直接炸。
+    """
     data = db.cal_all()
+    data["period"] = {"days": data["days"]}
     return {"ok": True, "cal": data, "predict": {}, **data}
 
 
