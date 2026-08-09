@@ -235,7 +235,8 @@ async def todos_post(payload: dict = Body(...)):
 
 @app.get("/api/cal", dependencies=authed)
 async def cal_get():
-    return db.cal_all()
+    data = db.cal_all()
+    return {"ok": True, "period": None, **data}
 
 
 @app.post("/api/cal", dependencies=authed)
