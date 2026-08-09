@@ -312,6 +312,28 @@ async def whisper_recent(n: int = 5, mark: int = 0):
     """
     return {"items": db.whisper_recent(n, mark_seen=bool(mark))}
 
+# ---------------------------------------------------------------- 长轮询
+
+@app.get("/api/poll", dependencies=authed)
+async def poll(since: str = "", timeout: int = 25):
+    """前端等推送用的。
+
+    没有新消息时挂着等，而不是立刻空手回去——
+    立刻回会让前端一秒重试几十次，日志里刷满 404。
+
+    现在还没有消息源（聊天没接），所以它就是老实等满再回。
+    等聊天那部分做起来，这里换成真的读消息队列。
+    """
+    import asyncio
+
+    # since 可能是字符串 "undefined"——前端第一次问的时候还没有游标
+    try:
+        cursor = int(since)
+    except (TypeError, ValueError):
+        cursor = 0
+
+    await asyncio.sleep(max(1, min(timeout, 30)))
+    return {"ok": True, "seq": cursor, "msgs": []}
 
 # ---------------------------------------------------------------- 健康检查
 
