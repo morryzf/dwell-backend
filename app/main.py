@@ -161,17 +161,26 @@ async def todos_get():
 
 @app.post("/api/todos", dependencies=authed)
 async def todos_post(payload: dict = Body(...)):
-    """前端只用这一个入口，动作放在 action 字段里。照文档的形状。"""
+    """前端只用这一个入口，动作放在 action 字段里。
+
+    栏位字段前端发的是 list，文档写的是 side。两个都收——
+    文档是事后整理的，跟实际代码有出入，以实际为准。
+    """
     action = str(payload.get("action", ""))
-    side = str(payload.get("side", ""))
+    side = str(payload.get("list") or payload.get("side") or "")
 
     if action == "add":
         if side not in ("mine", "hers"):
-            raise HTTPException(400, "side 只能是 mine 或 hers")
+            raise HTTPException(400, "栏位只能是 mine 或 hers")
         text = str(payload.get("text", "")).strip()
         if not text:
             raise HTTPException(400, "事情本身不能是空的")
-        return db.todo_add(side, text, str(payload.get("at", "")))
+        return db.todo_add(
+            side, text,
+            str(payload.get("at", "")),
+            str(payload.get("by", "")),
+            bool(payload.get("fixed")),
+        )
 
     if action == "toggle":
         return {"ok": db.todo_toggle(side, str(payload.get("id", "")))}
@@ -180,6 +189,7 @@ async def todos_post(payload: dict = Body(...)):
         return {"ok": db.todo_del(side, str(payload.get("id", "")))}
 
     raise HTTPException(400, f"不认识的动作：{action}")
+
 
 
 # ---------------------------------------------------------------- 日历
