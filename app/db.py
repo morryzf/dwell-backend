@@ -104,13 +104,16 @@ CREATE TABLE IF NOT EXISTS night (
 CREATE INDEX IF NOT EXISTS ix_night_date ON night(date DESC, hm ASC);
 
 -- 待办：两栏。side='mine' 是我的，'hers' 是你的。
+-- by 是谁记的，fixed 是固定项——前端会发这两个字段。
 CREATE TABLE IF NOT EXISTS todos (
-    id   TEXT PRIMARY KEY,
-    side TEXT NOT NULL CHECK (side IN ('mine','hers')),
-    text TEXT NOT NULL,
-    done INTEGER NOT NULL DEFAULT 0,
-    at   TEXT NOT NULL DEFAULT '',     -- 可选时间 "09:00"，空串=没时间
-    made INTEGER NOT NULL
+    id    TEXT PRIMARY KEY,
+    side  TEXT NOT NULL CHECK (side IN ('mine','hers')),
+    text  TEXT NOT NULL,
+    done  INTEGER NOT NULL DEFAULT 0,
+    at    TEXT NOT NULL DEFAULT '',
+    by    TEXT NOT NULL DEFAULT '',
+    fixed INTEGER NOT NULL DEFAULT 0,
+    made  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_todos_side ON todos(side, done);
 
@@ -359,19 +362,22 @@ def todos_all() -> dict:
     return out
 
 
-def todo_add(side: str, text: str, at: str = "") -> dict:
+def todo_add(side: str, text: str, at: str = "",
+             by: str = "", fixed: bool = False) -> dict:
     row = {
         "id": new_id(),
         "side": side,
         "text": text.strip()[:500],
         "done": 0,
         "at": (at or "").strip(),
+        "by": (by or "").strip()[:20],
+        "fixed": 1 if fixed else 0,
         "made": int(time.time()),
     }
     with conn() as cx:
         cx.execute(
-            """INSERT INTO todos (id,side,text,done,at,made)
-               VALUES (:id,:side,:text,:done,:at,:made)""",
+            """INSERT INTO todos (id,side,text,done,at,by,fixed,made)
+               VALUES (:id,:side,:text,:done,:at,:by,:fixed,:made)""",
             row,
         )
     return row
