@@ -182,20 +182,16 @@ async def night_list(limit: int = 200):
     return {"items": db.night_list(limit)}
 
 
-@app.post("/api/night", dependencies=authed)
-async def night_add(payload: dict = Body(...)):
-    hm = str(payload.get("hm", "")).strip()
-    text = str(payload.get("text", "")).strip()
-    if not hm or not text:
-        raise HTTPException(400, "要有时刻和正文")
-    return db.night_add(hm, text, str(payload.get("date", "")))
+@app.get("/api/night", dependencies=authed)
+async def night_list(limit: int = 200):
+    return {"ok": True, "items": db.night_list(limit)}
 
 
 # ---------------------------------------------------------------- 待办
 
 @app.get("/api/todos", dependencies=authed)
 async def todos_get():
-    return db.todos_all()
+    return {"ok": True, **db.todos_all()}
 
 
 @app.post("/api/todos", dependencies=authed)
@@ -282,7 +278,7 @@ async def cal_today():
 
 @app.get("/api/whisper", dependencies=authed)
 async def whisper_get():
-    return {"items": db.whisper_list()}
+    return {"ok": True, "items": db.whisper_list()}
 
 
 @app.post("/api/whisper", dependencies=authed)
