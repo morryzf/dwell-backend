@@ -496,6 +496,33 @@ async def poll(since: str = "", timeout: int = 25):
 async def health():
     return {"ok": True, "today": db.today_str()}
 
+# ---------------------------------------------------------------- PWA 清单
+
+@app.get("/manifest.json")
+async def manifest():
+    """PWA 清单。之前 fallback 到 index.html，浏览器当 JSON 解析就报语法错。
+
+    theme_color 用小人自己的橘色 (#DE886D)——他既是右下角的 pet，
+    也是任务栏和启动屏的颜色。icon 直接用他站着的样子。
+    """
+    return {
+        "name": "dwell",
+        "short_name": "dwell",
+        "description": "两个人住的地方",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#ffffff",
+        "theme_color": "#DE886D",
+        "icons": [
+            {
+                "src": "/pet/clawd-static-base.svg",
+                "sizes": "any",
+                "type": "image/svg+xml",
+                "purpose": "any",
+            }
+        ],
+    }
 
 # ---------------------------------------------------------------- 前端
 
