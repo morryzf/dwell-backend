@@ -209,28 +209,28 @@ async def todos_post(payload: dict = Body(...)):
     action = str(payload.get("action", ""))
     side = str(payload.get("list") or payload.get("side") or "")
 
-  if action == "add":
-    if side not in ("mine", "hers"):
-        raise HTTPException(400, "栏位只能是 mine 或 hers")
-    text = str(payload.get("text", "")).strip()
-    if not text:
-        raise HTTPException(400, "事情本身不能是空的")
-    item = db.todo_add(
-        side, text,
-        str(payload.get("at", "")),
-        str(payload.get("by", "")),
-        bool(payload.get("fixed")),
-    )
-    return {**(item or {}), "ok": True}   # ← ok 放最后，防止 db 里带了 ok:false 反被覆盖
+    if action == "add":
+        if side not in ("mine", "hers"):
+            raise HTTPException(400, "栏位只能是 mine 或 hers")
+        text = str(payload.get("text", "")).strip()
+        if not text:
+            raise HTTPException(400, "事情本身不能是空的")
+        item = db.todo_add(
+            side, text,
+            str(payload.get("at", "")),
+            str(payload.get("by", "")),
+            bool(payload.get("fixed")),
+        )
+        # ok 放最后，防止 db 里带了 ok:false 反被覆盖
+        return {**(item or {}), "ok": True}
 
-if action == "toggle":
-    return {"ok": bool(db.todo_toggle(side, str(payload.get("id", ""))))}
+    if action == "toggle":
+        return {"ok": bool(db.todo_toggle(side, str(payload.get("id", ""))))}
 
-if action == "del":
-    return {"ok": bool(db.todo_del(side, str(payload.get("id", ""))))}
+    if action == "del":
+        return {"ok": bool(db.todo_del(side, str(payload.get("id", ""))))}
 
     raise HTTPException(400, f"不认识的动作：{action}")
-
 
 
 # ---------------------------------------------------------------- 日历
