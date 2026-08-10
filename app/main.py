@@ -11,10 +11,11 @@ import os
 from pathlib import Path
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import auth, db
 from app.pet_assets import ensure_pet_assets
+from app.heartbeat_client import stream_chat
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
@@ -491,16 +492,6 @@ async def model_get():
     return {"ok": True, "model": "claude", "models": ["claude"]}
 
 
-@app.get("/api/messages", dependencies=authed)
-async def messages(limit: int = 400):
-    return {"ok": True, "msgs": [], "seq": 0}
-
-
-@app.get("/api/chats", dependencies=authed)
-async def chats(scope: str = ""):
-    return {"ok": True, "chats": []}
-
-
 @app.get("/api/wake", dependencies=authed)
 async def wake_get():
     return {"ok": True, "awake": True}
@@ -544,6 +535,94 @@ async def repo_get():
 @app.get("/api/watch", dependencies=authed)
 async def watch_get():
     return {"ok": True, "items": []}
+
+# ---------------------------------------------------------------- 聊天
+
+@app.get("/api/chats", dependencies=authed)
+async def chats_list(scope: str = ""):
+    """列出所有对话窗口。"""
+    return {"ok": True, "chats": db.chat_list()}
+
+
+@app.post("/api/chats", dependencies=authed)
+async def chats_new(payload: dict = Body(default={})):
+    """新建一个对话窗口。"""
+    name = str(payload.get("name", "")).strip()
+    chat = db.chat_add(name)
+    return {"ok": True, **chat, "chats": db.chat_list()}
+
+
+@app.delete("/api/chats/{chat_id}", dependencies=authed)
+async def chats_del(chat_id: str):
+    ok = db.chat_del(chat_id)
+    return {"ok": ok, "chats": db.chat_list()}
+
+
+@app.get("/api/messages", dependencies=authed)
+async def messages_get(chat_id: str = "", limit: int = 400):
+    """拉某个 chat 的历史消息。"""
+    if not chat_id:
+        return {"ok": True, "msgs": [], "seq": 0}
+    msgs = db.message_list(chat_id, limit)
+    return {"ok": True, "msgs": msgs, "seq": len(msgs)}
+
+
+@app.post("/api/send", dependencies=authed)
+async def send(request: Request):
+    """发消息。流式返回 AI 回复。
+
+    前端预期：SSE 流，每次一小段文本。
+    存储：user 消息立刻落库；assistant 消息流式接收完后落库。
+    """
+    payload = await _read_json(request)
+    chat_id = str(payload.get("chat_id", "")).strip()
+    text = str(payload.get("text", "")).strip()
+
+    if not chat_id:
+        raise HTTPException(400, "缺 chat_id")
+    if not text:
+        raise HTTPException(400, "消息不能是空的")
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+
+    # 1) 用户这条立刻落库
+    db.message_add(chat_id, "user", text)
+
+    # 2) 拼历史 + 当前，喂给 heartbeat
+    history = db.message_list(chat_id, limit=100)
+    messages = [
+        {"role": m["role"], "content": m["content"]} for m in history
+    ]
+
+    async def gen():
+        buf = []
+        async for chunk in stream_chat(messages, chat_id):
+            buf.append(chunk)
+            # SSE 帧
+            yield f"data: {json.dumps({'delta': chunk}, ensure_ascii=False)}\n\n"
+        # 3) 流完，assistant 一次性落库
+        full = "".join(buf).strip()
+        if full:
+            db.message_add(chat_id, "assistant", full)
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.get("/api/wake-target", dependencies=authed)
+async def wake_target_get():
+    """当前接收主动消息的 chat。"""
+    return {"ok": True, "chat_id": db.setting_get("wake_target_chat_id")}
+
+
+@app.post("/api/wake-target", dependencies=authed)
+async def wake_target_set(payload: dict = Body(...)):
+    chat_id = str(payload.get("chat_id", "")).strip()
+    if chat_id and not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    db.setting_set("wake_target_chat_id", chat_id)
+    return {"ok": True, "chat_id": chat_id}
+
 
 # ---------------------------------------------------------------- 长轮询
 
