@@ -48,11 +48,10 @@ async def stream_chat(messages: list, chat_id: str):
                     except json.JSONDecodeError:
                         continue
 
-                    delta = (
-                        chunk.get("choices", [{}])[0]
-                        .get("delta", {})
-                        .get("content", "")
-                    )
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {}).get("content", "")
                     if delta:
                         yield delta
     except httpx.RequestError as exc:
