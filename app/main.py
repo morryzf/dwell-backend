@@ -189,11 +189,6 @@ async def quotes_del(item_id: str):
 
 @app.get("/api/night", dependencies=authed)
 async def night_list(limit: int = 200):
-    return {"items": db.night_list(limit)}
-
-
-@app.get("/api/night", dependencies=authed)
-async def night_list(limit: int = 200):
     return {"ok": True, "items": db.night_list(limit)}
 
 
@@ -214,24 +209,25 @@ async def todos_post(payload: dict = Body(...)):
     action = str(payload.get("action", ""))
     side = str(payload.get("list") or payload.get("side") or "")
 
-    if action == "add":
-        if side not in ("mine", "hers"):
-            raise HTTPException(400, "栏位只能是 mine 或 hers")
-        text = str(payload.get("text", "")).strip()
-        if not text:
-            raise HTTPException(400, "事情本身不能是空的")
-        return db.todo_add(
-            side, text,
-            str(payload.get("at", "")),
-            str(payload.get("by", "")),
-            bool(payload.get("fixed")),
-        )
+  if action == "add":
+    if side not in ("mine", "hers"):
+        raise HTTPException(400, "栏位只能是 mine 或 hers")
+    text = str(payload.get("text", "")).strip()
+    if not text:
+        raise HTTPException(400, "事情本身不能是空的")
+    item = db.todo_add(
+        side, text,
+        str(payload.get("at", "")),
+        str(payload.get("by", "")),
+        bool(payload.get("fixed")),
+    )
+    return {**(item or {}), "ok": True}   # ← ok 放最后，防止 db 里带了 ok:false 反被覆盖
 
-    if action == "toggle":
-        return {"ok": db.todo_toggle(side, str(payload.get("id", "")))}
+if action == "toggle":
+    return {"ok": bool(db.todo_toggle(side, str(payload.get("id", ""))))}
 
-    if action == "del":
-        return {"ok": db.todo_del(side, str(payload.get("id", "")))}
+if action == "del":
+    return {"ok": bool(db.todo_del(side, str(payload.get("id", ""))))}
 
     raise HTTPException(400, f"不认识的动作：{action}")
 
@@ -299,20 +295,20 @@ async def whisper_get():
 
 @app.post("/api/whisper", dependencies=authed)
 async def whisper_post(payload: dict = Body(...)):
-    """你写一条。"""
     text = str(payload.get("text", "")).strip()
     if not text:
         raise HTTPException(400, "空的就不算悄悄话了")
-    return db.whisper_add("her", text)
+    item = db.whisper_add("her", text)
+    return {**(item or {}), "ok": True}
 
 
 @app.post("/api/whisper-mine", dependencies=authed)
 async def whisper_mine(payload: dict = Body(...)):
-    """我写一条。走这个口。"""
     text = str(payload.get("text", "")).strip()
     if not text:
         raise HTTPException(400, "空的就不算悄悄话了")
-    return db.whisper_add("mine", text)
+    item = db.whisper_add("mine", text)
+    return {**(item or {}), "ok": True}
 
 
 @app.get("/api/whisper-recent", dependencies=authed)
