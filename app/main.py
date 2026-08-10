@@ -25,7 +25,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 def _startup():
     db.init_db()
     ensure_frontend()
-    ensure_pet_assets("static") 
+    ensure_pet_assets(str(STATIC_DIR)) 
 
 
 FRONTEND_URL = ("https://raw.githubusercontent.com/xinwithyu/"
