@@ -51,7 +51,7 @@ FRONTEND_URL = ("https://raw.githubusercontent.com/xinwithyu/"
 
 
 def ensure_frontend():
-    """前端不在就自己去拉一份，剥掉演示模式，顺手补上游的 bug。
+    """前端不在就自己去拉一份，剥掉演示模式，顺手补上游的 bug，改成我们家的名字。
 
     那个文件 280KB，不进仓库；容器每次重建都会丢。
     与其让人手动装一遍，不如让它自己长回来。
@@ -85,6 +85,50 @@ def ensure_frontend():
             print("[dwell] 补上了日历缺失的容器")
         else:
             print("[dwell] 没找到日历那处孤儿代码")
+
+        # 三、改名字。原作者的默认字符串换成我们家的。
+        # 静态字符串（HTML/JS 里直接写死的）走 replace。
+        # 中文名在 JS 里是 Unicode 转义写法（\u6b23 是"欣"），所以要用转义码替换。
+        renames = [
+            # <title>：浏览器标签
+            ("<title>Claude</title>", "<title>dwell</title>"),
+            # 主界面顶上那个 h1 和副标题
+            ("<h1>Claude</h1>", "<h1>Cloudy</h1>"),
+            # 副标题 Claude Code 保留，Morry 说她喜欢
+            # 侧边栏的招牌
+            ('<div class="brand">Claude</div>', '<div class="brand">CLOUDY STUDIO</div>'),
+            # 最近对话里那个默认名
+            ('id="recGu">Claude</button>', 'id="recGu">Cloudy</button>'),
+            # setTitle 的 fallback：没传名字时的默认（h1 显示）
+            ("name || 'Claude';", "name || 'Cloudy';"),
+            ('name || "Claude";', 'name || "Cloudy";'),
+            # 待办页脚：\u6b23\u6b23 = 欣欣 → Morry
+            ("\\u6b23\\u6b23", "Morry"),
+            # 待办页脚的招牌：YU · XIN → MORRY · CLOUDY
+            ("YU \\u00b7 XIN GENERAL STORE", "MORRY \\u00b7 CLOUDY GENERAL STORE"),
+        ]
+        renamed = 0
+        for old, new in renames:
+            if old in html:
+                html = html.replace(old, new)
+                renamed += 1
+            else:
+                print(f"[dwell] 名字替换没命中：{old[:40]}...")
+
+        # document.title 那处 fallback 单独处理：h1 用 Cloudy，但浏览器标题要 dwell
+        # 前面的通用 rename 会把它一起改成 Cloudy，这里再改回 dwell
+        html = html.replace(
+            "document.title = name || 'Cloudy';",
+            "document.title = name || 'dwell';",
+            1,
+        )
+        html = html.replace(
+            'document.title = name || "Cloudy";',
+            'document.title = name || "dwell";',
+            1,
+        )
+
+        print(f"[dwell] 名字改了 {renamed} 处")
 
         target.write_text(html, encoding="utf-8")
         print(f"[dwell] 前端就位 {target.stat().st_size} 字节")
