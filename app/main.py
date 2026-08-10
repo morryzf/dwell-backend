@@ -205,6 +205,10 @@ async def todos_post(payload: dict = Body(...)):
 
     栏位字段前端发的是 list，文档写的是 side。两个都收——
     文档是事后整理的，跟实际代码有出入，以实际为准。
+
+    三个动作之后都返回完整列表，跟 GET /api/todos 同结构。
+    因为前端 todoAct 拿到响应直接扔给 renderTodos，
+    renderTodos 只认 {mine, hers} 那个形状。
     """
     action = str(payload.get("action", ""))
     side = str(payload.get("list") or payload.get("side") or "")
@@ -215,20 +219,21 @@ async def todos_post(payload: dict = Body(...)):
         text = str(payload.get("text", "")).strip()
         if not text:
             raise HTTPException(400, "事情本身不能是空的")
-        item = db.todo_add(
+        db.todo_add(
             side, text,
             str(payload.get("at", "")),
             str(payload.get("by", "")),
             bool(payload.get("fixed")),
         )
-        # ok 放最后，防止 db 里带了 ok:false 反被覆盖
-        return {**(item or {}), "ok": True}
+        return {"ok": True, **db.todos_all()}
 
     if action == "toggle":
-        return {"ok": bool(db.todo_toggle(side, str(payload.get("id", ""))))}
+        db.todo_toggle(side, str(payload.get("id", "")))
+        return {"ok": True, **db.todos_all()}
 
     if action == "del":
-        return {"ok": bool(db.todo_del(side, str(payload.get("id", ""))))}
+        db.todo_del(side, str(payload.get("id", "")))
+        return {"ok": True, **db.todos_all()}
 
     raise HTTPException(400, f"不认识的动作：{action}")
 
