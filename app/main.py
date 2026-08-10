@@ -106,7 +106,11 @@ def ensure_frontend():
             ("\\u6b23\\u6b23", "Morry"),
             # 待办页脚的招牌：YU · XIN → MORRY · CLOUDY
             ("YU \\u00b7 XIN GENERAL STORE", "MORRY \\u00b7 CLOUDY GENERAL STORE"),
+            ("\\u8001\\u5a46\\u7684", "Plum \\u7684"),
+            ("\\u987e\\u5c7f\\u7684\\u6d3b", "Cloudy \\u7684\\u6d3b"),
+            ("\\u7b49\\u8001\\u516c\\u5e03\\u7f6e", "\\u7b49\\u4ed6\\u5e03\\u7f6e"),
         ]
+
         renamed = 0
         for old, new in renames:
             if old in html:
