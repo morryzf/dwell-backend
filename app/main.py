@@ -61,8 +61,10 @@ def ensure_frontend():
     import urllib.request
 
     target = STATIC_DIR / "index.html"
-    if target.exists() and target.stat().st_size > 100_000:
-        return
+    # 每次启动都重拉。等前端稳定后再改回缓存版本。
+    if target.exists():
+        target.unlink()
+
 
     try:
         STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -86,6 +88,61 @@ def ensure_frontend():
             print("[dwell] 补上了日历缺失的容器")
         else:
             print("[dwell] 没找到日历那处孤儿代码")
+        # 二点五、拦掉 401 → reload 死循环。
+        # 前端 poll() 收到 401 会 location.href='./'，但 './' 就是主页本身，
+        # 一进来又 poll → 又 401 → 又跳，永远登不上。
+        # 改成 401 时弹一个原生登录框，成功了就刷新继续。
+        old_401 = "if (r.status === 401) { location.href = './'; return; }"
+        new_401 = "if (r.status === 401) { await promptLogin(); return; }"
+        if old_401 in html:
+            html = html.replace(old_401, new_401, 1)
+            print("[dwell] 拦掉了 401 reload 死循环")
+        else:
+            print("[dwell] 没找到 401 那行——可能上游改了")
+
+        # 注入 promptLogin 函数：弹原生 prompt，走 /api/login，成功后刷新。
+        # 塞在 </body> 前面，全局可用。
+        login_shim = """
+<script>
+window.promptLogin = async function() {
+  if (window.__logging_in) return;
+  window.__logging_in = true;
+  try {
+    const user = prompt('用户名');
+    if (!user) return;
+    const password = prompt('密码');
+    if (password === null) return;
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({user, password})
+    });
+    if (r.ok) {
+      location.reload();
+    } else {
+      alert('登不上，再试一次');
+      window.__logging_in = false;
+    }
+  } catch (e) {
+    alert('出错了：' + e);
+    window.__logging_in = false;
+  }
+};
+
+// 页面加载时先问一下 /api/me，如果没登录就立刻弹框。
+// 不等 poll 那边慢慢触发。
+(async function bootAuth() {
+  try {
+    const r = await fetch('/api/me');
+    const d = await r.json();
+    if (!d.authed) await window.promptLogin();
+  } catch (e) {}
+})();
+</script>
+"""
+        if "</body>" in html:
+            html = html.replace("</body>", login_shim + "</body>", 1)
+            print("[dwell] 注入了登录弹框")
 
         # 三、改名字。原作者的默认字符串换成我们家的。
         # 静态字符串（HTML/JS 里直接写死的）走 replace。
