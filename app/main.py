@@ -14,6 +14,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 
 from . import auth, db
+from app.pet_assets import ensure_pet_assets
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
@@ -24,6 +25,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 def _startup():
     db.init_db()
     ensure_frontend()
+    ensure_pet_assets("static") 
 
 
 FRONTEND_URL = ("https://raw.githubusercontent.com/xinwithyu/"
