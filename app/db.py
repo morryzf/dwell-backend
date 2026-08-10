@@ -145,6 +145,31 @@ CREATE TABLE IF NOT EXISTS whispers (
     seen INTEGER NOT NULL DEFAULT 0   -- 我读过没有。给我自己看的，界面不显示。
 );
 CREATE INDEX IF NOT EXISTS ix_whispers_at ON whispers(at DESC);
+
+-- 聊天窗口。一个人可以有多个对话，每个对话是一个 chat。
+CREATE TABLE IF NOT EXISTS chats (
+    id      TEXT PRIMARY KEY,
+    name    TEXT NOT NULL DEFAULT '',
+    made    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_chats_made ON chats(made DESC);
+
+-- 消息。每条消息属于一个 chat。
+CREATE TABLE IF NOT EXISTS messages (
+    id      TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    role    TEXT NOT NULL CHECK (role IN ('user','assistant','system')),
+    content TEXT NOT NULL,
+    made    INTEGER NOT NULL,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_messages_chat ON messages(chat_id, made ASC);
+
+-- 全局设置。key-value，放"接收主动消息的 chat_id"这种单例。
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -520,3 +545,115 @@ def whisper_recent(n: int = 5, mark_seen: bool = False) -> list:
                 [(r["id"],) for r in rows],
             )
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------- 聊天窗口
+
+def chat_add(name: str = "") -> dict:
+    row = {
+        "id": new_id(),
+        "name": name.strip()[:60] or "新对话",
+        "made": int(time.time()),
+    }
+    with conn() as cx:
+        cx.execute(
+            "INSERT INTO chats (id,name,made) VALUES (:id,:name,:made)", row
+        )
+        # 如果是第一个 chat，自动设为主动消息接收窗口
+        cnt = cx.execute("SELECT COUNT(*) FROM chats").fetchone()[0]
+        if cnt == 1:
+            cx.execute(
+                "INSERT INTO settings (key,value) VALUES ('wake_target_chat_id',?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (row["id"],),
+            )
+    return row
+
+
+def chat_list() -> list:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT id,name,made FROM chats ORDER BY made DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def chat_get(chat_id: str) -> dict | None:
+    with conn() as cx:
+        r = cx.execute("SELECT * FROM chats WHERE id=?", (chat_id,)).fetchone()
+    return dict(r) if r else None
+
+
+def chat_rename(chat_id: str, name: str) -> bool:
+    with conn() as cx:
+        cur = cx.execute(
+            "UPDATE chats SET name=? WHERE id=?", (name.strip()[:60], chat_id)
+        )
+    return cur.rowcount > 0
+
+
+def chat_del(chat_id: str) -> bool:
+    """删 chat 会级联删掉它下面所有 messages。
+    如果删的是当前 wake_target，自动切到最近创建的那个。"""
+    with conn() as cx:
+        cur = cx.execute("DELETE FROM chats WHERE id=?", (chat_id,))
+        if cur.rowcount == 0:
+            return False
+        # 如果删的是 wake_target，重新指一个
+        cur2 = cx.execute(
+            "SELECT value FROM settings WHERE key='wake_target_chat_id'"
+        ).fetchone()
+        if cur2 and cur2["value"] == chat_id:
+            fallback = cx.execute(
+                "SELECT id FROM chats ORDER BY made DESC LIMIT 1"
+            ).fetchone()
+            cx.execute(
+                "UPDATE settings SET value=? WHERE key='wake_target_chat_id'",
+                (fallback["id"] if fallback else "",),
+            )
+    return True
+
+
+# ---------------------------------------------------------------- 消息
+
+def message_add(chat_id: str, role: str, content: str) -> dict:
+    row = {
+        "id": new_id(),
+        "chat_id": chat_id,
+        "role": role,
+        "content": content,
+        "made": int(time.time()),
+    }
+    with conn() as cx:
+        cx.execute(
+            """INSERT INTO messages (id,chat_id,role,content,made)
+               VALUES (:id,:chat_id,:role,:content,:made)""",
+            row,
+        )
+    return row
+
+
+def message_list(chat_id: str, limit: int = 400) -> list:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT * FROM messages WHERE chat_id=? ORDER BY made ASC LIMIT ?",
+            (chat_id, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------- 设置
+
+def setting_get(key: str, default: str = "") -> str:
+    with conn() as cx:
+        r = cx.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return r["value"] if r else default
+
+
+def setting_set(key: str, value: str) -> None:
+    with conn() as cx:
+        cx.execute(
+            "INSERT INTO settings (key,value) VALUES (?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
