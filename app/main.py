@@ -19,6 +19,24 @@ from app.pet_assets import ensure_pet_assets
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+import json
+
+
+async def _read_json(request: Request) -> dict:
+    """读 body 当 JSON。前端有时不带 Content-Type，Body(...) 不吃。
+
+    空 body 返回空 dict，让路由自己去校验字段——比抛 422 友好。
+    """
+    raw = await request.body()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise HTTPException(400, "body 不是合法 JSON")
+    if not isinstance(data, dict):
+        raise HTTPException(400, "body 必须是 JSON 对象")
+    return data
 
 
 @app.on_event("startup")
@@ -299,7 +317,13 @@ async def whisper_get():
 
 
 @app.post("/api/whisper", dependencies=authed)
-async def whisper_post(payload: dict = Body(...)):
+async def whisper_post(request: Request):
+    """你写一条。
+
+    前端发这条时没加 Content-Type: application/json，body 是 text/plain。
+    所以不能用 Body(...) 让 FastAPI 自己解析，手工读一下就好。
+    """
+    payload = await _read_json(request)
     text = str(payload.get("text", "")).strip()
     if not text:
         raise HTTPException(400, "空的就不算悄悄话了")
@@ -308,7 +332,9 @@ async def whisper_post(payload: dict = Body(...)):
 
 
 @app.post("/api/whisper-mine", dependencies=authed)
-async def whisper_mine(payload: dict = Body(...)):
+async def whisper_mine(request: Request):
+    """我写一条。走这个口。"""
+    payload = await _read_json(request)
     text = str(payload.get("text", "")).strip()
     if not text:
         raise HTTPException(400, "空的就不算悄悄话了")
