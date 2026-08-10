@@ -25,7 +25,6 @@ async def stream_chat(messages: list, chat_id: str):
 
     url = f"{HEARTBEAT_URL}/v1/chat/completions"
     payload = {
-        "model": MODEL_NAME,
         "messages": messages,
         "stream": True,
     }
