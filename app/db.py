@@ -657,3 +657,29 @@ def setting_set(key: str, value: str) -> None:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, value),
         )
+# ---------------------------------------------------------------- 消息 seq
+
+def message_max_id(chat_id: str) -> int:
+    """按 rowid 拿最大值，当增量游标用。"""
+    with conn() as cx:
+        r = cx.execute(
+            "SELECT COALESCE(MAX(rowid),0) FROM messages WHERE chat_id=?",
+            (chat_id,),
+        ).fetchone()
+    return int(r[0])
+
+
+def message_since(chat_id: str, since: int, limit: int = 200) -> list:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT rowid, id, chat_id, role, content, made "
+            "FROM messages WHERE chat_id=? AND rowid>? "
+            "ORDER BY rowid ASC LIMIT ?",
+            (chat_id, since, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def message_update(msg_id: str, content: str) -> None:
+    with conn() as cx:
+        cx.execute("UPDATE messages SET content=? WHERE id=?", (content, msg_id))
