@@ -679,7 +679,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str):
         if m["content"] or m["role"] != "assistant"
     ]
 
-    buf = []
+       buf = []
     try:
         async for chunk in stream_chat(messages, chat_id):
             buf.append(chunk)
@@ -697,6 +697,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str):
                 "content": [{"type": "text", "text": full}] if full else []
             }
         })
+        _emit(chat_id, {"type": "result", "is_error": False})
     except asyncio.CancelledError:
         if buf:
             db.message_update(msg_id, "".join(buf) + "\n[已停止]")
@@ -706,10 +707,10 @@ async def _run_ai_reply(chat_id: str, msg_id: str):
                     "content": [{"type": "text", "text": "".join(buf) + "\n[已停止]"}]
                 }
             })
+        _emit(chat_id, {"type": "system", "subtype": "stopped"})
         raise
     finally:
         _running_tasks.pop(chat_id, None)
-
 
 @app.post("/api/send", dependencies=authed)
 async def send(request: Request):
@@ -743,27 +744,29 @@ async def stop():
 
 @app.get("/api/poll", dependencies=authed)
 async def poll(since: str = "", timeout: int = 25):
-    """长轮询：返回 {next, events}。"""
+    """长轮询：返回 {next, events}。只从 _event_log 里拿，不用 Queue。"""
     chat_id = _get_or_create_current_chat()
-    q = _get_queue(chat_id)
+    _get_queue(chat_id)  # 确保初始化
 
     try:
         cursor = int(since)
     except (TypeError, ValueError):
         cursor = 0
 
+    # 有积压立刻回
     backlog = [e for e in _event_log.get(chat_id, []) if e["seq"] > cursor]
     if backlog:
         return {"ok": True, "next": backlog[-1]["seq"], "events": backlog}
 
-    try:
-        ev = await asyncio.wait_for(q.get(), timeout=max(1, min(timeout, 30)))
-        events = [ev]
-        while not q.empty():
-            events.append(q.get_nowait())
-        return {"ok": True, "next": events[-1]["seq"], "events": events}
-    except asyncio.TimeoutError:
-        return {"ok": True, "next": cursor, "events": []}
+    # 没有就轮询等
+    deadline = asyncio.get_event_loop().time() + max(1, min(timeout, 30))
+    while asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(0.3)
+        new = [e for e in _event_log.get(chat_id, []) if e["seq"] > cursor]
+        if new:
+            return {"ok": True, "next": new[-1]["seq"], "events": new}
+
+    return {"ok": True, "next": cursor, "events": []}
 
 
 @app.get("/api/wake-target", dependencies=authed)
