@@ -24,6 +24,34 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 # 正在跑的 AI 回复任务。key=chat_id，value=asyncio.Task
 _running_tasks: dict[str, asyncio.Task] = {}
+# 每个 chat 一条事件队列，poll 从这里拿事件推给前端。
+_event_queues: dict[str, asyncio.Queue] = {}
+# 每个 chat 的事件游标，从 1 开始
+_event_seq: dict[str, int] = {}
+# 缓存最近 N 条事件，让重连的 poll(since=N) 能补上漏掉的
+_event_log: dict[str, list] = {}
+
+
+def _get_queue(chat_id: str) -> asyncio.Queue:
+    if chat_id not in _event_queues:
+        _event_queues[chat_id] = asyncio.Queue()
+        _event_seq[chat_id] = 0
+        _event_log[chat_id] = []
+    return _event_queues[chat_id]
+
+
+def _emit(chat_id: str, event: dict):
+    """把一个事件塞进队列 + 日志。event 已经是前端认识的形状。"""
+    _get_queue(chat_id)
+    _event_seq[chat_id] += 1
+    event = {**event, "seq": _event_seq[chat_id]}
+    _event_log[chat_id].append(event)
+    if len(_event_log[chat_id]) > 200:
+        _event_log[chat_id] = _event_log[chat_id][-200:]
+    try:
+        _event_queues[chat_id].put_nowait(event)
+    except asyncio.QueueFull:
+        pass
 
 import json
 
@@ -643,21 +671,41 @@ def _get_or_create_current_chat() -> str:
 
 
 async def _run_ai_reply(chat_id: str, msg_id: str):
-    """后台跑 heartbeat，边收边把 assistant 那条消息 update 进库。
-    poll 那边靠 rowid 增量，看到 content 变了就推给前端。
-    """
+    """跑 heartbeat，边收边发事件给前端。同时把完整回复写进库。"""
     history = db.message_list(chat_id, limit=100)
-    messages = [{"role": m["role"], "content": m["content"]} for m in history]
+    messages = [
+        {"role": m["role"], "content": m["content"]}
+        for m in history
+        if m["content"] or m["role"] != "assistant"
+    ]
 
     buf = []
     try:
         async for chunk in stream_chat(messages, chat_id):
             buf.append(chunk)
             db.message_update(msg_id, "".join(buf))
+            _emit(chat_id, {
+                "type": "stream_event",
+                "event": {
+                    "delta": {"type": "text_delta", "text": chunk}
+                }
+            })
+        full = "".join(buf).strip()
+        _emit(chat_id, {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "text", "text": full}] if full else []
+            }
+        })
     except asyncio.CancelledError:
-        # 用户点 stop。把已经收到的存下来。
         if buf:
             db.message_update(msg_id, "".join(buf) + "\n[已停止]")
+            _emit(chat_id, {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "".join(buf) + "\n[已停止]"}]
+                }
+            })
         raise
     finally:
         _running_tasks.pop(chat_id, None)
@@ -672,17 +720,15 @@ async def send(request: Request):
 
     chat_id = _get_or_create_current_chat()
 
-    # 用户消息落库
     db.message_add(chat_id, "user", text)
+    _emit(chat_id, {"type": "echo", "text": text})
 
-    # 建一条空的 assistant 占位，后台任务往里 update
     placeholder = db.message_add(chat_id, "assistant", "")
 
-    # 起后台任务
     task = asyncio.create_task(_run_ai_reply(chat_id, placeholder["id"]))
     _running_tasks[chat_id] = task
 
-    return {"ok": True, "chat_id": chat_id, "msg_id": placeholder["id"]}
+    return {"ok": True}
 
 
 @app.post("/api/stop", dependencies=authed)
@@ -697,44 +743,27 @@ async def stop():
 
 @app.get("/api/poll", dependencies=authed)
 async def poll(since: str = "", timeout: int = 25):
-    """长轮询：有新消息或消息内容变了就立刻回。没有就挂着等。"""
+    """长轮询：返回 {next, events}。"""
     chat_id = _get_or_create_current_chat()
+    q = _get_queue(chat_id)
 
     try:
         cursor = int(since)
     except (TypeError, ValueError):
         cursor = 0
 
-    # 已经有新的直接回
-    msgs = db.message_since(chat_id, cursor)
-    if msgs:
-        return {"ok": True, "seq": msgs[-1]["rowid"], "msgs": msgs}
+    backlog = [e for e in _event_log.get(chat_id, []) if e["seq"] > cursor]
+    if backlog:
+        return {"ok": True, "next": backlog[-1]["seq"], "events": backlog}
 
-    # 挂着轮询，每 500ms 看一次
-    deadline = asyncio.get_event_loop().time() + max(1, min(timeout, 30))
-    while asyncio.get_event_loop().time() < deadline:
-        await asyncio.sleep(0.5)
-        msgs = db.message_since(chat_id, cursor)
-        if msgs:
-            return {"ok": True, "seq": msgs[-1]["rowid"], "msgs": msgs}
-        # 如果正在跑的任务把 assistant 那条 content 更新了，rowid 不变，
-        # 上面 message_since 拿不到。所以再拉一次全量对比。
-        latest = db.message_since(chat_id, cursor - 1) if cursor > 0 else []
-        # 这里判断"content 变了"太脏，先简单点：只要 chat 里最后一条是 assistant
-        # 且它内容非空，就把它当增量推
-        tail = db.message_list(chat_id, limit=1)
-        if tail and tail[-1]["role"] == "assistant" and tail[-1]["content"]:
-            # 靠 rowid 拿这条
-            with db.conn() as cx:
-                r = cx.execute(
-                    "SELECT rowid, id, chat_id, role, content, made "
-                    "FROM messages WHERE id=?",
-                    (tail[-1]["id"],),
-                ).fetchone()
-            if r and r["rowid"] > cursor:
-                return {"ok": True, "seq": r["rowid"], "msgs": [dict(r)]}
-
-    return {"ok": True, "seq": cursor, "msgs": []}
+    try:
+        ev = await asyncio.wait_for(q.get(), timeout=max(1, min(timeout, 30)))
+        events = [ev]
+        while not q.empty():
+            events.append(q.get_nowait())
+        return {"ok": True, "next": events[-1]["seq"], "events": events}
+    except asyncio.TimeoutError:
+        return {"ok": True, "next": cursor, "events": []}
 
 
 @app.get("/api/wake-target", dependencies=authed)
