@@ -7,6 +7,7 @@
 这么做是为了只在 Zeabur 上开一个服务：省内存，也不用管跨域。
 """
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -18,10 +19,12 @@ from app.pet_assets import ensure_pet_assets
 from app.heartbeat_client import stream_chat
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
 # 正在跑的 AI 回复任务。key=chat_id，value=asyncio.Task
 _running_tasks: dict[str, asyncio.Task] = {}
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 import json
 
 
