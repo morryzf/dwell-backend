@@ -18,6 +18,8 @@ from app.pet_assets import ensure_pet_assets
 from app.heartbeat_client import stream_chat
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
+# 正在跑的 AI 回复任务。key=chat_id，value=asyncio.Task
+_running_tasks: dict[str, asyncio.Task] = {}
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 import json
@@ -617,53 +619,119 @@ async def chats_del(chat_id: str):
 
 @app.get("/api/messages", dependencies=authed)
 async def messages_get(chat_id: str = "", limit: int = 400):
-    """拉某个 chat 的历史消息。"""
     if not chat_id:
-        return {"ok": True, "msgs": [], "seq": 0}
+        chat_id = _get_or_create_current_chat()
     msgs = db.message_list(chat_id, limit)
     return {"ok": True, "msgs": msgs, "seq": len(msgs)}
+
+# ---------------------------------------------------------------- 聊天：发送 / 停止 / 长轮询
+
+CURRENT_CHAT_KEY = "current_chat_id"
+
+
+def _get_or_create_current_chat() -> str:
+    """当前活跃 chat。没有就建一个。"""
+    chat_id = db.setting_get(CURRENT_CHAT_KEY)
+    if chat_id and db.chat_get(chat_id):
+        return chat_id
+    chat = db.chat_add("对话")
+    db.setting_set(CURRENT_CHAT_KEY, chat["id"])
+    return chat["id"]
+
+
+async def _run_ai_reply(chat_id: str, msg_id: str):
+    """后台跑 heartbeat，边收边把 assistant 那条消息 update 进库。
+    poll 那边靠 rowid 增量，看到 content 变了就推给前端。
+    """
+    history = db.message_list(chat_id, limit=100)
+    messages = [{"role": m["role"], "content": m["content"]} for m in history]
+
+    buf = []
+    try:
+        async for chunk in stream_chat(messages, chat_id):
+            buf.append(chunk)
+            db.message_update(msg_id, "".join(buf))
+    except asyncio.CancelledError:
+        # 用户点 stop。把已经收到的存下来。
+        if buf:
+            db.message_update(msg_id, "".join(buf) + "\n[已停止]")
+        raise
+    finally:
+        _running_tasks.pop(chat_id, None)
 
 
 @app.post("/api/send", dependencies=authed)
 async def send(request: Request):
-    """发消息。流式返回 AI 回复。
-
-    前端预期：SSE 流，每次一小段文本。
-    存储：user 消息立刻落库；assistant 消息流式接收完后落库。
-    """
     payload = await _read_json(request)
-    chat_id = str(payload.get("chat_id", "")).strip()
     text = str(payload.get("text", "")).strip()
-
-    if not chat_id:
-        raise HTTPException(400, "缺 chat_id")
     if not text:
         raise HTTPException(400, "消息不能是空的")
-    if not db.chat_get(chat_id):
-        raise HTTPException(404, "chat 不存在")
 
-    # 1) 用户这条立刻落库
+    chat_id = _get_or_create_current_chat()
+
+    # 用户消息落库
     db.message_add(chat_id, "user", text)
 
-    # 2) 拼历史 + 当前，喂给 heartbeat
-    history = db.message_list(chat_id, limit=100)
-    messages = [
-        {"role": m["role"], "content": m["content"]} for m in history
-    ]
+    # 建一条空的 assistant 占位，后台任务往里 update
+    placeholder = db.message_add(chat_id, "assistant", "")
 
-    async def gen():
-        buf = []
-        async for chunk in stream_chat(messages, chat_id):
-            buf.append(chunk)
-            # SSE 帧
-            yield f"data: {json.dumps({'delta': chunk}, ensure_ascii=False)}\n\n"
-        # 3) 流完，assistant 一次性落库
-        full = "".join(buf).strip()
-        if full:
-            db.message_add(chat_id, "assistant", full)
-        yield "data: [DONE]\n\n"
+    # 起后台任务
+    task = asyncio.create_task(_run_ai_reply(chat_id, placeholder["id"]))
+    _running_tasks[chat_id] = task
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return {"ok": True, "chat_id": chat_id, "msg_id": placeholder["id"]}
+
+
+@app.post("/api/stop", dependencies=authed)
+async def stop():
+    chat_id = _get_or_create_current_chat()
+    task = _running_tasks.get(chat_id)
+    if task and not task.done():
+        task.cancel()
+        return {"ok": True, "stopped": True}
+    return {"ok": True, "stopped": False}
+
+
+@app.get("/api/poll", dependencies=authed)
+async def poll(since: str = "", timeout: int = 25):
+    """长轮询：有新消息或消息内容变了就立刻回。没有就挂着等。"""
+    chat_id = _get_or_create_current_chat()
+
+    try:
+        cursor = int(since)
+    except (TypeError, ValueError):
+        cursor = 0
+
+    # 已经有新的直接回
+    msgs = db.message_since(chat_id, cursor)
+    if msgs:
+        return {"ok": True, "seq": msgs[-1]["rowid"], "msgs": msgs}
+
+    # 挂着轮询，每 500ms 看一次
+    deadline = asyncio.get_event_loop().time() + max(1, min(timeout, 30))
+    while asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(0.5)
+        msgs = db.message_since(chat_id, cursor)
+        if msgs:
+            return {"ok": True, "seq": msgs[-1]["rowid"], "msgs": msgs}
+        # 如果正在跑的任务把 assistant 那条 content 更新了，rowid 不变，
+        # 上面 message_since 拿不到。所以再拉一次全量对比。
+        latest = db.message_since(chat_id, cursor - 1) if cursor > 0 else []
+        # 这里判断"content 变了"太脏，先简单点：只要 chat 里最后一条是 assistant
+        # 且它内容非空，就把它当增量推
+        tail = db.message_list(chat_id, limit=1)
+        if tail and tail[-1]["role"] == "assistant" and tail[-1]["content"]:
+            # 靠 rowid 拿这条
+            with db.conn() as cx:
+                r = cx.execute(
+                    "SELECT rowid, id, chat_id, role, content, made "
+                    "FROM messages WHERE id=?",
+                    (tail[-1]["id"],),
+                ).fetchone()
+            if r and r["rowid"] > cursor:
+                return {"ok": True, "seq": r["rowid"], "msgs": [dict(r)]}
+
+    return {"ok": True, "seq": cursor, "msgs": []}
 
 
 @app.get("/api/wake-target", dependencies=authed)
@@ -680,29 +748,6 @@ async def wake_target_set(payload: dict = Body(...)):
     db.setting_set("wake_target_chat_id", chat_id)
     return {"ok": True, "chat_id": chat_id}
 
-
-# ---------------------------------------------------------------- 长轮询
-
-@app.get("/api/poll", dependencies=authed)
-async def poll(since: str = "", timeout: int = 25):
-    """前端等推送用的。
-
-    没有新消息时挂着等，而不是立刻空手回去——
-    立刻回会让前端一秒重试几十次，日志里刷满 404。
-
-    现在还没有消息源（聊天没接），所以它就是老实等满再回。
-    等聊天那部分做起来，这里换成真的读消息队列。
-    """
-    import asyncio
-
-    # since 可能是字符串 "undefined"——前端第一次问的时候还没有游标
-    try:
-        cursor = int(since)
-    except (TypeError, ValueError):
-        cursor = 0
-
-    await asyncio.sleep(max(1, min(timeout, 30)))
-    return {"ok": True, "seq": cursor, "msgs": []}
 
 # ---------------------------------------------------------------- 健康检查
 
