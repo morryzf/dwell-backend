@@ -642,6 +642,19 @@ async def chats_new(payload: dict = Body(default={})):
     return {"ok": True, **chat, "chats": db.chat_list()}
 
 
+@app.post("/api/newchat", dependencies=authed)
+async def newchat(request: Request):
+    """前端 New chat 打这个接口。arm:true 只是预备切换（说话才真建），arm:false 取消。
+    简化处理：直接建新 chat 并切过去。"""
+    payload = await _read_json(request)
+    if payload.get("arm") is False:
+        return {"ok": True}
+    chat = db.chat_add("")
+    db.setting_set(CURRENT_CHAT_KEY, chat["id"])
+    _emit(chat["id"], {"type": "system", "subtype": "newchat", "text": "（新窗口开好了）"})
+    return {"ok": True, **chat}
+
+
 @app.delete("/api/chats/{chat_id}", dependencies=authed)
 async def chats_del(chat_id: str):
     ok = db.chat_del(chat_id)
