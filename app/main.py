@@ -679,7 +679,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str):
         if m["content"] or m["role"] != "assistant"
     ]
 
-       buf = []
+    buf = []
     try:
         async for chunk in stream_chat(messages, chat_id):
             buf.append(chunk)
