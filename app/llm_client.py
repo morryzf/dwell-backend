@@ -1,0 +1,58 @@
+"""通用 OpenAI 兼容聊天客户端。
+
+这是普通聊天的模型通道；heartbeat 只应负责定时唤醒，不应成为每次对话的必经网关。
+"""
+
+import json
+
+import httpx
+
+from .provider_secrets import SecretConfigurationError, decrypt_api_key
+
+
+async def stream_chat(provider: dict, model_id: str, messages: list):
+    """以 OpenAI 兼容的 SSE 格式请求供应商，逐段 yield 文本。"""
+    if not model_id:
+        yield "[配置错误] 这个聊天还没有选择模型"
+        return
+    if not provider.get("api_key_box"):
+        yield "[配置错误] 这个供应商还没有保存 API 密钥"
+        return
+
+    try:
+        api_key = decrypt_api_key(provider["api_key_box"])
+    except SecretConfigurationError as exc:
+        yield f"[配置错误] {exc}"
+        return
+
+    url = provider["base_url"].rstrip("/") + "/chat/completions"
+    payload = {"model": model_id, "messages": messages, "stream": True}
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "text/event-stream"}
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=20.0)) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as resp:
+                if resp.status_code != 200:
+                    body = (await resp.aread()).decode("utf-8", errors="ignore")[:500]
+                    yield f"[供应商错误 {resp.status_code}] {body}"
+                    return
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    text = delta.get("content")
+                    if isinstance(text, str) and text:
+                        yield text
+    except httpx.RequestError as exc:
+        yield f"[网络错误] 无法连接供应商：{exc}"
+
