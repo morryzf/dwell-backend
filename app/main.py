@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+import httpx
 from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
@@ -665,6 +666,37 @@ async def providers_delete(provider_id: str):
     if not db.provider_delete(provider_id):
         raise HTTPException(404, "找不到这个供应商")
     return {"ok": True}
+
+
+@app.post("/api/provider-test", dependencies=authed)
+async def provider_test(request: Request):
+    """用浏览器刚填写、尚未保存的资料做一次最小 OpenAI 兼容请求。"""
+    payload = await _read_json(request)
+    base_url = _clean_base_url(payload.get("base_url"))
+    token = str(payload.get("token") or "").strip()
+    model_id = str(payload.get("model") or "").strip()[:200]
+    if not token or not model_id:
+        raise HTTPException(400, "测试需要 API 密钥和模型名")
+    url = base_url + "/chat/completions"
+    body = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": "Reply with OK."}],
+        "max_tokens": 8,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(35.0, connect=15.0)) as client:
+            response = await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=body)
+    except httpx.RequestError as exc:
+        return {"ok": False, "code": "network", "detail": str(exc), "url": url}
+    if response.status_code >= 400:
+        return {"ok": False, "code": response.status_code,
+                "detail": response.text[:500], "url": url}
+    try:
+        returned_model = str(response.json().get("model") or model_id)
+    except ValueError:
+        returned_model = model_id
+    return {"ok": True, "model": returned_model, "url": url}
 
 
 @app.post("/api/model", dependencies=authed)
