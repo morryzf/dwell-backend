@@ -170,6 +170,18 @@ CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+
+-- 模型供应商。密钥密文由 provider_store 加解密，绝不返回给浏览器。
+CREATE TABLE IF NOT EXISTS provider_profiles (
+    id             TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    base_url       TEXT NOT NULL,
+    api_key_box    TEXT NOT NULL DEFAULT '',
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    made           INTEGER NOT NULL,
+    updated        INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ix_provider_profiles_name ON provider_profiles(name);
 """
 
 
@@ -179,6 +191,12 @@ def init_db():
         cols = {r["name"] for r in cx.execute("PRAGMA table_info(chats)").fetchall()}
         if "archived" not in cols:
             cx.execute("ALTER TABLE chats ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+        if "provider_id" not in cols:
+            cx.execute("ALTER TABLE chats ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''")
+        if "model_id" not in cols:
+            cx.execute("ALTER TABLE chats ADD COLUMN model_id TEXT NOT NULL DEFAULT ''")
+        if "reasoning_effort" not in cols:
+            cx.execute("ALTER TABLE chats ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''")
 
 
 # ---------------------------------------------------------------- 日记
@@ -641,6 +659,35 @@ def chat_switch(chat_id: str) -> bool:
     return True
 
 
+def chat_model_get(chat_id: str) -> dict:
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT provider_id, model_id, reasoning_effort FROM chats WHERE id=?",
+            (chat_id,),
+        ).fetchone()
+    return dict(row) if row else {"provider_id": "", "model_id": "", "reasoning_effort": ""}
+
+
+def chat_model_set(chat_id: str, provider_id: str | None = None,
+                   model_id: str | None = None, reasoning_effort: str | None = None) -> bool:
+    current = chat_model_get(chat_id)
+    if not chat_get(chat_id):
+        return False
+    values = {
+        "provider_id": current["provider_id"] if provider_id is None else provider_id,
+        "model_id": current["model_id"] if model_id is None else model_id,
+        "reasoning_effort": current["reasoning_effort"] if reasoning_effort is None else reasoning_effort,
+        "id": chat_id,
+    }
+    with conn() as cx:
+        cx.execute(
+            "UPDATE chats SET provider_id=:provider_id, model_id=:model_id, "
+            "reasoning_effort=:reasoning_effort WHERE id=:id",
+            values,
+        )
+    return True
+
+
 def chat_del(chat_id: str) -> bool:
     """删 chat 会级联删掉它下面所有 messages。
     如果删的是当前 wake_target，自动切到最近创建的那个。"""
@@ -739,6 +786,55 @@ def setting_set(key: str, value: str) -> None:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, value),
         )
+
+
+# ---------------------------------------------------------------- 模型供应商
+
+def provider_list() -> list:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT id,name,base_url,enabled,made,updated,api_key_box FROM provider_profiles "
+            "ORDER BY made ASC"
+        ).fetchall()
+    return [{**{k: r[k] for k in ("id", "name", "base_url", "enabled", "made", "updated")},
+             "has_key": bool(r["api_key_box"])} for r in rows]
+
+
+def provider_get(provider_id: str) -> dict | None:
+    with conn() as cx:
+        row = cx.execute("SELECT * FROM provider_profiles WHERE id=?", (provider_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def provider_upsert(provider_id: str, name: str, base_url: str, api_key_box: str | None,
+                    enabled: bool = True) -> dict:
+    now = int(time.time())
+    row = provider_get(provider_id) if provider_id else None
+    provider_id = provider_id or new_id()
+    box = row["api_key_box"] if row and api_key_box is None else (api_key_box or "")
+    with conn() as cx:
+        cx.execute(
+            "INSERT INTO provider_profiles (id,name,base_url,api_key_box,enabled,made,updated) "
+            "VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "name=excluded.name,base_url=excluded.base_url,api_key_box=excluded.api_key_box,"
+            "enabled=excluded.enabled,updated=excluded.updated",
+            (provider_id, name, base_url, box, 1 if enabled else 0, now, now),
+        )
+    return provider_get(provider_id) or {}
+
+
+def provider_delete(provider_id: str) -> bool:
+    with conn() as cx:
+        cur = cx.execute("DELETE FROM provider_profiles WHERE id=?", (provider_id,))
+    return cur.rowcount > 0
+
+
+def provider_in_use(provider_id: str) -> bool:
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT 1 FROM chats WHERE provider_id=? LIMIT 1", (provider_id,)
+        ).fetchone()
+    return bool(row)
 # ---------------------------------------------------------------- 消息 seq
 
 def message_max_id(chat_id: str) -> int:
@@ -765,3 +861,4 @@ def message_since(chat_id: str, since: int, limit: int = 200) -> list:
 def message_update(msg_id: str, content: str) -> None:
     with conn() as cx:
         cx.execute("UPDATE messages SET content=? WHERE id=?", (content, msg_id))
+
