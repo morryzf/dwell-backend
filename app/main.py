@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from . import auth, db, provider_secrets
 from app.pet_assets import ensure_pet_assets
 from app.llm_client import stream_chat
+from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
@@ -668,6 +669,95 @@ async def providers_delete(provider_id: str):
     return {"ok": True}
 
 
+# ---------------------------------------------------------------- MCP 服务器
+
+def _mcp_public(row: dict) -> dict:
+    return {key: row[key] for key in ("id", "name", "url", "transport", "enabled", "made", "updated")}
+
+
+@app.get("/api/mcp/servers", dependencies=authed)
+async def mcp_servers_get():
+    return {"ok": True, "items": db.mcp_server_list(),
+            "encryption_ready": provider_secrets.encryption_ready()}
+
+
+@app.post("/api/mcp/servers", dependencies=authed)
+async def mcp_servers_upsert(request: Request):
+    payload = await _read_json(request)
+    server_id = str(payload.get("id") or "").strip()
+    existing = db.mcp_server_get(server_id) if server_id else None
+    if server_id and not existing:
+        raise HTTPException(404, "找不到这个 MCP 服务器")
+    name = str(payload.get("name") or (existing or {}).get("name") or "").strip()[:80]
+    if not name:
+        raise HTTPException(400, "MCP 服务器名称不能为空")
+    url = _clean_base_url(payload.get("url") or (existing or {}).get("url"))
+    transport = str(payload.get("transport") or (existing or {}).get("transport") or "streamable_http")
+    if transport not in {"streamable_http", "sse"}:
+        raise HTTPException(400, "transport 只能是 streamable_http 或 sse")
+    enabled = bool(payload.get("enabled", (existing or {}).get("enabled", True)))
+
+    headers_box = None
+    if "headers" in payload:
+        headers = payload.get("headers")
+        if not isinstance(headers, dict):
+            raise HTTPException(400, "headers 必须是对象")
+        clean_headers = {str(k).strip(): str(v).strip() for k, v in headers.items()
+                         if str(k).strip() and str(v).strip()}
+        if clean_headers:
+            try:
+                headers_box = provider_secrets.encrypt_api_key(json.dumps(clean_headers, ensure_ascii=False))
+            except provider_secrets.SecretConfigurationError as exc:
+                raise HTTPException(503, str(exc)) from exc
+        else:
+            headers_box = ""
+
+    saved = db.mcp_server_upsert(server_id, name, url, transport, headers_box, enabled)
+    return {"ok": True, "server": _mcp_public(saved),
+            "has_credentials": bool(saved.get("headers_box"))}
+
+
+@app.delete("/api/mcp/servers/{server_id}", dependencies=authed)
+async def mcp_servers_delete(server_id: str):
+    if not db.mcp_server_delete(server_id):
+        raise HTTPException(404, "找不到这个 MCP 服务器")
+    return {"ok": True}
+
+
+@app.post("/api/mcp/test", dependencies=authed)
+async def mcp_test(request: Request):
+    payload = await _read_json(request)
+    server_id = str(payload.get("server_id") or "").strip()
+    server = db.mcp_server_get(server_id)
+    if not server:
+        raise HTTPException(404, "找不到这个 MCP 服务器")
+    try:
+        tools = await mcp_list_tools(server)
+    except McpConnectionError as exc:
+        return {"ok": False, "detail": str(exc)}
+    return {"ok": True, "tools": [tool["function"]["name"].split("__", 2)[-1] for tool in tools],
+            "count": len(tools)}
+
+
+@app.get("/api/mcp/chat", dependencies=authed)
+async def mcp_chat_get():
+    chat_id = _get_or_create_current_chat()
+    selected = set(db.chat_mcp_server_ids(chat_id))
+    return {"ok": True, "chat_id": chat_id,
+            "items": [{**item, "selected": item["id"] in selected} for item in db.mcp_server_list()]}
+
+
+@app.post("/api/mcp/chat", dependencies=authed)
+async def mcp_chat_set(request: Request):
+    payload = await _read_json(request)
+    server_ids = payload.get("server_ids")
+    if not isinstance(server_ids, list) or not all(isinstance(item, str) for item in server_ids):
+        raise HTTPException(400, "server_ids 必须是字符串数组")
+    chat_id = _get_or_create_current_chat()
+    db.chat_mcp_servers_set(chat_id, server_ids)
+    return {"ok": True, "chat_id": chat_id, "server_ids": db.chat_mcp_server_ids(chat_id)}
+
+
 @app.post("/api/provider-test", dependencies=authed)
 async def provider_test(request: Request):
     """用浏览器刚填写、尚未保存的资料做一次最小 OpenAI 兼容请求。"""
@@ -906,15 +996,56 @@ async def _run_ai_reply(chat_id: str, msg_id: str):
     try:
         if not provider or not provider["enabled"]:
             raise RuntimeError("这个聊天还没有可用的供应商；请在设置里添加并选择一个")
-        async for chunk in stream_chat(provider, selection["model_id"], messages):
-            buf.append(chunk)
-            db.message_update(msg_id, "".join(buf))
-            _emit(chat_id, {
-                "type": "stream_event",
-                "event": {
-                    "delta": {"type": "text_delta", "text": chunk}
-                }
-            })
+        tool_map = {}
+        tools = []
+        for server in db.chat_mcp_servers(chat_id):
+            try:
+                server_tools = await mcp_list_tools(server)
+            except McpConnectionError:
+                continue
+            for tool in server_tools:
+                tools.append(tool)
+                tool_map[tool["function"]["name"]] = server
+
+        for round_no in range(8):
+            calls = []
+            async for event in stream_chat(provider, selection["model_id"], messages, tools or None):
+                if event["type"] == "text":
+                    chunk = event["text"]
+                    buf.append(chunk)
+                    db.message_update(msg_id, "".join(buf))
+                    _emit(chat_id, {
+                        "type": "stream_event",
+                        "event": {"delta": {"type": "text_delta", "text": chunk}},
+                    })
+                elif event["type"] == "tool_calls":
+                    calls.extend(event["calls"])
+            if not calls:
+                break
+
+            assistant_calls = []
+            for index, call in enumerate(calls):
+                call_id = call.get("id") or f"mcp-{round_no}-{index}"
+                assistant_calls.append({"id": call_id, "type": "function", "function": {
+                    "name": call.get("name") or "", "arguments": call.get("arguments") or "{}"}})
+            messages.append({"role": "assistant", "content": "", "tool_calls": assistant_calls})
+
+            for call in assistant_calls:
+                name = call["function"]["name"]
+                server = tool_map.get(name)
+                try:
+                    arguments = json.loads(call["function"]["arguments"])
+                    if not isinstance(arguments, dict):
+                        raise ValueError("参数必须是对象")
+                    if not server:
+                        raise ValueError("模型请求了未启用的 MCP 工具")
+                    tool_name = name.split("__", 2)[-1]
+                    result = await mcp_call_tool(server, tool_name, arguments)
+                except Exception as exc:
+                    result = json.dumps({"is_error": True, "content": [{"type": "text", "text": str(exc)}]}, ensure_ascii=False)
+                messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+        else:
+            raise RuntimeError("MCP 工具调用轮数超过上限")
         full = "".join(buf).strip()
         _emit(chat_id, {
             "type": "assistant",
