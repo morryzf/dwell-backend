@@ -986,6 +986,11 @@ async def poll(since: str = "", timeout: int = 25):
     except (TypeError, ValueError):
         cursor = 0
 
+    # 前端初次加载会用数据库消息的 rowid 当游标；实时事件则有自己
+    # 从 1 开始的内存序号。两者不能混用：把过大的旧游标收敛到当前
+    # 事件末尾，下一条流式事件才不会被永久跳过。
+    cursor = max(0, min(cursor, _event_seq.get(chat_id, 0)))
+
     # 有积压立刻回
     backlog = [e for e in _event_log.get(chat_id, []) if e["seq"] > cursor]
     if backlog:
