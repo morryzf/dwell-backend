@@ -695,18 +695,17 @@ def chat_del(chat_id: str) -> bool:
         cur = cx.execute("DELETE FROM chats WHERE id=?", (chat_id,))
         if cur.rowcount == 0:
             return False
-        # 如果删的是 wake_target，重新指一个
-        cur2 = cx.execute(
-            "SELECT value FROM settings WHERE key='wake_target_chat_id'"
+        fallback = cx.execute(
+            "SELECT id FROM chats ORDER BY made DESC LIMIT 1"
         ).fetchone()
-        if cur2 and cur2["value"] == chat_id:
-            fallback = cx.execute(
-                "SELECT id FROM chats ORDER BY made DESC LIMIT 1"
-            ).fetchone()
-            cx.execute(
-                "UPDATE settings SET value=? WHERE key='wake_target_chat_id'",
-                (fallback["id"] if fallback else "",),
-            )
+        fallback_id = fallback["id"] if fallback else ""
+        # 删除当前聊天或主动消息目标时，都要指向最新剩余聊天。
+        for key in ("wake_target_chat_id", "current_chat_id"):
+            saved = cx.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+            if saved and saved["value"] == chat_id:
+                cx.execute(
+                    "UPDATE settings SET value=? WHERE key=?", (fallback_id, key)
+                )
     return True
 
 
