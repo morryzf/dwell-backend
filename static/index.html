@@ -5987,7 +5987,11 @@ function showChatHere(it) {
   if (pollAbort) pollAbort.abort();
   polling = false;
   cursor = Number.MAX_SAFE_INTEGER;
-  guEl = null; earliestSeq = null; olderBtn = null;
+  // renderSaid 负责把历史逐条画出来，本身不会清空旧窗口；切换时必须
+  // 先清屏，否则新窗口的消息会被追加在旧窗口下面。
+  log.innerHTML = '';
+  guEl = null; turnThink = null; curGroup = null;
+  earliestSeq = null; olderBtn = null;
   setTitle(it.name);
   loadSaid().then(() => poll());
 }
