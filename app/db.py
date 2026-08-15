@@ -182,6 +182,28 @@ CREATE TABLE IF NOT EXISTS provider_profiles (
     updated        INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ix_provider_profiles_name ON provider_profiles(name);
+
+-- MCP 工具服务器。headers_box 是加密后的 JSON，可能含 Bearer token 等凭据。
+CREATE TABLE IF NOT EXISTS mcp_servers (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    url         TEXT NOT NULL,
+    transport   TEXT NOT NULL DEFAULT 'streamable_http',
+    headers_box TEXT NOT NULL DEFAULT '',
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    made        INTEGER NOT NULL,
+    updated     INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ix_mcp_servers_name ON mcp_servers(name);
+
+-- 哪些 MCP 服务器可以被某个聊天使用。工具不是全局强塞给每个聊天的。
+CREATE TABLE IF NOT EXISTS chat_mcp_servers (
+    chat_id   TEXT NOT NULL,
+    server_id TEXT NOT NULL,
+    PRIMARY KEY (chat_id, server_id),
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
+);
 """
 
 
@@ -834,6 +856,77 @@ def provider_in_use(provider_id: str) -> bool:
             "SELECT 1 FROM chats WHERE provider_id=? LIMIT 1", (provider_id,)
         ).fetchone()
     return bool(row)
+
+
+# ---------------------------------------------------------------- MCP 工具服务器
+
+def mcp_server_list() -> list:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT id,name,url,transport,enabled,made,updated,headers_box FROM mcp_servers "
+            "ORDER BY made ASC"
+        ).fetchall()
+    return [{**{k: row[k] for k in ("id", "name", "url", "transport", "enabled", "made", "updated")},
+             "has_credentials": bool(row["headers_box"])} for row in rows]
+
+
+def mcp_server_get(server_id: str) -> dict | None:
+    with conn() as cx:
+        row = cx.execute("SELECT * FROM mcp_servers WHERE id=?", (server_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def mcp_server_upsert(server_id: str, name: str, url: str, transport: str,
+                      headers_box: str | None, enabled: bool = True) -> dict:
+    now = int(time.time())
+    old = mcp_server_get(server_id) if server_id else None
+    server_id = server_id or new_id()
+    box = old["headers_box"] if old and headers_box is None else (headers_box or "")
+    with conn() as cx:
+        cx.execute(
+            "INSERT INTO mcp_servers (id,name,url,transport,headers_box,enabled,made,updated) "
+            "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "name=excluded.name,url=excluded.url,transport=excluded.transport,"
+            "headers_box=excluded.headers_box,enabled=excluded.enabled,updated=excluded.updated",
+            (server_id, name, url, transport, box, 1 if enabled else 0, now, now),
+        )
+    return mcp_server_get(server_id) or {}
+
+
+def mcp_server_delete(server_id: str) -> bool:
+    with conn() as cx:
+        cur = cx.execute("DELETE FROM mcp_servers WHERE id=?", (server_id,))
+    return cur.rowcount > 0
+
+
+def chat_mcp_server_ids(chat_id: str) -> list[str]:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT server_id FROM chat_mcp_servers WHERE chat_id=? ORDER BY server_id", (chat_id,)
+        ).fetchall()
+    return [row["server_id"] for row in rows]
+
+
+def chat_mcp_servers(chat_id: str) -> list[dict]:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT s.* FROM mcp_servers s JOIN chat_mcp_servers c ON c.server_id=s.id "
+            "WHERE c.chat_id=? AND s.enabled=1 ORDER BY s.made ASC", (chat_id,)
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def chat_mcp_servers_set(chat_id: str, server_ids: list[str]) -> bool:
+    if not chat_get(chat_id):
+        return False
+    clean = list(dict.fromkeys(server_id for server_id in server_ids if mcp_server_get(server_id)))
+    with conn() as cx:
+        cx.execute("DELETE FROM chat_mcp_servers WHERE chat_id=?", (chat_id,))
+        cx.executemany(
+            "INSERT INTO chat_mcp_servers (chat_id,server_id) VALUES (?,?)",
+            [(chat_id, server_id) for server_id in clean],
+        )
+    return True
 # ---------------------------------------------------------------- 消息 seq
 
 def message_max_id(chat_id: str) -> int:

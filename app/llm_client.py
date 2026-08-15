@@ -10,23 +10,25 @@ import httpx
 from .provider_secrets import SecretConfigurationError, decrypt_api_key
 
 
-async def stream_chat(provider: dict, model_id: str, messages: list):
-    """以 OpenAI 兼容的 SSE 格式请求供应商，逐段 yield 文本。"""
+async def stream_chat(provider: dict, model_id: str, messages: list, tools: list | None = None):
+    """以 OpenAI 兼容 SSE 请求聊天，yield 文本或完整的工具调用组。"""
     if not model_id:
-        yield "[配置错误] 这个聊天还没有选择模型"
+        yield {"type": "text", "text": "[配置错误] 这个聊天还没有选择模型"}
         return
     if not provider.get("api_key_box"):
-        yield "[配置错误] 这个供应商还没有保存 API 密钥"
+        yield {"type": "text", "text": "[配置错误] 这个供应商还没有保存 API 密钥"}
         return
 
     try:
         api_key = decrypt_api_key(provider["api_key_box"])
     except SecretConfigurationError as exc:
-        yield f"[配置错误] {exc}"
+        yield {"type": "text", "text": f"[配置错误] {exc}"}
         return
 
     url = provider["base_url"].rstrip("/") + "/chat/completions"
     payload = {"model": model_id, "messages": messages, "stream": True}
+    if tools:
+        payload["tools"] = tools
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "text/event-stream"}
 
     try:
@@ -34,8 +36,9 @@ async def stream_chat(provider: dict, model_id: str, messages: list):
             async with client.stream("POST", url, headers=headers, json=payload) as resp:
                 if resp.status_code != 200:
                     body = (await resp.aread()).decode("utf-8", errors="ignore")[:500]
-                    yield f"[供应商错误 {resp.status_code}] {body}"
+                    yield {"type": "text", "text": f"[供应商错误 {resp.status_code}] {body}"}
                     return
+                calls: dict[int, dict] = {}
                 async for line in resp.aiter_lines():
                     if not line or not line.startswith("data:"):
                         continue
@@ -52,7 +55,16 @@ async def stream_chat(provider: dict, model_id: str, messages: list):
                     delta = choices[0].get("delta") or {}
                     text = delta.get("content")
                     if isinstance(text, str) and text:
-                        yield text
+                        yield {"type": "text", "text": text}
+                    for part in delta.get("tool_calls") or []:
+                        index = int(part.get("index", 0))
+                        call = calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                        call["id"] += str(part.get("id") or "")
+                        fn = part.get("function") or {}
+                        call["name"] += str(fn.get("name") or "")
+                        call["arguments"] += str(fn.get("arguments") or "")
+                if calls:
+                    yield {"type": "tool_calls", "calls": [calls[index] for index in sorted(calls)]}
     except httpx.RequestError as exc:
-        yield f"[网络错误] 无法连接供应商：{exc}"
+        yield {"type": "text", "text": f"[网络错误] 无法连接供应商：{exc}"}
 

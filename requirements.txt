@@ -4,4 +4,6 @@ python-multipart==0.0.20
 itsdangerous==2.2.0
 httpx
 cryptography>=46,<47
+mcp>=1.26,<2
+sse-starlette>=2,<3
 
