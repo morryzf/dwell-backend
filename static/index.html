@@ -1583,6 +1583,10 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .crow .ct { font-size: 12.5px; color: var(--dim); flex: none; align-self: flex-start; }
+  .chatrow { display: flex; align-items: stretch; gap: 7px; margin-bottom: 7px; }
+  .chatrow .crow { flex: 1; margin-bottom: 0; min-width: 0; }
+  .chatdel { width: 42px; flex: none; border-radius: 13px; color: var(--dim); background: var(--glass); border: 1px solid var(--line); }
+  .chatdel:active { color: var(--red); background: color-mix(in srgb, var(--red) 10%, var(--panel)); }
   #newSession {
     position: absolute; right: 18px; bottom: calc(20px + env(safe-area-inset-bottom));
     background: #2b2a27; color: #faf9f5; border-radius: 999px;
@@ -2919,7 +2923,7 @@ async function loadOlder() {
 }
 
 /* ---------- 事件流 ---------- */
-let cursor = 0, polling = false;
+let cursor = 0, polling = false, pollAbort = null, pollGeneration = 0;
 let armedFresh = false;        // 「新窗口」上膛了没——handle() 要用，所以在这儿先立着
 let uiVer = null;              // 网页那份文件的版本，换了就自己重载
 let pendingVer = null;
@@ -2940,8 +2944,12 @@ function tryReload() {
 async function poll() {
   if (polling) return;
   polling = true;
+  const generation = pollGeneration;
+  const controller = new AbortController();
+  pollAbort = controller;
   try {
-    const r = await fetch('api/poll?since=' + cursor, { cache: 'no-store' });
+    const r = await fetch('api/poll?since=' + cursor, { cache: 'no-store', signal: controller.signal });
+    if (generation !== pollGeneration) return;
     if (r.status === 401) { await promptLogin(); return; }
     const d = await r.json();
     if (d.ver) {
@@ -2951,11 +2959,14 @@ async function poll() {
     cursor = d.next;
     for (const ev of d.events) handle(ev);
     if (pendingVer && tryReload()) return;
-  } catch {
-    await new Promise(r => setTimeout(r, 1500));
+  } catch (e) {
+    if (generation === pollGeneration && e.name !== 'AbortError') await new Promise(r => setTimeout(r, 1500));
   } finally {
-    polling = false;
-    poll();
+    if (generation === pollGeneration) {
+      if (pollAbort === controller) pollAbort = null;
+      polling = false;
+      poll();
+    }
   }
 }
 // 先把说完的话照着念一遍，游标落在最后一条上；之后的（正在说的那轮）才走事件流
@@ -5929,6 +5940,8 @@ async function loadChats() {
       return;
     }
     d.items.forEach(it => {
+      const row = document.createElement('div');
+      row.className = 'chatrow';
       const b = document.createElement('button');
       b.className = 'crow' + (it.current ? ' on' : '');
       const mid = document.createElement('span');
@@ -5945,7 +5958,12 @@ async function loadChats() {
       t.textContent = it.current ? '在这儿' : ago(it.last || it.created);
       b.append(mid, t);
       b.onclick = () => switchChat(it);
-      body.appendChild(b);
+      const del = document.createElement('button');
+      del.className = 'chatdel'; del.title = '删除这个对话';
+      del.appendChild(icEl('trash', 17));
+      del.onclick = (e) => deleteChat(it, e);
+      row.append(b, del);
+      body.appendChild(row);
     });
   } catch { body.innerHTML = '<div class="gnote">拿不到窗口清单，等会儿再试</div>'; }
 }
@@ -5954,12 +5972,40 @@ async function switchChat(it) {
   if (it.current) { sheets.chats.classList.remove('open'); return; }
   if (it.archived) { note('（这间收起来了——先从收纳里放出来才能进）'); return; }
   try {
-    await fetch('api/chats', {
+    const response = await fetch('api/chats', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'switch', id: it.id })
     });
-    location.reload();          // 换了一副记忆，界面整个重来最干净
+    if (!response.ok) throw new Error('切换失败');
+    showChatHere(it);
   } catch { note('（没切成，再试一次）', 'err'); }
+}
+
+function showChatHere(it) {
+  sheets.chats.classList.remove('open');
+  pollGeneration += 1;
+  if (pollAbort) pollAbort.abort();
+  polling = false;
+  cursor = Number.MAX_SAFE_INTEGER;
+  guEl = null; earliestSeq = null; olderBtn = null;
+  setTitle(it.name);
+  loadSaid().then(() => poll());
+}
+
+async function deleteChat(it, event) {
+  event.stopPropagation();
+  if (!confirm(`确定删除「${it.name || '这个对话'}」吗？里面所有消息都会永久删除，不能恢复。`)) return;
+  try {
+    const r = await fetch('api/chats/' + encodeURIComponent(it.id), { method: 'DELETE' });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error('删除失败');
+    if (it.current) {
+      const next = (d.items || []).find(x => x.current);
+      if (next) showChatHere(next);
+      else { log.innerHTML = ''; setTitle('Cloudy'); }
+    }
+    loadChats();
+  } catch { note('（没删掉，再试一次）', 'err'); }
 }
 
 document.getElementById('chatsMenu').onclick = () => {
