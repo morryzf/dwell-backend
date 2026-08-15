@@ -596,6 +596,36 @@ html[data-theme="dark"] .composer {
   .group .grow:not(.static):active { background: rgba(0,0,0,.04); }
   .gnote { font-size: 13.5px; color: var(--dim); padding: 12px 6px 0; line-height: 1.6; }
 
+  /* 模型供应商 / MCP：两个设置页共用的表单骨架 */
+  .ap-section {
+    margin: 14px 0 20px; padding: 16px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+  }
+  .ap-section-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+  .ap-lb { display: block; margin: 15px 2px 6px; color: var(--dim); font-size: 13.5px; font-weight: 600; }
+  .ap-section .ap-lb:first-of-type { margin-top: 12px; }
+  .ap-in {
+    display: block; width: 100%; min-height: 43px; padding: 9px 11px;
+    border: 1px solid var(--line); border-radius: 11px; outline: 0;
+    color: var(--text); background: var(--card); font: inherit; line-height: 1.4;
+  }
+  .ap-in:focus { border-color: var(--accent-soft); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-soft) 18%, transparent); }
+  textarea.ap-in { min-height: 70px; resize: vertical; }
+  .ap-btns { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.35fr); gap: 10px; margin-top: 17px; }
+  .ap-btns.single { grid-template-columns: 1fr; }
+  .ap-b {
+    min-height: 45px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 12px;
+    background: var(--card); color: var(--text); font-weight: 700; line-height: 1.25;
+  }
+  .ap-b:active { transform: scale(.985); }
+  .ap-b.go { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .ap-msg { display: none; margin-top: 12px; padding: 11px 12px; border-radius: 11px; color: var(--green); background: var(--sage-track); font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .ap-msg.on { display: block; }
+  .ap-msg.bad { color: var(--red); background: var(--red-track); }
+  .ap-note { margin: 14px 2px 0; padding: 12px 13px; border-left: 3px solid var(--accent-soft); border-radius: 0 10px 10px 0; color: var(--dim); background: color-mix(in srgb, var(--card) 68%, transparent); font-size: 13.5px; line-height: 1.7; }
+  .mcp-enabled { margin: 14px 0 0; }
+  .mcp-enabled input { width: 18px; height: 18px; accent-color: var(--accent); }
+
   /* Usage */
   .ucard { background: var(--panel); border-radius: 18px; padding: 18px 20px; }
   .ucard + .ucard, .ucard + .group-label { margin-top: 6px; }
@@ -5758,6 +5788,7 @@ async function loadApi() {
   const choices = `<option value="">＋ 新供应商</option>` + profiles.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.has_key ? '' : '（未填密钥）'}</option>`).join('');
   b.innerHTML =
     `<div class="sh-head"><h1>模型供应商</h1><div class="sub">每个聊天可自行选择；密钥只会保存到服务器。</div></div>`
+    + `<div class="ap-section"><div class="ap-section-title">供应商与模型</div>`
     + `<div class="ap-lb">已保存的供应商</div><select class="ap-in" id="apProfile">${choices}</select>`
     + `<div class="ap-lb">名称</div><input class="ap-in" id="apName" placeholder="例如：聚梦 AG">`
     + `<div class="ap-lb">接口地址</div>`
@@ -5765,10 +5796,11 @@ async function loadApi() {
     + `<div class="ap-lb">令牌</div>`
     + `<input class="ap-in" id="apTok" type="password" placeholder="已保存时留空；输入空值不会读取旧密钥">`
     + `<div class="ap-lb">这个聊天使用的模型名</div>`
-    + `<input class="ap-in" id="apModel" placeholder="例如：gemini-3.5-flash-low">`
+    + `<input class="ap-in" id="apModel" placeholder="例如：gemini-3.5-flash-low"></div>`
+    + `<div class="ap-section"><div class="ap-section-title">测试与应用</div>`
     + `<div class="ap-btns"><button class="ap-b" id="apTest">试一试</button>`
     + `<button class="ap-b go" id="apSave">保存并用于当前聊天</button></div>`
-    + `<div class="ap-msg" id="apMsg"></div>`
+    + `<div class="ap-msg" id="apMsg"></div></div>`
     + `<div class="ap-note">密钥经服务器加密后保存，网页之后只能看到“已保存”，拿不回来。<br>`
     + `「试一试」只测试当前填写的地址、密钥和模型，不会保存它们。<br>`
     + `保存后，当前聊天直接走这里选的供应商；其他聊天不受影响。</div>`;
@@ -5859,14 +5891,16 @@ async function loadMcp() {
   const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const selected = new Set(linked.filter(s=>s.selected).map(s=>s.id));
   body.innerHTML = `<div class="sh-head"><h1>当前聊天的工具</h1><div class="sub">模型会自己决定是否调用已启用的工具。</div></div>`
-    + `<div class="group" id="mcpEnableList">${servers.length ? servers.map(s=>`<label class="grow"><input type="checkbox" value="${esc(s.id)}" ${selected.has(s.id)?'checked':''}> ${esc(s.name)}<span class="val">${s.transport==='sse'?'SSE':'HTTP'}</span></label>`).join('') : '<div class="gnote">还没有工具服务器，先在下面添加。</div>'}</div>`
-    + `<div class="ap-btns"><button class="ap-b go" id="mcpEnableSave">保存当前聊天可用工具</button></div><div class="group-label">添加或编辑服务器</div>`
+    + `<div class="ap-section"><div class="ap-section-title">这间聊天可用的工具</div><div class="group mcp-enabled" id="mcpEnableList">${servers.length ? servers.map(s=>`<label class="grow"><input type="checkbox" value="${esc(s.id)}" ${selected.has(s.id)?'checked':''}> ${esc(s.name)}<span class="val">${s.transport==='sse'?'SSE':'HTTP'}</span></label>`).join('') : '<div class="gnote">还没有工具服务器，先在下面添加。</div>'}</div>`
+    + `<div class="ap-btns single"><button class="ap-b go" id="mcpEnableSave">保存当前聊天可用工具</button></div></div><div class="group-label">添加或编辑服务器</div>`
+    + `<div class="ap-section"><div class="ap-section-title">服务器连接</div>`
     + `<div class="ap-lb">已保存的服务器</div><select class="ap-in" id="mcpProfile"><option value="">＋ 新服务器</option>${servers.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select>`
     + `<div class="ap-lb">名称</div><input class="ap-in" id="mcpName" placeholder="例如：Ombre Brain"><div class="ap-lb">MCP 地址</div><input class="ap-in" id="mcpUrl" placeholder="https://example.com/mcp">`
     + `<div class="ap-lb">传输方式</div><select class="ap-in" id="mcpTransport"><option value="streamable_http">Streamable HTTP（推荐）</option><option value="sse">旧版 SSE</option></select>`
-    + `<div class="ap-lb">认证请求头（可选 JSON）</div><textarea class="ap-in" id="mcpHeaders" rows="2" placeholder='{"Authorization":"Bearer ..."}'></textarea>`
+    + `<div class="ap-lb">认证请求头（可选 JSON）</div><textarea class="ap-in" id="mcpHeaders" rows="2" placeholder='{"Authorization":"Bearer ..."}'></textarea></div>`
+    + `<div class="ap-section"><div class="ap-section-title">保存与测试</div>`
     + `<div class="ap-btns"><button class="ap-b" id="mcpTest">测试连接</button><button class="ap-b go" id="mcpSave">保存服务器</button></div><div class="ap-msg" id="mcpMsg"></div>`
-    + `<div class="ap-note">Ombre Brain 填完整 <code>/mcp</code> 地址，传输选 Streamable HTTP。已有凭据留空就不会改动。</div>`;
+    + `<div class="ap-note">先保存服务器，再测试连接；Ombre Brain 填完整 <code>/mcp</code> 地址，传输选 Streamable HTTP。已有凭据留空就不会改动。</div></div>`;
   const profile=document.getElementById('mcpProfile');
   const fill=()=>{const s=servers.find(x=>x.id===profile.value); document.getElementById('mcpName').value=s?s.name:''; document.getElementById('mcpUrl').value=s?s.url:''; document.getElementById('mcpTransport').value=s?s.transport:'streamable_http'; document.getElementById('mcpHeaders').placeholder=s&&s.has_credentials?'凭据已保存 · 留空则不更改':'{"Authorization":"Bearer ..."}';}; profile.onchange=fill; fill();
   const say=(t,bad)=>{const m=document.getElementById('mcpMsg');m.textContent=t;m.className='ap-msg on'+(bad?' bad':'');};
