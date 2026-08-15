@@ -176,6 +176,9 @@ CREATE TABLE IF NOT EXISTS settings (
 def init_db():
     with conn() as cx:
         cx.executescript(SCHEMA)
+        cols = {r["name"] for r in cx.execute("PRAGMA table_info(chats)").fetchall()}
+        if "archived" not in cols:
+            cx.execute("ALTER TABLE chats ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
 
 
 # ---------------------------------------------------------------- 日记
@@ -567,15 +570,45 @@ def chat_add(name: str = "") -> dict:
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (row["id"],),
             )
+            cx.execute(
+                "INSERT INTO settings (key,value) VALUES ('current_chat_id',?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (row["id"],),
+            )
     return row
 
 
-def chat_list() -> list:
+def chat_list(scope: str = "", current_id: str = "") -> list:
     with conn() as cx:
         rows = cx.execute(
-            "SELECT id,name,made FROM chats ORDER BY made DESC"
+            """SELECT c.id, c.name, c.made, COALESCE(c.archived,0) AS archived,
+                      COALESCE(MAX(m.made), c.made) AS last,
+                      (SELECT content FROM messages mm
+                       WHERE mm.chat_id=c.id AND mm.content<>''
+                       ORDER BY mm.made DESC, mm.rowid DESC LIMIT 1) AS preview
+               FROM chats c
+               LEFT JOIN messages m ON m.chat_id=c.id
+               GROUP BY c.id
+               ORDER BY last DESC, c.made DESC"""
         ).fetchall()
-    return [dict(r) for r in rows]
+    items = []
+    for r in rows:
+        archived = bool(r["archived"])
+        if scope == "live" and archived:
+            continue
+        if scope == "box" and not archived:
+            continue
+        items.append({
+            "id": r["id"],
+            "name": r["name"],
+            "created": r["made"],
+            "made": r["made"],
+            "last": r["last"],
+            "preview": r["preview"] or "",
+            "current": r["id"] == current_id,
+            "archived": archived,
+        })
+    return items
 
 
 def chat_get(chat_id: str) -> dict | None:
@@ -590,6 +623,22 @@ def chat_rename(chat_id: str, name: str) -> bool:
             "UPDATE chats SET name=? WHERE id=?", (name.strip()[:60], chat_id)
         )
     return cur.rowcount > 0
+
+
+def chat_archive(chat_id: str, archived: bool = True) -> bool:
+    with conn() as cx:
+        cur = cx.execute(
+            "UPDATE chats SET archived=? WHERE id=?",
+            (1 if archived else 0, chat_id),
+        )
+    return cur.rowcount > 0
+
+
+def chat_switch(chat_id: str) -> bool:
+    if not chat_get(chat_id):
+        return False
+    setting_set("current_chat_id", chat_id)
+    return True
 
 
 def chat_del(chat_id: str) -> bool:
@@ -633,13 +682,46 @@ def message_add(chat_id: str, role: str, content: str) -> dict:
     return row
 
 
-def message_list(chat_id: str, limit: int = 400) -> list:
+def message_list(chat_id: str, limit: int = 400, before: int | None = None) -> list:
     with conn() as cx:
-        rows = cx.execute(
-            "SELECT * FROM messages WHERE chat_id=? ORDER BY made ASC LIMIT ?",
-            (chat_id, limit),
-        ).fetchall()
-    return [dict(r) for r in rows]
+        if before:
+            rows = cx.execute(
+                "SELECT rowid, * FROM messages WHERE chat_id=? AND rowid<? "
+                "ORDER BY rowid DESC LIMIT ?",
+                (chat_id, before, limit),
+            ).fetchall()
+        else:
+            rows = cx.execute(
+                "SELECT rowid, * FROM messages WHERE chat_id=? "
+                "ORDER BY rowid DESC LIMIT ?",
+                (chat_id, limit),
+            ).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
+def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -> dict:
+    rows = message_list(chat_id, limit, before)
+    msgs = []
+    for r in rows:
+        role = r["role"]
+        msgs.append({
+            "seq": r["rowid"],
+            "id": r["id"],
+            "kind": "me" if role == "user" else ("gu" if role == "assistant" else "system"),
+            "role": role,
+            "text": r["content"],
+            "content": r["content"],
+            "at": r["made"],
+        })
+    more = False
+    if msgs:
+        with conn() as cx:
+            r = cx.execute(
+                "SELECT 1 FROM messages WHERE chat_id=? AND rowid<? LIMIT 1",
+                (chat_id, msgs[0]["seq"]),
+            ).fetchone()
+        more = bool(r)
+    return {"msgs": msgs, "more": more, "upto": msgs[-1]["seq"] if msgs else message_max_id(chat_id)}
 
 
 # ---------------------------------------------------------------- 设置
