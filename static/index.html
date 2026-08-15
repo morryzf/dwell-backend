@@ -1710,6 +1710,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
         <button class="grow" id="rewakeRow"><span class="ic" data-i="refresh"></span>叫他重新醒一次<span class="val" id="rewakeVal">他要是卡住了就按</span></button>
         <button class="grow" id="themeRow"><span class="ic" data-i="moon"></span>夜间模式<span class="sw wait" id="themeSw"></span></button>
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>接入 API<span class="val" id="apiVal">…</span><span class="chev">›</span></button>
+        <button class="grow" id="mcpRow"><span class="ic" data-i="bolt"></span>MCP 工具<span class="chev">›</span></button>
       </div>
     </div>
   </div>
@@ -1725,6 +1726,13 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     </div>
     <div class="body" id="apiBody"></div>
   </div>
+</div>
+
+<div class="sheetWrap" id="mcpSheet">
+  <div class="shade" data-close="mcp"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="mcp"><span class="ic" data-i="x"></span></button><div class="ht">MCP 工具</div>
+  </div><div class="body" id="mcpBody"></div></div>
 </div>
 
 <div class="sheetWrap" id="gongSheet">
@@ -3490,6 +3498,7 @@ document.addEventListener('touchend', (e) => {
 }, { passive: true });
 const sheets = {
   api: document.getElementById('apiSheet'),
+  mcp: document.getElementById('mcpSheet'),
   settings: document.getElementById('settingsSheet'),
   usage: document.getElementById('usageSheet'),
   model: document.getElementById('modelSheet'),
@@ -5843,6 +5852,30 @@ document.getElementById('rewakeRow').onclick = async () => {
 document.getElementById('apiRow').onclick = () => {
   sheets.api.classList.add('open'); loadApi();
 };
+
+async function loadMcp() {
+  const body = document.getElementById('mcpBody'); let servers = [], linked = [];
+  try { const [all, chat] = await Promise.all([fetch('api/mcp/servers',{cache:'no-store'}).then(r=>r.json()), fetch('api/mcp/chat',{cache:'no-store'}).then(r=>r.json())]); servers=all.items||[]; linked=chat.items||[]; } catch(e) {}
+  const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const selected = new Set(linked.filter(s=>s.selected).map(s=>s.id));
+  body.innerHTML = `<div class="sh-head"><h1>当前聊天的工具</h1><div class="sub">模型会自己决定是否调用已启用的工具。</div></div>`
+    + `<div class="group" id="mcpEnableList">${servers.length ? servers.map(s=>`<label class="grow"><input type="checkbox" value="${esc(s.id)}" ${selected.has(s.id)?'checked':''}> ${esc(s.name)}<span class="val">${s.transport==='sse'?'SSE':'HTTP'}</span></label>`).join('') : '<div class="gnote">还没有工具服务器，先在下面添加。</div>'}</div>`
+    + `<div class="ap-btns"><button class="ap-b go" id="mcpEnableSave">保存当前聊天可用工具</button></div><div class="group-label">添加或编辑服务器</div>`
+    + `<div class="ap-lb">已保存的服务器</div><select class="ap-in" id="mcpProfile"><option value="">＋ 新服务器</option>${servers.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select>`
+    + `<div class="ap-lb">名称</div><input class="ap-in" id="mcpName" placeholder="例如：Ombre Brain"><div class="ap-lb">MCP 地址</div><input class="ap-in" id="mcpUrl" placeholder="https://example.com/mcp">`
+    + `<div class="ap-lb">传输方式</div><select class="ap-in" id="mcpTransport"><option value="streamable_http">Streamable HTTP（推荐）</option><option value="sse">旧版 SSE</option></select>`
+    + `<div class="ap-lb">认证请求头（可选 JSON）</div><textarea class="ap-in" id="mcpHeaders" rows="2" placeholder='{"Authorization":"Bearer ..."}'></textarea>`
+    + `<div class="ap-btns"><button class="ap-b" id="mcpTest">测试连接</button><button class="ap-b go" id="mcpSave">保存服务器</button></div><div class="ap-msg" id="mcpMsg"></div>`
+    + `<div class="ap-note">Ombre Brain 填完整 <code>/mcp</code> 地址，传输选 Streamable HTTP。已有凭据留空就不会改动。</div>`;
+  const profile=document.getElementById('mcpProfile');
+  const fill=()=>{const s=servers.find(x=>x.id===profile.value); document.getElementById('mcpName').value=s?s.name:''; document.getElementById('mcpUrl').value=s?s.url:''; document.getElementById('mcpTransport').value=s?s.transport:'streamable_http'; document.getElementById('mcpHeaders').placeholder=s&&s.has_credentials?'凭据已保存 · 留空则不更改':'{"Authorization":"Bearer ..."}';}; profile.onchange=fill; fill();
+  const say=(t,bad)=>{const m=document.getElementById('mcpMsg');m.textContent=t;m.className='ap-msg on'+(bad?' bad':'');};
+  const vals=()=>{const raw=document.getElementById('mcpHeaders').value.trim();const v={id:profile.value,name:document.getElementById('mcpName').value.trim(),url:document.getElementById('mcpUrl').value.trim(),transport:document.getElementById('mcpTransport').value};if(raw)v.headers=JSON.parse(raw);return v;};
+  document.getElementById('mcpEnableSave').onclick=async()=>{const ids=[...document.querySelectorAll('#mcpEnableList input:checked')].map(x=>x.value);try{await fetch('api/mcp/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({server_ids:ids})});note('（这间可用的工具换好了）');}catch{note('（工具没换上，再试一次）','err');}};
+  document.getElementById('mcpSave').onclick=async()=>{try{const r=await (await fetch('api/mcp/servers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(vals())})).json();if(!r.ok)throw new Error(r.detail||'没有保存');say('保存好了 · 现在可以测试并勾选给当前聊天');setTimeout(loadMcp,600);}catch(e){say('没存上：'+e.message,true);}};
+  document.getElementById('mcpTest').onclick=async()=>{if(!profile.value){say('请先保存服务器，再测试连接',true);return;}say('正在连接…');try{const r=await (await fetch('api/mcp/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({server_id:profile.value})})).json();if(!r.ok)throw new Error(r.detail||'连接失败');say('通了 · 找到 '+r.count+' 个工具：'+r.tools.join('、'));}catch(e){say('没通：'+e.message,true);}};
+}
+document.getElementById('mcpRow').onclick=()=>{sheets.mcp.classList.add('open');loadMcp();};
 
 (async () => {
   try {
