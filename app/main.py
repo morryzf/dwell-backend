@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import auth, db, provider_secrets
 from app.pet_assets import ensure_pet_assets
-from app.heartbeat_client import stream_chat
+from app.llm_client import stream_chat
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
@@ -577,7 +577,7 @@ async def status_get():
         "busy": bool(task and not task.done()),
         "armed": False,
         "online": True,
-        "model": "claude",
+        "model": db.chat_model_get(current)["model_id"],
         "name": "Cloudy",
         "today": db.today_str(),
     }
@@ -861,18 +861,20 @@ def _get_or_create_current_chat() -> str:
 
 
 async def _run_ai_reply(chat_id: str, msg_id: str):
-    """跑 heartbeat，边收边发事件给前端。同时把完整回复写进库。"""
+    """调用当前聊天所选供应商，边收边发事件给前端。"""
     history = db.message_list(chat_id, limit=100)
-    # 身份、长期记忆和可选指令由 MCP（Ombre Brain 等）提供；
-    # 本地后端不再注入 Cloudy 人设，避免与记忆系统冲突。
     messages = [
         {"role": m["role"], "content": m["content"]}
         for m in history
         if m["content"] or m["role"] != "assistant"
     ]
     buf = []
+    selection = db.chat_model_get(chat_id)
+    provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
     try:
-        async for chunk in stream_chat(messages, chat_id):
+        if not provider or not provider["enabled"]:
+            raise RuntimeError("这个聊天还没有可用的供应商；请在设置里添加并选择一个")
+        async for chunk in stream_chat(provider, selection["model_id"], messages):
             buf.append(chunk)
             db.message_update(msg_id, "".join(buf))
             _emit(chat_id, {
@@ -900,6 +902,14 @@ async def _run_ai_reply(chat_id: str, msg_id: str):
             })
         _emit(chat_id, {"type": "system", "subtype": "stopped"})
         raise
+    except Exception as exc:
+        text = f"[配置错误] {exc}"
+        db.message_update(msg_id, text)
+        _emit(chat_id, {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": text}]},
+        })
+        _emit(chat_id, {"type": "result", "is_error": True})
     finally:
         _running_tasks.pop(chat_id, None)
 
