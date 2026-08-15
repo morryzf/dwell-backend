@@ -3,3 +3,5 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 itsdangerous==2.2.0
 httpx
+cryptography>=46,<47
+
