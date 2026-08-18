@@ -6152,6 +6152,7 @@ function showChatHere(it) {
   guEl = null; turnThink = null; curGroup = null;
   earliestSeq = null; olderBtn = null;
   setTitle(it.name);
+  refreshInstructionButton();
   loadSaid().then(() => poll());
 }
 
