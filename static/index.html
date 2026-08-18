@@ -406,8 +406,9 @@ html[data-theme="dark"] .composer {
   }
   .pill:active { opacity: .7; }
   .pill .ic { width: 14px; height: 14px; }
-  #plusBtn { width: 36px; height: 36px; border-radius: 50%; background: var(--panel); flex: none; display: flex; align-items: center; justify-content: center; }
-  #plusBtn .ic { width: 17px; height: 17px; }
+  #plusBtn, #instructionsBtn { width: 36px; height: 36px; border-radius: 50%; background: var(--panel); flex: none; display: flex; align-items: center; justify-content: center; }
+  #plusBtn .ic, #instructionsBtn .ic { width: 17px; height: 17px; }
+  #instructionsBtn.on { color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent); }
   .ctlrow .gap { flex: 1; }
   #send {
     flex: none; width: 38px; height: 38px; border-radius: 50%;
@@ -1651,7 +1652,8 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     <div id="attachStrip"></div>
     <textarea id="box" rows="1" placeholder="说点什么…" autocomplete="off"></textarea>
     <div class="ctlrow">
-      <button id="plusBtn" title="添加照片和文件"><span class="ic" data-i="plus"></span></button>
+<button id="plusBtn" title="添加照片和文件"><span class="ic" data-i="plus"></span></button>
+<button id="instructionsBtn" title="这间聊天的指令"><span class="ic" data-i="layers"></span></button>
       <button class="pill" id="modelPill">…</button>
       <span class="gap"></span>
       <button id="send" title="发送"><span class="ic" data-i="arrowUp"></span></button>
@@ -1741,6 +1743,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
         <button class="grow" id="themeRow"><span class="ic" data-i="moon"></span>夜间模式<span class="sw wait" id="themeSw"></span></button>
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>接入 API<span class="val" id="apiVal">…</span><span class="chev">›</span></button>
         <button class="grow" id="mcpRow"><span class="ic" data-i="bolt"></span>MCP 工具<span class="chev">›</span></button>
+        <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
       </div>
     </div>
   </div>
@@ -1763,6 +1766,20 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   <div class="sheet"><div class="grabber"></div><div class="head">
     <button class="hbtn" data-close="mcp"><span class="ic" data-i="x"></span></button><div class="ht">MCP 工具</div>
   </div><div class="body" id="mcpBody"></div></div>
+</div>
+
+<div class="sheetWrap" id="instructionsSheet">
+  <div class="shade" data-close="instructions"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="instructions"><span class="ic" data-i="x"></span></button><div class="ht">聊天指令</div><div class="hspace"></div>
+  </div><div class="body" id="instructionsBody"></div></div>
+</div>
+
+<div class="sheetWrap" id="chatInstructionsSheet">
+  <div class="shade" data-close="chatInstructions"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="chatInstructions"><span class="ic" data-i="x"></span></button><div class="ht">这间聊天的指令</div><div class="hspace"></div>
+  </div><div class="body" id="chatInstructionsBody"></div></div>
 </div>
 
 <div class="sheetWrap" id="gongSheet">
@@ -2036,6 +2053,7 @@ const ICONS = {
         + '<path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/>'),
   expand: S('<polyline points="14 4 20 4 20 10"/><polyline points="10 20 4 20 4 14"/>'),
   plus: S('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
+  layers: S('<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 12 12 17 22 12"/><polyline points="2 17 12 22 22 17"/>'),
   arrowUp: S('<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>'),
   arrowDown: S('<line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>'),
   download: S('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'),
@@ -3529,6 +3547,8 @@ document.addEventListener('touchend', (e) => {
 const sheets = {
   api: document.getElementById('apiSheet'),
   mcp: document.getElementById('mcpSheet'),
+  instructions: document.getElementById('instructionsSheet'),
+  chatInstructions: document.getElementById('chatInstructionsSheet'),
   settings: document.getElementById('settingsSheet'),
   usage: document.getElementById('usageSheet'),
   model: document.getElementById('modelSheet'),
@@ -5911,6 +5931,78 @@ async function loadMcp() {
 }
 document.getElementById('mcpRow').onclick=()=>{sheets.mcp.classList.add('open');loadMcp();};
 
+/* ---------- 聊天指令：设置页管理，输入框下的小叠层只管本聊天勾选 ---------- */
+const instructionEsc = s => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function refreshInstructionButton() {
+  const button = document.getElementById('instructionsBtn');
+  try {
+    const d = await (await fetch('api/instructions/chat', {cache:'no-store'})).json();
+    const count = (d.items || []).filter(item => item.selected).length;
+    button.classList.toggle('on', count > 0);
+    button.title = count ? `这间聊天已启用 ${count} 条指令` : '这间聊天的指令';
+  } catch { button.classList.remove('on'); }
+}
+async function loadChatInstructions() {
+  const body = document.getElementById('chatInstructionsBody');
+  body.innerHTML = '<div class="gnote">正在拿这间聊天的指令…</div>';
+  try {
+    const d = await (await fetch('api/instructions/chat', {cache:'no-store'})).json();
+    const items = d.items || [];
+    body.innerHTML = `<div class="sh-head"><h1>当前聊天的指令</h1><div class="sub">勾选后，下一条消息开始会一起发给模型。</div></div>`
+      + (items.length ? `<div class="group" id="chatInstructionList">${items.map(item => `<label class="grow"><input type="checkbox" value="${instructionEsc(item.id)}" ${item.selected ? 'checked' : ''}> <span>${instructionEsc(item.name)}</span><span class="val">${instructionEsc(item.content).slice(0, 28)}${item.content.length > 28 ? '…' : ''}</span></label>`).join('')}</div>` : '<div class="gnote">还没有可用指令。先去设置里写一条。</div>')
+      + `<div class="ap-btns single"><button class="ap-b" id="openInstructionSettings">管理指令</button></div><div class="ap-msg" id="chatInstructionMsg"></div>`;
+    const save = async () => {
+      const ids = [...body.querySelectorAll('#chatInstructionList input:checked')].map(el => el.value);
+      const msg = document.getElementById('chatInstructionMsg');
+      try {
+        const r = await fetch('api/instructions/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction_ids:ids})});
+        if (!r.ok) throw new Error('服务器没有保存');
+        msg.textContent = ids.length ? '已用于当前聊天' : '这间聊天暂未启用指令'; msg.className = 'ap-msg on';
+        refreshInstructionButton();
+      } catch (e) { msg.textContent = '没保存上：' + e.message; msg.className = 'ap-msg on bad'; }
+    };
+    body.querySelectorAll('#chatInstructionList input').forEach(el => el.onchange = save);
+    document.getElementById('openInstructionSettings').onclick = () => { sheets.chatInstructions.classList.remove('open'); sheets.instructions.classList.add('open'); loadInstructions(); };
+  } catch { body.innerHTML = '<div class="gnote">指令没拿到，等会儿再开一次。</div>'; }
+}
+async function loadInstructions(editId = '') {
+  const body = document.getElementById('instructionsBody');
+  body.innerHTML = '<div class="gnote">正在整理指令…</div>';
+  try {
+    const d = await (await fetch('api/instructions', {cache:'no-store'})).json();
+    const items = d.items || [];
+    const current = items.find(item => item.id === editId) || null;
+    body.innerHTML = `<div class="sh-head"><h1>聊天指令</h1><div class="sub">在这里写好；每间聊天再从输入框下方选择要用哪些。</div></div>`
+      + `<div class="group-label">已保存的指令</div>`
+      + (items.length ? `<div class="group">${items.map(item => `<button class="grow instruction-edit" data-id="${instructionEsc(item.id)}"><span>${instructionEsc(item.name)}</span><span class="val">编辑 ›</span></button>`).join('')}</div>` : '<div class="gnote">还没有指令。写第一条吧。</div>')
+      + `<div class="ap-section"><div class="ap-section-title">${current ? '编辑指令' : '新建指令'}</div>`
+      + `<div class="ap-lb">名称</div><input class="ap-in" id="instructionName" maxlength="80" placeholder="例如：OB">`
+      + `<div class="ap-lb">指令内容</div><textarea class="ap-in" id="instructionContent" rows="7" maxlength="8000" placeholder="写给模型看的规则或背景…"></textarea>`
+      + `<div class="ap-btns ${current ? '' : 'single'}"><button class="ap-b go" id="instructionSave">保存指令</button>${current ? '<button class="ap-b" id="instructionDelete">删除</button>' : ''}</div><div class="ap-msg" id="instructionMsg"></div></div>`;
+    document.getElementById('instructionName').value = current ? current.name : '';
+    document.getElementById('instructionContent').value = current ? current.content : '';
+    body.querySelectorAll('.instruction-edit').forEach(el => el.onclick = () => loadInstructions(el.dataset.id));
+    const say = (text, bad) => { const msg = document.getElementById('instructionMsg'); msg.textContent = text; msg.className = 'ap-msg on' + (bad ? ' bad' : ''); };
+    document.getElementById('instructionSave').onclick = async () => {
+      const name = document.getElementById('instructionName').value.trim();
+      const content = document.getElementById('instructionContent').value.trim();
+      try {
+        const r = await (await fetch('api/instructions', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:current ? current.id : '',name,content})})).json();
+        if (!r.ok) throw new Error(r.detail || '没有保存');
+        loadInstructions(r.instruction.id); refreshInstructionButton();
+      } catch (e) { say('没存上：' + e.message, true); }
+    };
+    if (current) document.getElementById('instructionDelete').onclick = async () => {
+      if (!confirm('删除「' + current.name + '」？已勾选它的聊天会自动取消。')) return;
+      try { const r = await fetch('api/instructions/' + encodeURIComponent(current.id), {method:'DELETE'}); if (!r.ok) throw new Error('没有删除'); loadInstructions(); refreshInstructionButton(); }
+      catch (e) { say('没删掉：' + e.message, true); }
+    };
+  } catch { body.innerHTML = '<div class="gnote">指令没拿到，等会儿再开一次。</div>'; }
+}
+document.getElementById('instructionsBtn').onclick = () => { sheets.chatInstructions.classList.add('open'); loadChatInstructions(); };
+document.getElementById('instructionsRow').onclick = () => { sheets.instructions.classList.add('open'); loadInstructions(); };
+refreshInstructionButton();
+
 (async () => {
   try {
     const st = await (await fetch('api/authmode', { cache: 'no-store' })).json();
@@ -6060,6 +6152,7 @@ function showChatHere(it) {
   guEl = null; turnThink = null; curGroup = null;
   earliestSeq = null; olderBtn = null;
   setTitle(it.name);
+  refreshInstructionButton();
   loadSaid().then(() => poll());
 }
 
