@@ -32,6 +32,8 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 # 正在跑的 AI 回复任务。key=chat_id，value=asyncio.Task
 _running_tasks: dict[str, asyncio.Task] = {}
+# 观影页的最新私有剧情笔记。只在进程内短暂保留，不写入聊天记录或数据库。
+_watch_notes: dict[tuple[str, str], dict] = {}
 _kelivo_uploads: dict[str, tuple[str, float]] = {}
 
 WEB_TOOLS = [
@@ -1245,6 +1247,9 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         )
         if subtitles:
             note += f"\n附近字幕：\n{subtitles}"
+        summary = str(watch_context.get("summary") or "").strip()[:3000]
+        if summary:
+            note += f"\nCloudy 刚刚自己整理的当前剧情笔记：\n{summary}"
         for index in range(len(messages) - 1, -1, -1):
             if messages[index]["role"] == "user":
                 content = [{"type": "text", "text": str(messages[index]["content"]) + note}]
@@ -1387,6 +1392,58 @@ async def send(request: Request):
     return {"ok": True}
 
 
+@app.post("/api/watch/observe", dependencies=authed)
+async def watch_observe(request: Request):
+    """为当前本地画面生成一条不写入聊天记录的私有剧情笔记。"""
+    payload = await _read_json(request)
+    chat_id = str(payload.get("chat_id", "")).strip()
+    watch_id = str(payload.get("watch_id", "")).strip()[:100]
+    if not chat_id or not db.chat_get(chat_id):
+        raise HTTPException(404, "请先选择一个存在的聊天")
+    if not watch_id:
+        raise HTTPException(400, "观影会话标识缺失")
+
+    image = str(payload.get("image") or "")
+    if not image.startswith("data:image/") or len(image) > 1_500_000:
+        raise HTTPException(400, "需要一张有效且较小的当前截帧")
+    selection = db.chat_model_get(chat_id)
+    provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
+    if not provider or not provider.get("enabled"):
+        raise HTTPException(400, "这个聊天还没有可用的供应商")
+    try:
+        at_ms = max(0, int(payload.get("at_ms") or 0))
+    except (TypeError, ValueError):
+        at_ms = 0
+    title = str(payload.get("title") or "未命名视频")[:160]
+    subtitles = str(payload.get("subtitles") or "").strip()[:6000]
+    timestamp = f"{at_ms // 3_600_000:02d}:{(at_ms // 60_000) % 60:02d}:{(at_ms // 1000) % 60:02d}"
+    prompt = (
+        "你是私人观影笔记员。根据当前视频画面和附近字幕，用中文写一条不超过120字的"
+        "客观剧情笔记：人物、动作、情绪、重要线索。只描述已播放到的画面，绝不猜测后续，"
+        "不要与观众对话，不要使用标题或前缀。\n"
+        f"片名：{title}\n播放位置：{timestamp}"
+    )
+    if subtitles:
+        prompt += f"\n附近字幕：\n{subtitles}"
+    request_messages = [
+        {"role": "system", "content": "你只负责生成简短、无剧透的观影笔记。"},
+        {"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": image, "detail": "low"}},
+        ]},
+    ]
+    chunks = []
+    async for event in stream_chat(provider, selection["model_id"], request_messages):
+        if event["type"] == "text":
+            chunks.append(event["text"])
+    summary = "".join(chunks).strip()
+    if not summary or summary.startswith("["):
+        raise HTTPException(502, summary or "模型没有返回观影笔记")
+    summary = summary[:3000]
+    _watch_notes[(chat_id, watch_id)] = {"summary": summary, "at_ms": at_ms, "made": int(time.time())}
+    return {"ok": True, "summary": summary, "at_ms": at_ms}
+
+
 @app.post("/api/watch/send", dependencies=authed)
 async def watch_send(request: Request):
     """观影页专用发送：保留普通聊天记录，同时把本地截帧临时交给视觉模型。"""
@@ -1403,11 +1460,14 @@ async def watch_send(request: Request):
         raise HTTPException(400, "images 必须是列表")
     images = [image for image in raw_images[:2]
               if isinstance(image, str) and image.startswith("data:image/") and len(image) <= 1_500_000]
+    watch_id = str(payload.get("watch_id", "")).strip()[:100]
+    saved_note = _watch_notes.get((chat_id, watch_id), {}) if watch_id else {}
     watch_context = {
         "title": str(payload.get("title") or "未命名视频"),
         "at_ms": payload.get("at_ms") or 0,
         "subtitles": str(payload.get("subtitles") or ""),
         "images": images,
+        "summary": saved_note.get("summary", ""),
     }
     db.message_add(chat_id, "user", text)
     _emit(chat_id, {"type": "echo", "text": text})

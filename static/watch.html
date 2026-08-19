@@ -19,6 +19,7 @@
     <video id="video" class="video" controls playsinline></video>
     <p id="videoName" class="hint">视频只在你的浏览器播放；完整文件不会上传。页面会低频截取当前画面，只有当你向 Cloudy 发言时才把最新画面随该条消息发送。</p>
     <div class="title">Cloudy 此刻可见的字幕</div><div id="caption" class="caption">尚未载入字幕。仍可通过当前截帧理解画面。</div>
+    <div class="title" style="margin-top:14px">Cloudy 的观影笔记</div><div id="watchNote" class="caption">播放后会自动更新；这不是聊天记录。</div>
   </section>
   <aside class="card">
     <div class="title">和 Cloudy 聊</div>
@@ -29,7 +30,8 @@
 </main>
 <script>
 const $=id=>document.getElementById(id), video=$('video'), chat=$('chat'), messages=$('messages');
-let subtitleCues=[], latestFrame='', pollCursor=0, selectedChat='';
+let subtitleCues=[], latestFrame='', pollCursor=0, selectedChat='', observing=false, lastObserveAt=0;
+const watchId=(globalThis.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+'-'+Math.random();
 function setState(s){$('state').textContent=s}
 function esc(t){const e=document.createElement('span');e.textContent=t||'';return e.innerHTML}
 function showMessage(m){let el=messages.querySelector('[data-id="'+CSS.escape(m.id||'')+'"]');if(!el){el=document.createElement('div');el.className='msg '+(m.kind|| (m.role==='user'?'me':'gu'));if(m.id)el.dataset.id=m.id;messages.appendChild(el)}el.textContent=m.text||m.content||'';messages.scrollTop=messages.scrollHeight}
@@ -39,11 +41,24 @@ chat.onchange=async()=>{selectedChat=chat.value;await loadMessages();setState('�
 function parseSubtitles(raw){const blocks=raw.replace(/\r/g,'').split(/\n\s*\n/);const toMs=s=>{const p=s.trim().replace(',', '.').split(':').map(Number);return Math.round(((p.length===3?p[0]*3600+p[1]*60+p[2]:p[0]*60+p[1])*1000))};subtitleCues=blocks.map(b=>{const lines=b.split('\n');const time=lines.findIndex(x=>x.includes('-->'));if(time<0)return null;const pair=lines[time].split('-->');return{a:toMs(pair[0]),b:toMs(pair[1]),t:lines.slice(time+1).join('\n').replace(/<[^>]+>/g,'').trim()}}).filter(Boolean)}
 function captionNow(){const at=Math.round(video.currentTime*1000);const near=subtitleCues.filter(c=>c.b>=at-7000&&c.a<=at+7000);$('caption').textContent=near.length?near.map(c=>c.t).join('\n'):'（这一刻附近没有字幕）';return near.map(c=>c.t).join('\n')}
 function capture(){if(!video.videoWidth||video.readyState<2)return '';const max=960, k=Math.min(1,max/video.videoWidth),c=document.createElement('canvas');c.width=Math.max(1,Math.round(video.videoWidth*k));c.height=Math.max(1,Math.round(video.videoHeight*k));c.getContext('2d').drawImage(video,0,0,c.width,c.height);latestFrame=c.toDataURL('image/jpeg',.72);return latestFrame}
-video.addEventListener('timeupdate',captionNow);video.addEventListener('loadedmetadata',()=>{captionNow();capture()});video.addEventListener('play',()=>setState('正在一起看'));
+video.addEventListener('timeupdate',captionNow);video.addEventListener('loadedmetadata',()=>{captionNow();capture()});video.addEventListener('play',()=>{setState('正在一起看');setTimeout(observe,5000)});
 setInterval(()=>{if(!video.paused)capture()},45000);
-$('videoFile').onchange=e=>{const f=e.target.files[0];if(!f)return;if(video.src)URL.revokeObjectURL(video.src);video.src=URL.createObjectURL(f);$('videoName').textContent='正在播放：'+f.name+'。完整文件只留在此设备。';latestFrame=''};
+setInterval(()=>{if(!video.paused)observe()},90000);
+$('videoFile').onchange=e=>{const f=e.target.files[0];if(!f)return;if(video.src)URL.revokeObjectURL(video.src);video.src=URL.createObjectURL(f);$('videoName').textContent='正在播放：'+f.name+'。完整文件只留在此设备。';latestFrame='';lastObserveAt=0;$('watchNote').textContent='等待画面稳定后自动生成。'};
 $('subtitleFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;parseSubtitles(await f.text());captionNow();setState('字幕已载入')};
-async function send(){const text=$('text').value.trim();if(!text||!selectedChat)return;const image=capture()||latestFrame;$('text').value='';setState('Cloudy 正在看…');const r=await fetch('/api/watch/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:selectedChat,text,title:$('videoFile').files[0]?.name||'本地视频',at_ms:Math.round(video.currentTime*1000),subtitles:captionNow(),images:image?[image]:[]})});if(!r.ok){setState('发送失败');alert(await r.text());return}setState(image?'已发送画面与时间点':'已发送时间点')}
+async function observe(){
+  if(observing||video.paused||!selectedChat)return;
+  const now=Date.now();if(now-lastObserveAt<80000)return;
+  const image=capture()||latestFrame;if(!image)return;
+  observing=true;setState('Cloudy 正在跟上剧情…');
+  try{
+    const r=await fetch('/api/watch/observe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:selectedChat,watch_id:watchId,title:$('videoFile').files[0]?.name||'本地视频',at_ms:Math.round(video.currentTime*1000),subtitles:captionNow(),image})});
+    const d=await r.json();if(!r.ok)throw new Error(d.detail||'观察失败');
+    lastObserveAt=Date.now();$('watchNote').textContent=d.summary;setState('Cloudy 已跟上 '+Math.floor(video.currentTime/60)+':'+String(Math.floor(video.currentTime%60)).padStart(2,'0'));
+  }catch(e){setState('观影笔记暂时没生成') }finally{observing=false}
+}
+
+async function send(){const text=$('text').value.trim();if(!text||!selectedChat)return;const image=capture()||latestFrame;$('text').value='';setState('Cloudy 正在看…');const r=await fetch('/api/watch/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:selectedChat,watch_id:watchId,text,title:$('videoFile').files[0]?.name||'本地视频',at_ms:Math.round(video.currentTime*1000),subtitles:captionNow(),images:image?[image]:[]})});if(!r.ok){setState('发送失败');alert(await r.text());return}setState(image?'已发送画面与时间点':'已发送时间点')}
 $('send').onclick=()=>send();$('text').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
 async function poll(){try{if(selectedChat){const d=await (await fetch('/api/poll?timeout=25&since='+pollCursor+'&chat_id='+encodeURIComponent(selectedChat))).json();pollCursor=d.next??pollCursor;(d.events||[]).forEach(e=>{if(e.type==='echo')showMessage({id:'echo-'+e.seq,kind:'me',text:e.text});if(e.type==='stream_event'){let m=messages.querySelector('[data-stream="1"]');if(!m){m=document.createElement('div');m.className='msg gu';m.dataset.stream='1';messages.appendChild(m)}m.textContent+=(e.event?.delta?.text||'');messages.scrollTop=messages.scrollHeight}else if(e.type==='result'){const m=messages.querySelector('[data-stream="1"]');if(m)delete m.dataset.stream}})}}catch(e){setState('连接重试中')}finally{setTimeout(poll,100)}}
 loadChats().then(()=>{setState('选择视频后即可开始');poll()}).catch(()=>setState('请先从 Dwell 登录'));
