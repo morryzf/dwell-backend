@@ -561,7 +561,488 @@ async def favlines_get():
 
 
 @app.post("/api/favlines", dependencies=authed)
-async def favlines_post(payload: dict = Body(.…4913 tokens truncated…, "id": chat_id, "items": items, "chats": items}
+async def favlines_post(payload: dict = Body(...)):
+    quote = str(payload.get("quote") or payload.get("text") or "").strip()
+    if not quote:
+        raise HTTPException(400, "摘的话不能是空的")
+    item = db.quote_add(quote, str(payload.get("note", "")),
+                        str(payload.get("date", "")))
+    return {"ok": True, **item}
+
+
+@app.get("/api/dreams", dependencies=authed)
+async def dreams_get(limit: int = 200):
+    return {"ok": True, "items": db.night_list(limit)}
+    
+# ---------------------------------------------------------------- 聊天那部分的空壳
+#
+# 这些接口前端一打开就要，缺一个它就以为整页坏了。
+# 聊天本体还没接（要串 heartbeat 的网关），先给合理的空壳让界面安静下来。
+# 每一个都得带 ok，前端只认这个字段。
+
+@app.get("/api/status", dependencies=authed)
+async def status_get():
+    current = _get_or_create_current_chat()
+    task = _running_tasks.get(current)
+    return {
+        "ok": True,
+        "alive": True,
+        "since": int(db.setting_get("started_at", "0") or "0") or None,
+        "busy": bool(task and not task.done()),
+        "armed": False,
+        "online": True,
+        "model": db.chat_model_get(current)["model_id"],
+        "name": "Cloudy",
+        "today": db.today_str(),
+    }
+
+
+@app.get("/api/authmode", dependencies=authed)
+async def authmode():
+    return {"ok": True, "mode": "password"}
+
+
+@app.get("/api/model", dependencies=authed)
+async def model_get():
+    chat_id = _get_or_create_current_chat()
+    selection = db.chat_model_get(chat_id)
+    providers = db.provider_list()
+    return {
+        "ok": True,
+        # model/effort 保留给原 dwell 前端的读取逻辑；新增字段供新的设置界面使用。
+        "model": selection["model_id"],
+        "effort": selection["reasoning_effort"],
+        "provider_id": selection["provider_id"],
+        "chat_id": chat_id,
+        "providers": providers,
+        "configured": bool(selection["provider_id"] and selection["model_id"]),
+    }
+
+
+def _clean_base_url(value: object) -> str:
+    url = str(value or "").strip().rstrip("/")
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(400, "base_url 必须是 http:// 或 https:// 开头的地址")
+    if parsed.query or parsed.fragment:
+        raise HTTPException(400, "base_url 不能带查询参数或 # 片段")
+    return url
+
+
+def _provider_public(row: dict) -> dict:
+    return {key: row[key] for key in ("id", "name", "base_url", "enabled", "made", "updated")}
+
+
+@app.get("/api/providers", dependencies=authed)
+async def providers_get():
+    return {
+        "ok": True,
+        "items": db.provider_list(),
+        "encryption_ready": provider_secrets.encryption_ready(),
+    }
+
+
+@app.post("/api/providers", dependencies=authed)
+async def providers_upsert(request: Request):
+    payload = await _read_json(request)
+    provider_id = str(payload.get("id") or "").strip()
+    existing = db.provider_get(provider_id) if provider_id else None
+    if provider_id and not existing:
+        raise HTTPException(404, "找不到这个供应商")
+
+    name = str(payload.get("name") or (existing or {}).get("name") or "").strip()[:80]
+    if not name:
+        raise HTTPException(400, "供应商名称不能为空")
+    base_url = _clean_base_url(payload.get("base_url") or (existing or {}).get("base_url"))
+    enabled = bool(payload.get("enabled", (existing or {}).get("enabled", True)))
+
+    # token 未传时，更新名称/地址不会动已有密钥；传空字符串则明确清除密钥。
+    api_key_box = None
+    if "token" in payload:
+        token = str(payload.get("token") or "").strip()
+        if token:
+            try:
+                api_key_box = provider_secrets.encrypt_api_key(token)
+            except provider_secrets.SecretConfigurationError as exc:
+                raise HTTPException(503, str(exc)) from exc
+        else:
+            api_key_box = ""
+
+    saved = db.provider_upsert(provider_id, name, base_url, api_key_box, enabled)
+    return {"ok": True, "provider": _provider_public(saved), "has_key": bool(saved.get("api_key_box"))}
+
+
+@app.delete("/api/providers/{provider_id}", dependencies=authed)
+async def providers_delete(provider_id: str):
+    if db.provider_in_use(provider_id):
+        raise HTTPException(409, "仍有聊天正在使用这个供应商；请先切换模型")
+    if not db.provider_delete(provider_id):
+        raise HTTPException(404, "找不到这个供应商")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- 模型目录与常用模型
+
+def _model_catalog_item(row: dict, providers: dict[str, dict]) -> dict:
+    provider = providers.get(row["provider_id"], {})
+    return {**row, "provider_name": provider.get("name", "未知供应商")}
+
+
+@app.get("/api/model-catalog", dependencies=authed)
+async def model_catalog_get(provider_id: str = ""):
+    providers = db.provider_list()
+    provider_map = {item["id"]: item for item in providers}
+    if provider_id and provider_id not in provider_map:
+        raise HTTPException(404, "找不到这个供应商")
+    items = [_model_catalog_item(item, provider_map) for item in db.provider_model_list(provider_id)]
+    return {"ok": True, "providers": providers, "items": items,
+            "favorites": [item for item in items if item["favorite"]]}
+
+
+@app.post("/api/model-catalog", dependencies=authed)
+async def model_catalog_upsert(request: Request):
+    payload = await _read_json(request)
+    provider_id = str(payload.get("provider_id") or "").strip()
+    model_id = str(payload.get("model_id") or "").strip()[:200]
+    provider = db.provider_get(provider_id)
+    if not provider or not provider["enabled"]:
+        raise HTTPException(400, "所选供应商不存在或已停用")
+    if not model_id:
+        raise HTTPException(400, "模型名不能为空")
+    favorite = bool(payload.get("favorite", True))
+    manual = bool(payload.get("manual", False))
+    saved = db.provider_model_upsert(provider_id, model_id, favorite=favorite, manual=manual)
+    return {"ok": True, "item": _model_catalog_item(saved, {provider_id: provider})}
+
+
+@app.post("/api/model-catalog/refresh", dependencies=authed)
+async def model_catalog_refresh(request: Request):
+    payload = await _read_json(request)
+    provider_id = str(payload.get("provider_id") or "").strip()
+    provider = db.provider_get(provider_id)
+    if not provider or not provider["enabled"]:
+        raise HTTPException(400, "所选供应商不存在或已停用")
+    if not provider.get("api_key_box"):
+        raise HTTPException(400, "这个供应商还没有保存 API 密钥")
+    try:
+        token = provider_secrets.decrypt_api_key(provider["api_key_box"])
+    except provider_secrets.SecretConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    url = provider["base_url"].rstrip("/") + "/models"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(35.0, connect=15.0)) as client:
+            response = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+    except httpx.RequestError as exc:
+        return {"ok": False, "detail": f"无法连接供应商：{exc}", "url": url}
+    if response.status_code >= 400:
+        return {"ok": False, "detail": response.text[:500], "code": response.status_code, "url": url}
+    try:
+        raw_items = response.json().get("data") or []
+    except ValueError:
+        return {"ok": False, "detail": "供应商返回的不是模型列表 JSON", "url": url}
+    model_ids = []
+    for item in raw_items:
+        model_id = item if isinstance(item, str) else (item.get("id") if isinstance(item, dict) else "")
+        model_id = str(model_id or "").strip()[:200]
+        if model_id:
+            model_ids.append(model_id)
+    if not model_ids:
+        return {"ok": False, "detail": "供应商没有返回可识别的模型 ID", "url": url}
+    count = db.provider_models_refresh(provider_id, model_ids)
+    return {"ok": True, "count": count, "url": url}
+
+
+# ---------------------------------------------------------------- MCP 服务器
+
+def _mcp_public(row: dict) -> dict:
+    return {key: row[key] for key in ("id", "name", "url", "transport", "enabled", "made", "updated")}
+
+
+@app.get("/api/mcp/servers", dependencies=authed)
+async def mcp_servers_get():
+    return {"ok": True, "items": db.mcp_server_list(),
+            "encryption_ready": provider_secrets.encryption_ready()}
+
+
+@app.post("/api/mcp/servers", dependencies=authed)
+async def mcp_servers_upsert(request: Request):
+    payload = await _read_json(request)
+    server_id = str(payload.get("id") or "").strip()
+    existing = db.mcp_server_get(server_id) if server_id else None
+    if server_id and not existing:
+        raise HTTPException(404, "找不到这个 MCP 服务器")
+    name = str(payload.get("name") or (existing or {}).get("name") or "").strip()[:80]
+    if not name:
+        raise HTTPException(400, "MCP 服务器名称不能为空")
+    url = _clean_base_url(payload.get("url") or (existing or {}).get("url"))
+    transport = str(payload.get("transport") or (existing or {}).get("transport") or "streamable_http")
+    if transport not in {"streamable_http", "sse"}:
+        raise HTTPException(400, "transport 只能是 streamable_http 或 sse")
+    enabled = bool(payload.get("enabled", (existing or {}).get("enabled", True)))
+
+    headers_box = None
+    if "headers" in payload:
+        headers = payload.get("headers")
+        if not isinstance(headers, dict):
+            raise HTTPException(400, "headers 必须是对象")
+        clean_headers = {str(k).strip(): str(v).strip() for k, v in headers.items()
+                         if str(k).strip() and str(v).strip()}
+        if clean_headers:
+            try:
+                headers_box = provider_secrets.encrypt_api_key(json.dumps(clean_headers, ensure_ascii=False))
+            except provider_secrets.SecretConfigurationError as exc:
+                raise HTTPException(503, str(exc)) from exc
+        else:
+            headers_box = ""
+
+    saved = db.mcp_server_upsert(server_id, name, url, transport, headers_box, enabled)
+    return {"ok": True, "server": _mcp_public(saved),
+            "has_credentials": bool(saved.get("headers_box"))}
+
+
+@app.delete("/api/mcp/servers/{server_id}", dependencies=authed)
+async def mcp_servers_delete(server_id: str):
+    if not db.mcp_server_delete(server_id):
+        raise HTTPException(404, "找不到这个 MCP 服务器")
+    return {"ok": True}
+
+
+@app.post("/api/mcp/test", dependencies=authed)
+async def mcp_test(request: Request):
+    payload = await _read_json(request)
+    server_id = str(payload.get("server_id") or "").strip()
+    server = db.mcp_server_get(server_id)
+    if not server:
+        raise HTTPException(404, "找不到这个 MCP 服务器")
+    try:
+        tools = await mcp_list_tools(server)
+    except McpConnectionError as exc:
+        return {"ok": False, "detail": str(exc)}
+    return {"ok": True, "tools": [tool["function"]["name"].split("__", 2)[-1] for tool in tools],
+            "count": len(tools)}
+
+
+@app.get("/api/mcp/chat", dependencies=authed)
+async def mcp_chat_get():
+    chat_id = _get_or_create_current_chat()
+    selected = set(db.chat_mcp_server_ids(chat_id))
+    return {"ok": True, "chat_id": chat_id,
+            "items": [{**item, "selected": item["id"] in selected} for item in db.mcp_server_list()]}
+
+
+@app.post("/api/mcp/chat", dependencies=authed)
+async def mcp_chat_set(request: Request):
+    payload = await _read_json(request)
+    server_ids = payload.get("server_ids")
+    if not isinstance(server_ids, list) or not all(isinstance(item, str) for item in server_ids):
+        raise HTTPException(400, "server_ids 必须是字符串数组")
+    chat_id = _get_or_create_current_chat()
+    db.chat_mcp_servers_set(chat_id, server_ids)
+    return {"ok": True, "chat_id": chat_id, "server_ids": db.chat_mcp_server_ids(chat_id)}
+
+
+# ---------------------------------------------------------------- 聊天指令
+
+@app.get("/api/instructions", dependencies=authed)
+async def instructions_get():
+    return {"ok": True, "items": db.instruction_list()}
+
+
+@app.post("/api/instructions", dependencies=authed)
+async def instructions_upsert(request: Request):
+    payload = await _read_json(request)
+    instruction_id = str(payload.get("id") or "").strip()
+    if instruction_id and not db.instruction_get(instruction_id):
+        raise HTTPException(404, "找不到这条指令")
+    name = str(payload.get("name") or "").strip()[:80]
+    content = str(payload.get("content") or "").strip()[:50000]
+    if not name:
+        raise HTTPException(400, "指令名称不能为空")
+    if not content:
+        raise HTTPException(400, "指令内容不能为空")
+    return {"ok": True, "instruction": db.instruction_upsert(instruction_id, name, content)}
+
+
+@app.delete("/api/instructions/{instruction_id}", dependencies=authed)
+async def instructions_delete(instruction_id: str):
+    if not db.instruction_delete(instruction_id):
+        raise HTTPException(404, "找不到这条指令")
+    return {"ok": True}
+
+
+@app.get("/api/instructions/chat", dependencies=authed)
+async def chat_instructions_get():
+    chat_id = _get_or_create_current_chat()
+    selected = set(db.chat_instruction_ids(chat_id))
+    return {"ok": True, "chat_id": chat_id,
+            "items": [{**item, "selected": item["id"] in selected} for item in db.instruction_list()]}
+
+
+@app.post("/api/instructions/chat", dependencies=authed)
+async def chat_instructions_set(request: Request):
+    payload = await _read_json(request)
+    instruction_ids = payload.get("instruction_ids")
+    if not isinstance(instruction_ids, list) or not all(isinstance(item, str) for item in instruction_ids):
+        raise HTTPException(400, "instruction_ids 必须是字符串数组")
+    chat_id = _get_or_create_current_chat()
+    db.chat_instructions_set(chat_id, instruction_ids)
+    return {"ok": True, "chat_id": chat_id, "instruction_ids": db.chat_instruction_ids(chat_id)}
+
+
+@app.post("/api/provider-test", dependencies=authed)
+async def provider_test(request: Request):
+    """用浏览器刚填写、尚未保存的资料做一次最小 OpenAI 兼容请求。"""
+    payload = await _read_json(request)
+    base_url = _clean_base_url(payload.get("base_url"))
+    token = str(payload.get("token") or "").strip()
+    model_id = str(payload.get("model") or "").strip()[:200]
+    if not token or not model_id:
+        raise HTTPException(400, "测试需要 API 密钥和模型名")
+    url = base_url + "/chat/completions"
+    body = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": "Reply with OK."}],
+        "max_tokens": 8,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(35.0, connect=15.0)) as client:
+            response = await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=body)
+    except httpx.RequestError as exc:
+        return {"ok": False, "code": "network", "detail": str(exc), "url": url}
+    if response.status_code >= 400:
+        return {"ok": False, "code": response.status_code,
+                "detail": response.text[:500], "url": url}
+    try:
+        returned_model = str(response.json().get("model") or model_id)
+    except ValueError:
+        returned_model = model_id
+    return {"ok": True, "model": returned_model, "url": url}
+
+
+@app.post("/api/model", dependencies=authed)
+async def model_set(request: Request):
+    payload = await _read_json(request)
+    chat_id = _get_or_create_current_chat()
+    current = db.chat_model_get(chat_id)
+    provider_id = str(payload.get("provider_id", current["provider_id"]) or "").strip()
+    model_id = str(payload.get("model", payload.get("model_id", current["model_id"])) or "").strip()[:200]
+    effort = str(payload.get("effort", payload.get("reasoning_effort", current["reasoning_effort"])) or "").strip()[:30]
+    if provider_id:
+        provider = db.provider_get(provider_id)
+        if not provider or not provider["enabled"]:
+            raise HTTPException(400, "所选供应商不存在或已停用")
+    if provider_id and not model_id:
+        raise HTTPException(400, "请选择模型")
+    if model_id and not provider_id:
+        raise HTTPException(400, "请先选择供应商")
+    db.chat_model_set(chat_id, provider_id, model_id, effort)
+    return {"ok": True, "provider_id": provider_id, "model": model_id, "effort": effort}
+
+
+@app.get("/api/wake", dependencies=authed)
+async def wake_get():
+    return {
+        "ok": True,
+        "on": db.setting_get("wake_on", "1") != "0",
+        "count": int(db.setting_get("wake_count_today", "0") or "0"),
+        "room": "",
+    }
+
+
+@app.post("/api/wake", dependencies=authed)
+async def wake_set(request: Request):
+    payload = await _read_json(request)
+    on = bool(payload.get("on"))
+    db.setting_set("wake_on", "1" if on else "0")
+    return {"ok": True, "on": on, "count": int(db.setting_get("wake_count_today", "0") or "0"), "room": ""}
+
+
+@app.get("/api/context", dependencies=authed)
+async def context_get():
+    return {"ok": True, "used": 0, "total": 0}
+
+
+@app.get("/api/usage", dependencies=authed)
+async def usage_get():
+    return {"ok": True, "items": []}
+
+
+@app.get("/api/notes", dependencies=authed)
+async def notes_get():
+    return {"ok": True, "gu": [], "her": []}
+
+
+@app.get("/api/gong", dependencies=authed)
+async def gong_get():
+    return {"ok": True, "msgs": []}
+
+
+@app.get("/api/news", dependencies=authed)
+async def news_get():
+    return {"ok": True, "items": []}
+
+
+@app.get("/api/nook", dependencies=authed)
+async def nook_get():
+    return {"ok": True, "items": []}
+
+
+@app.get("/api/repo", dependencies=authed)
+async def repo_get():
+    return {"ok": True, "items": []}
+
+
+@app.get("/api/watch", dependencies=authed)
+async def watch_get():
+    return {"ok": True, "items": []}
+
+
+@app.get("/api/pushkey", dependencies=authed)
+async def pushkey_get():
+    key = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
+    if not key:
+        raise HTTPException(503, "还没配置 VAPID_PUBLIC_KEY")
+    return {"ok": True, "key": key}
+
+
+@app.post("/api/subscribe", dependencies=authed)
+async def subscribe(request: Request):
+    payload = await _read_json(request)
+    db.setting_set("push_subscription", json.dumps(payload, ensure_ascii=False))
+    return {"ok": True}
+
+
+@app.post("/api/rewake", dependencies=authed)
+async def rewake():
+    chat_id = _get_or_create_current_chat()
+    _emit(chat_id, {"type": "system", "subtype": "rewake", "text": "（我在，刚刚重新听了一下）"})
+    return {"ok": True}
+
+# ---------------------------------------------------------------- 聊天
+
+@app.get("/api/chats", dependencies=authed)
+async def chats_list(scope: str = ""):
+    """列出所有对话窗口。"""
+    current = _get_or_create_current_chat()
+    items = db.chat_list(scope, current)
+    return {"ok": True, "items": items, "chats": items}
+
+
+@app.post("/api/chats", dependencies=authed)
+async def chats_post(request: Request):
+    """新建、切换、改名、收纳聊天窗口。"""
+    payload = await _read_json(request)
+    action = str(payload.get("action") or "new").strip()
+    current = _get_or_create_current_chat()
+
+    if action == "switch":
+        chat_id = str(payload.get("id", "")).strip()
+        if not db.chat_switch(chat_id):
+            raise HTTPException(404, "chat 不存在")
+        _emit(chat_id, {"type": "system", "subtype": "switched", "text": "（换到这间了）"})
+        items = db.chat_list("", chat_id)
+        return {"ok": True, "id": chat_id, "items": items, "chats": items}
 
     if action == "rename":
         chat_id = str(payload.get("id") or current).strip()
@@ -699,10 +1180,12 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         if m["content"] or m["role"] != "assistant"
     ]
     # 观影页的画面只在本次模型请求中出现，不把截帧或隐形提示写进聊天记录。
-    # 这样本地视频不会离开浏览器，历史记录也仍然是用户真正说过的话。
     if watch_context:
         title = str(watch_context.get("title") or "未命名视频")[:160]
-        at_ms = max(0, int(watch_context.get("at_ms") or 0))
+        try:
+            at_ms = max(0, int(watch_context.get("at_ms") or 0))
+        except (TypeError, ValueError):
+            at_ms = 0
         timestamp = f"{at_ms // 3_600_000:02d}:{(at_ms // 60_000) % 60:02d}:{(at_ms // 1000) % 60:02d}"
         subtitles = str(watch_context.get("subtitles") or "").strip()[:6000]
         note = (
@@ -716,7 +1199,6 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             if messages[index]["role"] == "user":
                 content = [{"type": "text", "text": str(messages[index]["content"]) + note}]
                 for image in watch_context.get("images") or []:
-                    # 仅接收浏览器刚截出的 data: 图片；长度在 API 层也有限制。
                     if isinstance(image, str) and image.startswith("data:image/"):
                         content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
                 messages[index] = {**messages[index], "content": content}
@@ -882,7 +1364,6 @@ async def watch_send(request: Request):
     task = asyncio.create_task(_run_ai_reply(chat_id, placeholder["id"], watch_context))
     _running_tasks[chat_id] = task
     return {"ok": True, "frames": len(images)}
-
 
 @app.post("/api/stop", dependencies=authed)
 async def stop():
