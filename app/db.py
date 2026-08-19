@@ -781,6 +781,12 @@ def message_add(chat_id: str, role: str, content: str) -> dict:
     return row
 
 
+def message_get(message_id: str) -> dict | None:
+    with conn() as cx:
+        row = cx.execute("SELECT rowid,* FROM messages WHERE id=?", (message_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def message_list(chat_id: str, limit: int = 400, before: int | None = None) -> list:
     with conn() as cx:
         if before:
@@ -1082,7 +1088,14 @@ def message_since(chat_id: str, since: int, limit: int = 200) -> list:
     return [dict(r) for r in rows]
 
 
-def message_update(msg_id: str, content: str) -> None:
+def message_update(msg_id: str, content: str) -> bool:
     with conn() as cx:
-        cx.execute("UPDATE messages SET content=? WHERE id=?", (content, msg_id))
+        cur = cx.execute("UPDATE messages SET content=? WHERE id=?", (content, msg_id))
+    return cur.rowcount > 0
+
+
+def message_delete(msg_id: str) -> bool:
+    with conn() as cx:
+        cur = cx.execute("DELETE FROM messages WHERE id=?", (msg_id,))
+    return cur.rowcount > 0
 

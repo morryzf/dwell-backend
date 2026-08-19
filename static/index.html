@@ -408,7 +408,7 @@ html[data-theme="dark"] .composer {
   .pill .ic { width: 14px; height: 14px; }
   #plusBtn, #instructionsBtn { width: 36px; height: 36px; border-radius: 50%; background: var(--panel); flex: none; display: flex; align-items: center; justify-content: center; }
   #plusBtn .ic, #instructionsBtn .ic { width: 17px; height: 17px; }
-  #instructionsBtn.on { color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent); }
+  #instructionsBtn.on, #mcpChatBtn.on { color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent); }
   .ctlrow .gap { flex: 1; }
   #send {
     flex: none; width: 38px; height: 38px; border-radius: 50%;
@@ -632,6 +632,8 @@ html[data-theme="dark"] .composer {
   .model-catalog-provider { color: var(--dim); font-size: 12px; white-space: nowrap; }
   .model-catalog-action { flex: none; min-width: 42px; min-height: 32px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); color: var(--text); font-size: 13px; font-weight: 700; }
   .model-catalog-action.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .msg-actions { display: flex; gap: 7px; margin-top: 7px; }
+  .msg-action { padding: 3px 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--dim); background: var(--panel); font-size: 12px; }
   .catalog-bar { display: flex; gap: 9px; margin: 14px 0 10px; }
   .catalog-bar .ap-in { flex: 1; min-width: 0; }
 
@@ -1662,6 +1664,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     <div class="ctlrow">
 <button id="plusBtn" title="添加照片和文件"><span class="ic" data-i="plus"></span></button>
 <button id="instructionsBtn" title="这间聊天的指令"><span class="ic" data-i="layers"></span></button>
+<button id="mcpChatBtn" title="这间聊天的工具"><span class="ic" data-i="tool"></span></button>
       <button class="pill" id="modelPill">…</button>
       <span class="gap"></span>
       <button id="send" title="发送"><span class="ic" data-i="arrowUp"></span></button>
@@ -1775,6 +1778,20 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   <div class="sheet"><div class="grabber"></div><div class="head">
     <button class="hbtn" data-close="mcp"><span class="ic" data-i="x"></span></button><div class="ht">MCP 工具</div>
   </div><div class="body" id="mcpBody"></div></div>
+</div>
+
+<div class="sheetWrap" id="chatMcpSheet">
+  <div class="shade" data-close="chatMcp"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="chatMcp"><span class="ic" data-i="x"></span></button><div class="ht">这间聊天的工具</div><div class="hspace"></div>
+  </div><div class="body" id="chatMcpBody"></div></div>
+</div>
+
+<div class="sheetWrap" id="editMessageSheet">
+  <div class="shade" data-close="editMessage"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="editMessage"><span class="ic" data-i="x"></span></button><div class="ht">编辑 AI 回复</div><div class="hspace"></div>
+  </div><div class="body" id="editMessageBody"></div></div>
 </div>
 
 <div class="sheetWrap" id="wakeTargetSheet">
@@ -2299,6 +2316,29 @@ function ensureGu() {
   guEl = d;
   scroll();
   return guEl;
+}
+function attachAssistantActions(el, message) {
+  if (!message || !message.id || el._actionsAttached) return;
+  el._actionsAttached = true;
+  const actions = document.createElement('div'); actions.className = 'msg-actions';
+  const edit = document.createElement('button'); edit.className = 'msg-action'; edit.textContent = '编辑'; edit.onclick = () => openMessageEditor(message);
+  const del = document.createElement('button'); del.className = 'msg-action'; del.textContent = '删除'; del.onclick = async () => {
+    if (!confirm('删除这条 AI 回复？之后的聊天不会再读到它。')) return;
+    try { const r = await fetch('api/messages/' + encodeURIComponent(message.id), {method:'DELETE'}); if (!r.ok) throw new Error('没有删除'); await loadSaid(); }
+    catch (e) { note('（没删掉：' + e.message + '）', 'err'); }
+  };
+  actions.append(edit, del); el.parentElement?.appendChild(actions);
+}
+function openMessageEditor(message) {
+  const body = document.getElementById('editMessageBody');
+  body.innerHTML = '<div class="ap-section"><div class="ap-section-title">修改后的内容会成为后续聊天的上下文</div><textarea class="ap-in" id="editMessageText" rows="12" maxlength="50000"></textarea><div class="ap-btns single"><button class="ap-b go" id="editMessageSave">保存修改</button></div><div class="ap-msg" id="editMessageMsg"></div></div>';
+  body.querySelector('#editMessageText').value = message.text || '';
+  body.querySelector('#editMessageSave').onclick = async () => {
+    const content = body.querySelector('#editMessageText').value.trim(); const msg = body.querySelector('#editMessageMsg');
+    try { const r = await (await fetch('api/messages/' + encodeURIComponent(message.id), {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})})).json(); if(!r.ok) throw new Error(r.detail||'没有保存'); sheets.editMessage.classList.remove('open'); await loadSaid(); }
+    catch (e) { msg.textContent = '没存上：' + e.message; msg.className = 'ap-msg on bad'; }
+  };
+  sheets.editMessage.classList.add('open');
 }
 function note(text, cls, sticky) {
   const [t1, t2] = toastSplit(text);
@@ -2913,6 +2953,7 @@ function renderSaid(msgs) {
       el.textContent = m.text;
       trimOrphanTail(el);            // 库里的半截消息拖着「课」这种孤尾——历史这条路也要摘
       renderRich(el);
+      attachAssistantActions(el, m);
       guEl = null;                   // 每条各归各位，别粘成一坨
     } else if (m.kind === 'think') {
       // 一轮思考在库里是好几条记录（想一段、歇一下、再想）。以前这里每条
@@ -3571,6 +3612,8 @@ document.addEventListener('touchend', (e) => {
 const sheets = {
   api: document.getElementById('apiSheet'),
   mcp: document.getElementById('mcpSheet'),
+  chatMcp: document.getElementById('chatMcpSheet'),
+  editMessage: document.getElementById('editMessageSheet'),
   wakeTarget: document.getElementById('wakeTargetSheet'),
   instructions: document.getElementById('instructionsSheet'),
   chatInstructions: document.getElementById('chatInstructionsSheet'),
@@ -5950,13 +5993,10 @@ document.getElementById('apiRow').onclick = () => {
 };
 
 async function loadMcp() {
-  const body = document.getElementById('mcpBody'); let servers = [], linked = [];
-  try { const [all, chat] = await Promise.all([fetch('api/mcp/servers',{cache:'no-store'}).then(r=>r.json()), fetch('api/mcp/chat',{cache:'no-store'}).then(r=>r.json())]); servers=all.items||[]; linked=chat.items||[]; } catch(e) {}
+  const body = document.getElementById('mcpBody'); let servers = [];
+  try { const all = await fetch('api/mcp/servers',{cache:'no-store'}).then(r=>r.json()); servers=all.items||[]; } catch(e) {}
   const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const selected = new Set(linked.filter(s=>s.selected).map(s=>s.id));
-  body.innerHTML = `<div class="sh-head"><h1>当前聊天的工具</h1><div class="sub">模型会自己决定是否调用已启用的工具。</div></div>`
-    + `<div class="ap-section"><div class="ap-section-title">这间聊天可用的工具</div><div class="group mcp-enabled" id="mcpEnableList">${servers.length ? servers.map(s=>`<label class="grow"><input type="checkbox" value="${esc(s.id)}" ${selected.has(s.id)?'checked':''}> ${esc(s.name)}<span class="val">${s.transport==='sse'?'SSE':'HTTP'}</span></label>`).join('') : '<div class="gnote">还没有工具服务器，先在下面添加。</div>'}</div>`
-    + `<div class="ap-btns single"><button class="ap-b go" id="mcpEnableSave">保存当前聊天可用工具</button></div></div><div class="group-label">添加或编辑服务器</div>`
+  body.innerHTML = `<div class="sh-head"><h1>MCP 工具服务器</h1><div class="sub">这里管理服务器；聊天输入框下方选择这间聊天要用哪些。</div></div><div class="group-label">添加或编辑服务器</div>`
     + `<div class="ap-section"><div class="ap-section-title">服务器连接</div>`
     + `<div class="ap-lb">已保存的服务器</div><select class="ap-in" id="mcpProfile"><option value="">＋ 新服务器</option>${servers.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select>`
     + `<div class="ap-lb">名称</div><input class="ap-in" id="mcpName" placeholder="例如：Ombre Brain"><div class="ap-lb">MCP 地址</div><input class="ap-in" id="mcpUrl" placeholder="https://example.com/mcp">`
@@ -5969,11 +6009,24 @@ async function loadMcp() {
   const fill=()=>{const s=servers.find(x=>x.id===profile.value); document.getElementById('mcpName').value=s?s.name:''; document.getElementById('mcpUrl').value=s?s.url:''; document.getElementById('mcpTransport').value=s?s.transport:'streamable_http'; document.getElementById('mcpHeaders').placeholder=s&&s.has_credentials?'凭据已保存 · 留空则不更改':'{"Authorization":"Bearer ..."}';}; profile.onchange=fill; fill();
   const say=(t,bad)=>{const m=document.getElementById('mcpMsg');m.textContent=t;m.className='ap-msg on'+(bad?' bad':'');};
   const vals=()=>{const raw=document.getElementById('mcpHeaders').value.trim();const v={id:profile.value,name:document.getElementById('mcpName').value.trim(),url:document.getElementById('mcpUrl').value.trim(),transport:document.getElementById('mcpTransport').value};if(raw)v.headers=JSON.parse(raw);return v;};
-  document.getElementById('mcpEnableSave').onclick=async()=>{const ids=[...document.querySelectorAll('#mcpEnableList input:checked')].map(x=>x.value);try{await fetch('api/mcp/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({server_ids:ids})});note('（这间可用的工具换好了）');}catch{note('（工具没换上，再试一次）','err');}};
   document.getElementById('mcpSave').onclick=async()=>{try{const r=await (await fetch('api/mcp/servers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(vals())})).json();if(!r.ok)throw new Error(r.detail||'没有保存');say('保存好了 · 现在可以测试并勾选给当前聊天');setTimeout(loadMcp,600);}catch(e){say('没存上：'+e.message,true);}};
   document.getElementById('mcpTest').onclick=async()=>{if(!profile.value){say('请先保存服务器，再测试连接',true);return;}say('正在连接…');try{const r=await (await fetch('api/mcp/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({server_id:profile.value})})).json();if(!r.ok)throw new Error(r.detail||'连接失败');say('通了 · 找到 '+r.count+' 个工具：'+r.tools.join('、'));}catch(e){say('没通：'+e.message,true);}};
 }
 document.getElementById('mcpRow').onclick=()=>{sheets.mcp.classList.add('open');loadMcp();};
+
+async function refreshMcpChatButton() {
+  const button = document.getElementById('mcpChatBtn');
+  try { const d = await (await fetch('api/mcp/chat',{cache:'no-store'})).json(); const count=(d.items||[]).filter(item=>item.selected).length; button.classList.toggle('on',count>0); button.title=count?'这间聊天已启用 '+count+' 个工具':'这间聊天的工具'; } catch { button.classList.remove('on'); }
+}
+async function loadChatMcp() {
+  const body=document.getElementById('chatMcpBody'); body.innerHTML='<div class="gnote">正在拿工具清单…</div>';
+  try { const d=await (await fetch('api/mcp/chat',{cache:'no-store'})).json(); const items=d.items||[];
+    body.innerHTML=`<div class="sh-head"><h1>当前聊天的工具</h1><div class="sub">模型会自己决定是否调用已启用的工具。</div></div>`+(items.length?`<div class="group" id="chatMcpList">${items.map(s=>`<label class="grow"><input type="checkbox" value="${instructionEsc(s.id)}" ${s.selected?'checked':''}> ${instructionEsc(s.name)}<span class="val">${s.transport==='sse'?'SSE':'HTTP'}</span></label>`).join('')}</div>`:'<div class="gnote">还没有服务器，先去设置里的 MCP 工具添加。</div>')+`<div class="ap-msg" id="chatMcpMsg"></div>`;
+    body.querySelectorAll('#chatMcpList input').forEach(input=>input.onchange=async()=>{const ids=[...body.querySelectorAll('#chatMcpList input:checked')].map(el=>el.value);const msg=body.querySelector('#chatMcpMsg');try{const r=await fetch('api/mcp/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({server_ids:ids})});if(!r.ok)throw new Error('没有保存');msg.textContent=ids.length?'已用于当前聊天':'这间聊天暂未启用工具';msg.className='ap-msg on';refreshMcpChatButton();}catch(e){msg.textContent='没保存上：'+e.message;msg.className='ap-msg on bad';}});
+  } catch { body.innerHTML='<div class="gnote">工具清单没拿到，等会儿再开一次。</div>'; }
+}
+document.getElementById('mcpChatBtn').onclick=()=>{sheets.chatMcp.classList.add('open');loadChatMcp();};
+refreshMcpChatButton();
 
 /* ---------- 聊天指令：设置页管理，输入框下的小叠层只管本聊天勾选 ---------- */
 const instructionEsc = s => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -6198,6 +6251,7 @@ function showChatHere(it) {
   earliestSeq = null; olderBtn = null;
   setTitle(it.name);
   refreshInstructionButton();
+  refreshMcpChatButton();
   loadSaid().then(() => poll());
 }
 
