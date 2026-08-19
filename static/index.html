@@ -1762,6 +1762,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>接入 API<span class="val" id="apiVal">…</span><span class="chev">›</span></button>
         <button class="grow" id="mcpRow"><span class="ic" data-i="bolt"></span>MCP 工具<span class="chev">›</span></button>
         <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
+        <button class="grow" id="kelivoImportRow"><span class="ic" data-i="plus"></span>导入 Kelivo 聊天记录<span class="chev">›</span></button>
       </div>
     </div>
   </div>
@@ -1805,6 +1806,13 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   <div class="sheet"><div class="grabber"></div><div class="head">
     <button class="hbtn" data-close="messageVersions"><span class="ic" data-i="x"></span></button><div class="ht">回复版本</div><div class="hspace"></div>
   </div><div class="body" id="messageVersionsBody"></div></div>
+</div>
+
+<div class="sheetWrap" id="kelivoImportSheet">
+  <div class="shade" data-close="kelivoImport"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="kelivoImport"><span class="ic" data-i="x"></span></button><div class="ht">导入 Kelivo</div><div class="hspace"></div>
+  </div><div class="body" id="kelivoImportBody"></div></div>
 </div>
 
 <div class="sheetWrap" id="wakeTargetSheet">
@@ -3684,6 +3692,7 @@ const sheets = {
   chatMcp: document.getElementById('chatMcpSheet'),
   editMessage: document.getElementById('editMessageSheet'),
   messageVersions: document.getElementById('messageVersionsSheet'),
+  kelivoImport: document.getElementById('kelivoImportSheet'),
   wakeTarget: document.getElementById('wakeTargetSheet'),
   instructions: document.getElementById('instructionsSheet'),
   chatInstructions: document.getElementById('chatInstructionsSheet'),
@@ -6097,6 +6106,35 @@ async function loadChatMcp() {
 }
 document.getElementById('mcpChatBtn').onclick=()=>{sheets.chatMcp.classList.add('open');loadChatMcp();};
 refreshMcpChatButton();
+
+/* ---------- Kelivo 导入：只上传数据库，绝不碰备份里的设置或密钥 ---------- */
+let kelivoImportToken = '';
+let kelivoImportConversations = [];
+function renderKelivoImport() {
+  const body = document.getElementById('kelivoImportBody');
+  body.innerHTML = `<div class="sh-head"><h1>导入 Kelivo 聊天记录</h1><div class="sub">只读取你选择的 kelivo.db；不会上传或导入 settings.json、API 密钥与供应商设置。</div></div><div class="ap-section"><div class="ap-section-title">1. 选择数据库文件</div><input class="ap-in" id="kelivoDbFile" type="file" accept=".db,application/octet-stream"><div class="gnote">在电脑中选择备份里的 database/kelivo.db。</div><div class="ap-btns single"><button class="ap-b" id="kelivoPreview">读取对话清单</button></div><div class="ap-msg" id="kelivoImportMsg"></div></div><div id="kelivoConversationList"></div>`;
+  const file = body.querySelector('#kelivoDbFile');
+  const msg = body.querySelector('#kelivoImportMsg');
+  body.querySelector('#kelivoPreview').onclick = async () => {
+    if (!file.files[0]) { msg.textContent = '先选择 kelivo.db 文件。'; msg.className = 'ap-msg on bad'; return; }
+    msg.textContent = '正在读取对话清单…'; msg.className = 'ap-msg on';
+    try {
+      const form = new FormData(); form.append('file', file.files[0]);
+      const r = await fetch('api/import/kelivo/preview',{method:'POST',body:form}); const d = await r.json(); if(!r.ok||!d.ok) throw new Error(d.detail||'没有读取到');
+      kelivoImportToken = d.token; kelivoImportConversations = d.conversations || []; msg.textContent = '找到了 ' + kelivoImportConversations.length + ' 个对话，请只选一个导入。';
+      const list = body.querySelector('#kelivoConversationList');
+      list.innerHTML = '<div class="ap-section"><div class="ap-section-title">2. 选择一个窗口</div><select class="ap-in" id="kelivoConversationSelect">' + kelivoImportConversations.map(item => '<option value="' + instructionEsc(item.id) + '">' + instructionEsc(item.title) + ' · ' + item.message_count + ' 条消息' + (item.attachment_count ? ' · ' + item.attachment_count + ' 个附件' : '') + '</option>').join('') + '</select><div class="gnote">本次先导入文字与工具调用记录；图片、文件附件会在后续单独处理。</div><div class="ap-btns single"><button class="ap-b go" id="kelivoConfirm">导入这个对话</button></div></div>';
+      list.querySelector('#kelivoConfirm').onclick = async () => {
+        const selected = list.querySelector('#kelivoConversationSelect'); const choice = kelivoImportConversations.find(item => item.id === selected.value);
+        if (!choice || !confirm('导入「' + choice.title + '」的 ' + choice.message_count + ' 条消息？这会新建一份 Dwell 对话。')) return;
+        msg.textContent = '正在导入…'; msg.className = 'ap-msg on';
+        try { const rr=await fetch('api/import/kelivo/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:kelivoImportToken,conversation_id:choice.id})}); const out=await rr.json(); if(!rr.ok||!out.ok) throw new Error(out.detail||'导入失败'); msg.textContent = '导入好了：' + out.message_count + ' 条消息，' + out.tool_count + ' 条工具记录。'; list.innerHTML = '<div class="gnote">现在可以关闭这里，到聊天列表打开「' + instructionEsc(out.chat.name) + '」。</div>'; }
+        catch(e){ msg.textContent='没导进来：'+e.message; msg.className='ap-msg on bad'; }
+      };
+    } catch (e) { msg.textContent = '没读到：' + e.message; msg.className = 'ap-msg on bad'; }
+  };
+}
+document.getElementById('kelivoImportRow').onclick=()=>{sheets.kelivoImport.classList.add('open');renderKelivoImport();};
 
 /* ---------- 聊天指令：设置页管理，输入框下的小叠层只管本聊天勾选 ---------- */
 const instructionEsc = s => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
