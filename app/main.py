@@ -1392,7 +1392,7 @@ async def send(request: Request):
     return {"ok": True}
 
 
- @app.post("/api/watch/observe", dependencies=authed)
+@app.post("/api/watch/observe", dependencies=authed)
 async def watch_observe(request: Request):
     """为当前本地画面生成一条不写入聊天记录的私有剧情笔记。"""
     payload = await _read_json(request)
