@@ -843,7 +843,7 @@ async def instructions_upsert(request: Request):
     if instruction_id and not db.instruction_get(instruction_id):
         raise HTTPException(404, "找不到这条指令")
     name = str(payload.get("name") or "").strip()[:80]
-    content = str(payload.get("content") or "").strip()[:8000]
+    content = str(payload.get("content") or "").strip()[:50000]
     if not name:
         raise HTTPException(400, "指令名称不能为空")
     if not content:

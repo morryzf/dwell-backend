@@ -6021,7 +6021,7 @@ async function loadInstructions(editId = '') {
       + (items.length ? `<div class="group">${items.map(item => `<button class="grow instruction-edit" data-id="${instructionEsc(item.id)}"><span>${instructionEsc(item.name)}</span><span class="val">编辑 ›</span></button>`).join('')}</div>` : '<div class="gnote">还没有指令。写第一条吧。</div>')
       + `<div class="ap-section"><div class="ap-section-title">${current ? '编辑指令' : '新建指令'}</div>`
       + `<div class="ap-lb">名称</div><input class="ap-in" id="instructionName" maxlength="80" placeholder="例如：OB">`
-      + `<div class="ap-lb">指令内容</div><textarea class="ap-in" id="instructionContent" rows="7" maxlength="8000" placeholder="写给模型看的规则或背景…"></textarea>`
+      + `<div class="ap-lb">指令内容</div><textarea class="ap-in" id="instructionContent" rows="7" maxlength="50000" placeholder="写给模型看的规则或背景…"></textarea>`
       + `<div class="ap-btns ${current ? '' : 'single'}"><button class="ap-b go" id="instructionSave">保存指令</button>${current ? '<button class="ap-b" id="instructionDelete">删除</button>' : ''}</div><div class="ap-msg" id="instructionMsg"></div></div>`;
     document.getElementById('instructionName').value = current ? current.name : '';
     document.getElementById('instructionContent').value = current ? current.content : '';
