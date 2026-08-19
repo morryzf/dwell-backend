@@ -1091,12 +1091,14 @@ async def messages_get(chat_id: str = "", limit: int = 400, before: int | None =
 async def messages_edit(message_id: str, request: Request):
     message = db.message_get(message_id)
     current = _get_or_create_current_chat()
-    if not message or message["chat_id"] != current or message["role"] != "assistant":
-        raise HTTPException(404, "找不到这条 AI 回复")
+    if not message or message["chat_id"] != current or message["role"] not in ("assistant", "user"):
+        raise HTTPException(404, "找不到这条消息")
     payload = await _read_json(request)
     content = str(payload.get("content") or "").strip()[:50000]
     if not content:
-        raise HTTPException(400, "回复不能是空的")
+        raise HTTPException(400, "消息不能是空的")
+    if message["role"] == "assistant" and message["content"] != content:
+        db.message_version_add(message_id, message["content"], "edited")
     db.message_update(message_id, content)
     return {"ok": True, "id": message_id, "content": content}
 
@@ -1105,9 +1107,36 @@ async def messages_edit(message_id: str, request: Request):
 async def messages_delete(message_id: str):
     message = db.message_get(message_id)
     current = _get_or_create_current_chat()
+    if not message or message["chat_id"] != current or message["role"] not in ("assistant", "user"):
+        raise HTTPException(404, "找不到这条消息")
+    db.message_delete(message_id)
+    return {"ok": True, "id": message_id}
+
+
+@app.get("/api/messages/{message_id}/versions", dependencies=authed)
+async def messages_versions(message_id: str):
+    message = db.message_get(message_id)
+    current = _get_or_create_current_chat()
     if not message or message["chat_id"] != current or message["role"] != "assistant":
         raise HTTPException(404, "找不到这条 AI 回复")
-    db.message_delete(message_id)
+    return {"ok": True, "current": message["content"], "versions": db.message_versions(message_id)}
+
+
+@app.post("/api/messages/{message_id}/regenerate", dependencies=authed)
+async def messages_regenerate(message_id: str):
+    message = db.message_get(message_id)
+    chat_id = _get_or_create_current_chat()
+    if not message or message["chat_id"] != chat_id or message["role"] != "assistant":
+        raise HTTPException(404, "找不到这条 AI 回复")
+    task = _running_tasks.get(chat_id)
+    if task and not task.done():
+        raise HTTPException(409, "这间聊天正在生成，请等它结束后再试")
+    if message["content"]:
+        db.message_version_add(message_id, message["content"], "regenerated")
+    db.message_update(message_id, "")
+    _emit(chat_id, {"type": "system", "subtype": "regenerating", "message_id": message_id})
+    task = asyncio.create_task(_run_ai_reply(chat_id, message_id))
+    _running_tasks[chat_id] = task
     return {"ok": True, "id": message_id}
 
 # ---------------------------------------------------------------- 聊天：发送 / 停止 / 长轮询

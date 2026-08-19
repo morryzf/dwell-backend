@@ -165,6 +165,17 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS ix_messages_chat ON messages(chat_id, made ASC);
 
+-- AI 回复的旧版本。重新生成或手动编辑时先存一份，当前 messages 表始终只保留
+-- 后续上下文真正会读到的那一版。
+CREATE TABLE IF NOT EXISTS message_versions (
+    id         TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    reason     TEXT NOT NULL DEFAULT '',
+    made       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_message_versions_message ON message_versions(message_id, made ASC);
+
 -- 全局设置。key-value，放"接收主动消息的 chat_id"这种单例。
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -1094,8 +1105,29 @@ def message_update(msg_id: str, content: str) -> bool:
     return cur.rowcount > 0
 
 
+def message_version_add(message_id: str, content: str, reason: str = "") -> dict:
+    row = {"id": new_id(), "message_id": message_id, "content": content,
+           "reason": reason, "made": int(time.time())}
+    with conn() as cx:
+        cx.execute(
+            "INSERT INTO message_versions (id,message_id,content,reason,made) "
+            "VALUES (:id,:message_id,:content,:reason,:made)", row,
+        )
+    return row
+
+
+def message_versions(message_id: str) -> list[dict]:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT * FROM message_versions WHERE message_id=? ORDER BY made DESC, rowid DESC",
+            (message_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def message_delete(msg_id: str) -> bool:
     with conn() as cx:
+        cx.execute("DELETE FROM message_versions WHERE message_id=?", (msg_id,))
         cur = cx.execute("DELETE FROM messages WHERE id=?", (msg_id,))
     return cur.rowcount > 0
 
