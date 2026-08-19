@@ -176,6 +176,19 @@ CREATE TABLE IF NOT EXISTS message_versions (
 );
 CREATE INDEX IF NOT EXISTS ix_message_versions_message ON message_versions(message_id, made ASC);
 
+-- 工具调用独立于 AI 正文保存。正文编辑、版本切换都不会吞掉工具参数或返回结果。
+CREATE TABLE IF NOT EXISTS tool_calls (
+    id                   TEXT PRIMARY KEY,
+    chat_id              TEXT NOT NULL,
+    assistant_message_id TEXT NOT NULL,
+    name                 TEXT NOT NULL,
+    arguments            TEXT NOT NULL DEFAULT '{}',
+    result               TEXT NOT NULL DEFAULT '',
+    is_error             INTEGER NOT NULL DEFAULT 0,
+    made                 INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_tool_calls_message ON tool_calls(assistant_message_id, made ASC);
+
 -- 全局设置。key-value，放"接收主动消息的 chat_id"这种单例。
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -817,6 +830,18 @@ def message_list(chat_id: str, limit: int = 400, before: int | None = None) -> l
 
 def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -> dict:
     rows = message_list(chat_id, limit, before)
+    assistant_ids = [row["id"] for row in rows if row["role"] == "assistant"]
+    tools_by_message: dict[str, list[dict]] = {}
+    if assistant_ids:
+        placeholders = ",".join("?" for _ in assistant_ids)
+        with conn() as cx:
+            tool_rows = cx.execute(
+                f"SELECT * FROM tool_calls WHERE assistant_message_id IN ({placeholders}) ORDER BY made ASC, rowid ASC",
+                assistant_ids,
+            ).fetchall()
+        for tool in tool_rows:
+            item = dict(tool)
+            tools_by_message.setdefault(item["assistant_message_id"], []).append(item)
     msgs = []
     for r in rows:
         role = r["role"]
@@ -828,6 +853,7 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
             "text": r["content"],
             "content": r["content"],
             "at": r["made"],
+            "tools": tools_by_message.get(r["id"], []) if role == "assistant" else [],
         })
     more = False
     if msgs:
@@ -1125,9 +1151,28 @@ def message_versions(message_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def tool_call_add(chat_id: str, assistant_message_id: str, name: str, arguments: str) -> dict:
+    row = {"id": new_id(), "chat_id": chat_id, "assistant_message_id": assistant_message_id,
+           "name": name, "arguments": arguments, "result": "", "is_error": 0,
+           "made": int(time.time())}
+    with conn() as cx:
+        cx.execute(
+            "INSERT INTO tool_calls (id,chat_id,assistant_message_id,name,arguments,result,is_error,made) "
+            "VALUES (:id,:chat_id,:assistant_message_id,:name,:arguments,:result,:is_error,:made)", row,
+        )
+    return row
+
+
+def tool_call_finish(tool_call_id: str, result: str, is_error: bool) -> bool:
+    with conn() as cx:
+        cur = cx.execute("UPDATE tool_calls SET result=?, is_error=? WHERE id=?", (result, int(is_error), tool_call_id))
+    return cur.rowcount > 0
+
+
 def message_delete(msg_id: str) -> bool:
     with conn() as cx:
         cx.execute("DELETE FROM message_versions WHERE message_id=?", (msg_id,))
+        cx.execute("DELETE FROM tool_calls WHERE assistant_message_id=?", (msg_id,))
         cur = cx.execute("DELETE FROM messages WHERE id=?", (msg_id,))
     return cur.rowcount > 0
 
