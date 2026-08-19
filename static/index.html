@@ -2810,14 +2810,14 @@ function verbOf(name, input) {
     case 'Edit':   return ['fileText', 'Updated', basename(input.file_path)];
     case 'Read':   return ['bookOpen', 'Read', basename(input.file_path)];
     case 'Glob': case 'Grep': return ['search', 'Searched', input.pattern || ''];
-    case 'WebSearch': return ['globe', 'Searched web', input.query || ''];
-    case 'WebFetch':  return ['globe', 'Fetched', input.url || ''];
+    case 'WebSearch': return ['globe', '网页搜索', input.query || ''];
+    case 'WebFetch':  return ['globe', '读取网页', input.url || ''];
     case 'Skill':  return ['book', 'Opened', input.skill || ''];
     case 'Task': case 'Agent': return ['box', 'Delegated', input.description || ''];
   }
   if (name.startsWith('mcp__')) {
     const parts = name.split('__');
-    return ['zap', 'Used', (parts[1] || '') + ' · ' + (parts[2] || '')];
+    return ['tool', '调用工具', parts[2] || ''];
   }
   return ['tool', 'Used', name];
 }
@@ -2995,6 +2995,12 @@ function renderSaid(msgs) {
   for (const m of msgs) {
     if (m.kind === 'me') { endThink(); addMe(m.text, m); }
     else if (m.kind === 'gu') {
+      for (const tool of (m.tools || [])) {
+        let input = {};
+        try { input = JSON.parse(tool.arguments || '{}'); } catch (e) {}
+        addToolUse({ id: tool.id, name: tool.name, input });
+        markToolDone(tool.id, !!tool.is_error, tool.result || '');
+      }
       endThink();                    // 该说正文了，思考那段收工
       const el = ensureGu();
       el._raw = m.text;
@@ -3173,6 +3179,8 @@ function handle(d) {
     document.querySelector('#log .row[data-message-id="' + CSS.escape(regeneratingMessageId) + '"]')?.remove();
     guEl = null; endThink(); closeGroup(); setBusy(true); petSet('thinking'); return;
   }
+  if (d.type === 'tool_call' && d.tool) { addToolUse(d.tool); return; }
+  if (d.type === 'tool_result') { markToolDone(d.tool_call_id, d.is_error, d.content); return; }
 
   if (d.type === 'stream_event') {
     const ev = d.event || {};
@@ -6078,12 +6086,12 @@ document.getElementById('mcpRow').onclick=()=>{sheets.mcp.classList.add('open');
 
 async function refreshMcpChatButton() {
   const button = document.getElementById('mcpChatBtn');
-  try { const d = await (await fetch('api/mcp/chat',{cache:'no-store'})).json(); const count=(d.items||[]).filter(item=>item.selected).length; button.classList.toggle('on',count>0); button.title=count?'这间聊天已启用 '+count+' 个工具':'这间聊天的工具'; } catch { button.classList.remove('on'); }
+  try { const d = await (await fetch('api/mcp/chat',{cache:'no-store'})).json(); const count=(d.items||[]).filter(item=>item.selected).length; button.classList.add('on'); button.title=count?'内置网页工具 + '+count+' 个 MCP 工具':'内置网页工具与这间聊天的 MCP 工具'; } catch { button.classList.add('on'); }
 }
 async function loadChatMcp() {
   const body=document.getElementById('chatMcpBody'); body.innerHTML='<div class="gnote">正在拿工具清单…</div>';
   try { const d=await (await fetch('api/mcp/chat',{cache:'no-store'})).json(); const items=d.items||[];
-    body.innerHTML=`<div class="sh-head"><h1>当前聊天的工具</h1><div class="sub">模型会自己决定是否调用已启用的工具。</div></div>`+(items.length?`<div class="group" id="chatMcpList">${items.map(s=>`<label class="grow"><input type="checkbox" value="${instructionEsc(s.id)}" ${s.selected?'checked':''}> ${instructionEsc(s.name)}<span class="val">${s.transport==='sse'?'SSE':'HTTP'}</span></label>`).join('')}</div>`:'<div class="gnote">还没有服务器，先去设置里的 MCP 工具添加。</div>')+`<div class="ap-msg" id="chatMcpMsg"></div>`;
+    body.innerHTML=`<div class="sh-head"><h1>当前聊天的工具</h1><div class="sub">模型会自己决定是否调用已启用的工具。</div></div><div class="ap-section"><div class="ap-section-title">内置网页工具</div><div class="gnote">网页搜索和读取网页链接已启用；它们只会访问公共 http(s) 地址。</div></div>`+(items.length?`<div class="group" id="chatMcpList">${items.map(s=>`<label class="grow"><input type="checkbox" value="${instructionEsc(s.id)}" ${s.selected?'checked':''}> ${instructionEsc(s.name)}<span class="val">${s.transport==='sse'?'SSE':'HTTP'}</span></label>`).join('')}</div>`:'<div class="gnote">还没有服务器，先去设置里的 MCP 工具添加。</div>')+`<div class="ap-msg" id="chatMcpMsg"></div>`;
     body.querySelectorAll('#chatMcpList input').forEach(input=>input.onchange=async()=>{const ids=[...body.querySelectorAll('#chatMcpList input:checked')].map(el=>el.value);const msg=body.querySelector('#chatMcpMsg');try{const r=await fetch('api/mcp/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({server_ids:ids})});if(!r.ok)throw new Error('没有保存');msg.textContent=ids.length?'已用于当前聊天':'这间聊天暂未启用工具';msg.className='ap-msg on';refreshMcpChatButton();}catch(e){msg.textContent='没保存上：'+e.message;msg.className='ap-msg on bad';}});
   } catch { body.innerHTML='<div class="gnote">工具清单没拿到，等会儿再开一次。</div>'; }
 }
