@@ -788,13 +788,13 @@ def chat_del(chat_id: str) -> bool:
 
 # ---------------------------------------------------------------- 消息
 
-def message_add(chat_id: str, role: str, content: str) -> dict:
+def message_add(chat_id: str, role: str, content: str, made: int | None = None) -> dict:
     row = {
         "id": new_id(),
         "chat_id": chat_id,
         "role": role,
         "content": content,
-        "made": int(time.time()),
+        "made": int(made if made is not None else time.time()),
     }
     with conn() as cx:
         cx.execute(

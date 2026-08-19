@@ -9,12 +9,14 @@
 
 import asyncio
 import os
+import tempfile
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import auth, db, provider_secrets
@@ -22,6 +24,7 @@ from app.pet_assets import ensure_pet_assets
 from app.llm_client import stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
 from app.web_tools import WebToolError, web_fetch, web_search
+from app.kelivo_import import KelivoImportError, import_conversation as kelivo_import_conversation, preview as kelivo_preview
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
@@ -29,6 +32,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 # 正在跑的 AI 回复任务。key=chat_id，value=asyncio.Task
 _running_tasks: dict[str, asyncio.Task] = {}
+_kelivo_uploads: dict[str, tuple[str, float]] = {}
 
 WEB_TOOLS = [
     {"type": "function", "function": {
@@ -1099,6 +1103,54 @@ async def messages_get(chat_id: str = "", limit: int = 400, before: int | None =
     return {"ok": True, **data}
 
 
+@app.post("/api/import/kelivo/preview", dependencies=authed)
+async def kelivo_import_preview(file: UploadFile = File(...)):
+    """Receive only a Kelivo .db file, inspect its conversations, and cache it briefly."""
+    if not (file.filename or "").lower().endswith(".db"):
+        raise HTTPException(400, "请选择 Kelivo 导出的 kelivo.db 文件")
+    temp = tempfile.NamedTemporaryFile(prefix="dwell-kelivo-", suffix=".db", delete=False)
+    size = 0
+    try:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > 40 * 1024 * 1024:
+                raise HTTPException(413, "数据库文件超过 40MB，暂时不能导入")
+            temp.write(chunk)
+        temp.close()
+        conversations = kelivo_preview(temp.name)
+    except HTTPException:
+        temp.close(); Path(temp.name).unlink(missing_ok=True)
+        raise
+    except (KelivoImportError, OSError) as exc:
+        temp.close(); Path(temp.name).unlink(missing_ok=True)
+        raise HTTPException(400, str(exc)) from exc
+    token = uuid.uuid4().hex
+    now = time.time()
+    for stale, (path, expires) in list(_kelivo_uploads.items()):
+        if expires < now:
+            Path(path).unlink(missing_ok=True); _kelivo_uploads.pop(stale, None)
+    _kelivo_uploads[token] = (temp.name, now + 15 * 60)
+    return {"ok": True, "token": token, "conversations": conversations}
+
+
+@app.post("/api/import/kelivo/confirm", dependencies=authed)
+async def kelivo_import_confirm(request: Request):
+    payload = await _read_json(request)
+    token, conversation_id = str(payload.get("token") or ""), str(payload.get("conversation_id") or "")
+    entry = _kelivo_uploads.pop(token, None)
+    if not entry or entry[1] < time.time():
+        if entry:
+            Path(entry[0]).unlink(missing_ok=True)
+        raise HTTPException(400, "导入预览已过期，请重新选择文件")
+    try:
+        result = kelivo_import_conversation(entry[0], conversation_id)
+    except KelivoImportError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    finally:
+        Path(entry[0]).unlink(missing_ok=True)
+    return {"ok": True, **result}
+
+
 @app.patch("/api/messages/{message_id}", dependencies=authed)
 async def messages_edit(message_id: str, request: Request):
     message = db.message_get(message_id)
@@ -1180,12 +1232,10 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         if m["content"] or m["role"] != "assistant"
     ]
     # 观影页的画面只在本次模型请求中出现，不把截帧或隐形提示写进聊天记录。
+    # 这样本地视频不会离开浏览器，历史记录也仍然是用户真正说过的话。
     if watch_context:
         title = str(watch_context.get("title") or "未命名视频")[:160]
-        try:
-            at_ms = max(0, int(watch_context.get("at_ms") or 0))
-        except (TypeError, ValueError):
-            at_ms = 0
+        at_ms = max(0, int(watch_context.get("at_ms") or 0))
         timestamp = f"{at_ms // 3_600_000:02d}:{(at_ms // 60_000) % 60:02d}:{(at_ms // 1000) % 60:02d}"
         subtitles = str(watch_context.get("subtitles") or "").strip()[:6000]
         note = (
@@ -1199,6 +1249,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             if messages[index]["role"] == "user":
                 content = [{"type": "text", "text": str(messages[index]["content"]) + note}]
                 for image in watch_context.get("images") or []:
+                    # 仅接收浏览器刚截出的 data: 图片；长度在 API 层也有限制。
                     if isinstance(image, str) and image.startswith("data:image/"):
                         content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
                 messages[index] = {**messages[index], "content": content}
@@ -1364,6 +1415,7 @@ async def watch_send(request: Request):
     task = asyncio.create_task(_run_ai_reply(chat_id, placeholder["id"], watch_context))
     _running_tasks[chat_id] = task
     return {"ok": True, "frames": len(images)}
+
 
 @app.post("/api/stop", dependencies=authed)
 async def stop():
