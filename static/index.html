@@ -1747,6 +1747,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
         <button class="grow" id="pushRow"><span class="ic" data-i="bell"></span>手机通知<span class="sw wait" id="pushSw"></span></button>
         <button class="grow static" id="aliveRow"><span class="ic" data-i="activity"></span>后端在跑吗<span class="val" id="aliveVal">看看…</span></button>
         <button class="grow" id="wakeRow"><span class="ic" data-i="alarm"></span>夜里让他自己醒<span class="sw wait" id="wakeSw"></span></button>
+        <button class="grow" id="wakeTargetRow"><span class="ic" data-i="chat"></span>接收主动消息的窗口<span class="val" id="wakeTargetVal">…</span><span class="chev">›</span></button>
         <button class="grow" id="rewakeRow"><span class="ic" data-i="refresh"></span>叫他重新醒一次<span class="val" id="rewakeVal">他要是卡住了就按</span></button>
         <button class="grow" id="themeRow"><span class="ic" data-i="moon"></span>夜间模式<span class="sw wait" id="themeSw"></span></button>
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>接入 API<span class="val" id="apiVal">…</span><span class="chev">›</span></button>
@@ -1774,6 +1775,13 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   <div class="sheet"><div class="grabber"></div><div class="head">
     <button class="hbtn" data-close="mcp"><span class="ic" data-i="x"></span></button><div class="ht">MCP 工具</div>
   </div><div class="body" id="mcpBody"></div></div>
+</div>
+
+<div class="sheetWrap" id="wakeTargetSheet">
+  <div class="shade" data-close="wakeTarget"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="wakeTarget"><span class="ic" data-i="x"></span></button><div class="ht">主动消息发到哪里</div><div class="hspace"></div>
+  </div><div class="body" id="wakeTargetBody"></div></div>
 </div>
 
 <div class="sheetWrap" id="instructionsSheet">
@@ -3563,6 +3571,7 @@ document.addEventListener('touchend', (e) => {
 const sheets = {
   api: document.getElementById('apiSheet'),
   mcp: document.getElementById('mcpSheet'),
+  wakeTarget: document.getElementById('wakeTargetSheet'),
   instructions: document.getElementById('instructionsSheet'),
   chatInstructions: document.getElementById('chatInstructionsSheet'),
   settings: document.getElementById('settingsSheet'),
@@ -5584,6 +5593,41 @@ document.getElementById('wakeRow').onclick = async () => {
   } catch { note('（没改成，再试一次）', 'err'); }
 };
 wakeState();
+
+async function refreshWakeTarget() {
+  const val = document.getElementById('wakeTargetVal');
+  try {
+    const [target, chats] = await Promise.all([
+      fetch('api/wake-target', {cache:'no-store'}).then(r => r.json()),
+      fetch('api/chats?scope=live', {cache:'no-store'}).then(r => r.json()),
+    ]);
+    const chat = (chats.items || []).find(item => item.id === target.chat_id);
+    val.textContent = chat ? (chat.name || '新对话') : '还没选';
+  } catch { val.textContent = '问不到'; }
+}
+async function loadWakeTarget() {
+  const body = document.getElementById('wakeTargetBody');
+  body.innerHTML = '<div class="gnote">正在找聊天窗口…</div>';
+  try {
+    const [target, chats] = await Promise.all([
+      fetch('api/wake-target', {cache:'no-store'}).then(r => r.json()),
+      fetch('api/chats?scope=live', {cache:'no-store'}).then(r => r.json()),
+    ]);
+    const items = chats.items || [];
+    body.innerHTML = `<div class="sh-head"><h1>接收主动消息的窗口</h1><div class="sub">heartbeat 主动说话时，永远只会送到这里。</div></div>`
+      + (items.length ? `<div class="group">${items.map(item => `<button class="grow wake-target-choice" data-id="${instructionEsc(item.id)}"><span>${instructionEsc(item.name || '新对话')}</span><span class="val">${item.id === target.chat_id ? '正在接收 ✓' : (item.current ? '当前聊天' : '')}</span></button>`).join('')}</div>` : '<div class="gnote">还没有聊天窗口。</div>')
+      + `<div class="ap-note">新建的其他聊天不会改变这里；删除当前目标时，系统会切到最近创建的聊天。</div>`;
+    body.querySelectorAll('.wake-target-choice').forEach(button => button.onclick = async () => {
+      try {
+        const r = await fetch('api/wake-target', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:button.dataset.id})});
+        if (!r.ok) throw new Error('没有保存');
+        sheets.wakeTarget.classList.remove('open'); refreshWakeTarget(); note('（以后他主动找你，就到这间）');
+      } catch (e) { note('（没换上，再试一次）', 'err'); }
+    });
+  } catch { body.innerHTML = '<div class="gnote">窗口清单没拿到，等会儿再开一次。</div>'; }
+}
+document.getElementById('wakeTargetRow').onclick = () => { sheets.wakeTarget.classList.add('open'); loadWakeTarget(); };
+refreshWakeTarget();
 
 function gongRow(role, text, think) {
   const r = document.createElement('div');
