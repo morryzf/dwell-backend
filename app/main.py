@@ -669,6 +669,77 @@ async def providers_delete(provider_id: str):
     return {"ok": True}
 
 
+# ---------------------------------------------------------------- 模型目录与常用模型
+
+def _model_catalog_item(row: dict, providers: dict[str, dict]) -> dict:
+    provider = providers.get(row["provider_id"], {})
+    return {**row, "provider_name": provider.get("name", "未知供应商")}
+
+
+@app.get("/api/model-catalog", dependencies=authed)
+async def model_catalog_get(provider_id: str = ""):
+    providers = db.provider_list()
+    provider_map = {item["id"]: item for item in providers}
+    if provider_id and provider_id not in provider_map:
+        raise HTTPException(404, "找不到这个供应商")
+    items = [_model_catalog_item(item, provider_map) for item in db.provider_model_list(provider_id)]
+    return {"ok": True, "providers": providers, "items": items,
+            "favorites": [item for item in items if item["favorite"]]}
+
+
+@app.post("/api/model-catalog", dependencies=authed)
+async def model_catalog_upsert(request: Request):
+    payload = await _read_json(request)
+    provider_id = str(payload.get("provider_id") or "").strip()
+    model_id = str(payload.get("model_id") or "").strip()[:200]
+    provider = db.provider_get(provider_id)
+    if not provider or not provider["enabled"]:
+        raise HTTPException(400, "所选供应商不存在或已停用")
+    if not model_id:
+        raise HTTPException(400, "模型名不能为空")
+    favorite = bool(payload.get("favorite", True))
+    manual = bool(payload.get("manual", False))
+    saved = db.provider_model_upsert(provider_id, model_id, favorite=favorite, manual=manual)
+    return {"ok": True, "item": _model_catalog_item(saved, {provider_id: provider})}
+
+
+@app.post("/api/model-catalog/refresh", dependencies=authed)
+async def model_catalog_refresh(request: Request):
+    payload = await _read_json(request)
+    provider_id = str(payload.get("provider_id") or "").strip()
+    provider = db.provider_get(provider_id)
+    if not provider or not provider["enabled"]:
+        raise HTTPException(400, "所选供应商不存在或已停用")
+    if not provider.get("api_key_box"):
+        raise HTTPException(400, "这个供应商还没有保存 API 密钥")
+    try:
+        token = provider_secrets.decrypt_api_key(provider["api_key_box"])
+    except provider_secrets.SecretConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    url = provider["base_url"].rstrip("/") + "/models"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(35.0, connect=15.0)) as client:
+            response = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+    except httpx.RequestError as exc:
+        return {"ok": False, "detail": f"无法连接供应商：{exc}", "url": url}
+    if response.status_code >= 400:
+        return {"ok": False, "detail": response.text[:500], "code": response.status_code, "url": url}
+    try:
+        raw_items = response.json().get("data") or []
+    except ValueError:
+        return {"ok": False, "detail": "供应商返回的不是模型列表 JSON", "url": url}
+    model_ids = []
+    for item in raw_items:
+        model_id = item if isinstance(item, str) else (item.get("id") if isinstance(item, dict) else "")
+        model_id = str(model_id or "").strip()[:200]
+        if model_id:
+            model_ids.append(model_id)
+    if not model_ids:
+        return {"ok": False, "detail": "供应商没有返回可识别的模型 ID", "url": url}
+    count = db.provider_models_refresh(provider_id, model_ids)
+    return {"ok": True, "count": count, "url": url}
+
+
 # ---------------------------------------------------------------- MCP 服务器
 
 def _mcp_public(row: dict) -> dict:

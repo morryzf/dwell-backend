@@ -626,6 +626,14 @@ html[data-theme="dark"] .composer {
   .ap-note { margin: 14px 2px 0; padding: 12px 13px; border-left: 3px solid var(--accent-soft); border-radius: 0 10px 10px 0; color: var(--dim); background: color-mix(in srgb, var(--card) 68%, transparent); font-size: 13.5px; line-height: 1.7; }
   .mcp-enabled { margin: 14px 0 0; }
   .mcp-enabled input { width: 18px; height: 18px; accent-color: var(--accent); }
+  .model-catalog-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 14px; border-top: 1px solid var(--line); }
+  .model-catalog-row:first-child { border-top: 0; }
+  .model-catalog-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .model-catalog-provider { color: var(--dim); font-size: 12px; white-space: nowrap; }
+  .model-catalog-action { flex: none; min-width: 42px; min-height: 32px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); color: var(--text); font-size: 13px; font-weight: 700; }
+  .model-catalog-action.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .catalog-bar { display: flex; gap: 9px; margin: 14px 0 10px; }
+  .catalog-bar .ap-in { flex: 1; min-width: 0; }
 
   /* Usage */
   .ucard { background: var(--panel); border-radius: 18px; padding: 18px 20px; }
@@ -5829,6 +5837,8 @@ async function loadApi() {
     + `<div class="ap-btns"><button class="ap-b" id="apTest">试一试</button>`
     + `<button class="ap-b go" id="apSave">保存并用于当前聊天</button></div>`
     + `<div class="ap-msg" id="apMsg"></div></div>`
+    + `<div class="ap-section"><div class="ap-section-title">模型目录</div><div class="sub">获取供应商的模型后，挑进常用模型；聊天页只显示常用项。</div>`
+    + `<div class="ap-btns single"><button class="ap-b" id="apOpenCatalog">管理模型与常用项</button></div></div>`
     + `<div class="ap-note">密钥经服务器加密后保存，网页之后只能看到“已保存”，拿不回来。<br>`
     + `「试一试」只测试当前填写的地址、密钥和模型，不会保存它们。<br>`
     + `保存后，当前聊天直接走这里选的供应商；其他聊天不受影响。</div>`;
@@ -5873,6 +5883,7 @@ async function loadApi() {
       setTimeout(loadApi, 800);
     } catch (e) { say('没存上：' + e.message, true); }
   };
+  document.getElementById('apOpenCatalog').onclick = () => { sheets.api.classList.remove('open'); openProviderModelPicker('browse'); };
 }
 
 /* 外观：跟随系统 → 常亮 → 常暗 → 转回来。
@@ -6466,6 +6477,88 @@ async function pickEffort(e) {
     setModelPill(d.model || '');
   } catch { setModelPill(''); }
 })();
+
+/* ---------- 供应商模型库：常用在前，完整目录按需打开 ---------- */
+let catalogMode = 'favorites';
+let catalogData = { providers: [], items: [], favorites: [] };
+let catalogProviderId = '';
+
+async function getModelCatalog() {
+  const d = await (await fetch('api/model-catalog', {cache:'no-store'})).json();
+  if (!d.ok) throw new Error(d.detail || '模型目录没有拿到');
+  catalogData = d;
+  if (!catalogProviderId && d.providers.length) catalogProviderId = d.providers[0].id;
+}
+async function chooseCatalogModel(item) {
+  try {
+    const r = await (await fetch('api/model', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:item.provider_id,model:item.model_id})})).json();
+    if (!r.ok) throw new Error(r.detail || '没有切换');
+    setModelPill(item.model_id); modelSheetEl.classList.remove('open');
+    note('（这间聊天换成 ' + item.model_id + ' 了）');
+  } catch (e) { note('（没换上：' + e.message + '）', 'err'); }
+}
+async function setCatalogFavorite(item, favorite) {
+  try {
+    const r = await (await fetch('api/model-catalog', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:item.provider_id,model_id:item.model_id,favorite})})).json();
+    if (!r.ok) throw new Error(r.detail || '没有保存');
+    await getModelCatalog(); renderProviderModelPicker();
+  } catch (e) { note('（常用模型没改上：' + e.message + '）', 'err'); }
+}
+function catalogRow(item, compact) {
+  const row = document.createElement('div'); row.className = 'model-catalog-row';
+  const name = document.createElement('span'); name.className = 'model-catalog-name'; name.textContent = item.model_id;
+  const provider = document.createElement('span'); provider.className = 'model-catalog-provider'; provider.textContent = item.provider_name || '';
+  const use = document.createElement('button'); use.className = 'model-catalog-action primary'; use.textContent = '使用'; use.onclick = () => chooseCatalogModel(item);
+  row.append(name, provider, use);
+  if (!compact) {
+    const fav = document.createElement('button'); fav.className = 'model-catalog-action'; fav.textContent = item.favorite ? '已常用' : '＋ 常用'; fav.onclick = () => setCatalogFavorite(item, !item.favorite); row.appendChild(fav);
+  } else {
+    const fav = document.createElement('button'); fav.className = 'model-catalog-action'; fav.textContent = '−'; fav.title = '移出常用'; fav.onclick = () => setCatalogFavorite(item, false); row.appendChild(fav);
+  }
+  return row;
+}
+function renderProviderModelPicker() {
+  modelBody.innerHTML = '';
+  modelTitle.textContent = catalogMode === 'favorites' ? '切换模型' : '模型目录';
+  const top = document.createElement('div'); top.className = 'catalog-bar';
+  const change = document.createElement('button'); change.className = 'ap-b'; change.textContent = catalogMode === 'favorites' ? '浏览模型库' : '← 常用模型';
+  change.onclick = () => { catalogMode = catalogMode === 'favorites' ? 'browse' : 'favorites'; renderProviderModelPicker(); };
+  top.appendChild(change); modelBody.appendChild(top);
+  if (catalogMode === 'favorites') {
+    const label = document.createElement('div'); label.className = 'group-label'; label.textContent = '常用模型'; modelBody.appendChild(label);
+    if (!catalogData.favorites.length) {
+      const empty = document.createElement('div'); empty.className = 'gnote'; empty.textContent = '还没有常用模型。去模型目录获取或手动添加，然后点「＋ 常用」。'; modelBody.appendChild(empty);
+    } else {
+      const group = document.createElement('div'); group.className = 'group'; catalogData.favorites.forEach(item => group.appendChild(catalogRow(item, true))); modelBody.appendChild(group);
+    }
+    return;
+  }
+  const select = document.createElement('select'); select.className = 'ap-in';
+  catalogData.providers.forEach(p => { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; if (p.id === catalogProviderId) o.selected = true; select.appendChild(o); });
+  select.onchange = () => { catalogProviderId = select.value; renderProviderModelPicker(); };
+  const refresh = document.createElement('button'); refresh.className = 'ap-b'; refresh.textContent = '获取 / 刷新';
+  refresh.onclick = async () => {
+    refresh.textContent = '正在获取…'; refresh.disabled = true;
+    try { const r = await (await fetch('api/model-catalog/refresh', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:catalogProviderId})})).json(); if (!r.ok) throw new Error(r.detail || '没有拿到模型'); await getModelCatalog(); renderProviderModelPicker(); note('（找到了 ' + r.count + ' 个模型）'); }
+    catch (e) { refresh.textContent = '获取失败'; note('（模型目录没取到：' + e.message + '）', 'err'); }
+  };
+  const controls = document.createElement('div'); controls.className = 'catalog-bar'; controls.append(select, refresh); modelBody.appendChild(controls);
+  const search = document.createElement('input'); search.className = 'ap-in'; search.placeholder = '输入模型名筛选'; modelBody.appendChild(search);
+  const group = document.createElement('div'); group.className = 'group'; group.style.marginTop = '12px'; modelBody.appendChild(group);
+  const all = () => catalogData.items.filter(item => item.provider_id === catalogProviderId && item.model_id.toLowerCase().includes(search.value.trim().toLowerCase())).slice(0, 300);
+  const draw = () => { group.innerHTML = ''; const items = all(); if (!items.length) { group.innerHTML = '<div class="gnote">还没有模型。先点「获取 / 刷新」，或在下面手动添加。</div>'; } else items.forEach(item => group.appendChild(catalogRow(item, false))); };
+  search.oninput = draw; draw();
+  const manual = document.createElement('div'); manual.className = 'ap-section'; manual.innerHTML = '<div class="ap-section-title">手动添加</div><div class="ap-lb">模型原始名称</div><input class="ap-in" id="catalogManualModel" placeholder="例如：[AG]gemini-3.5-flash-low"><div class="ap-btns single"><button class="ap-b" id="catalogManualSave">添加到常用</button></div>';
+  manual.querySelector('#catalogManualSave').onclick = async () => { const model_id = manual.querySelector('#catalogManualModel').value.trim(); if (!model_id) return; try { const r=await (await fetch('api/model-catalog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:catalogProviderId,model_id,favorite:true,manual:true})})).json(); if(!r.ok) throw new Error(r.detail||'没有保存'); await getModelCatalog(); renderProviderModelPicker(); } catch(e) { note('（手动添加失败：'+e.message+'）','err'); } };
+  modelBody.appendChild(manual);
+}
+async function openProviderModelPicker(mode = 'favorites') {
+  catalogMode = mode; modelTitle.textContent = '模型'; modelBody.innerHTML = '<div class="gnote">正在打开模型目录…</div>'; modelSheetEl.classList.add('open');
+  modelBack.innerHTML = ''; modelBack.appendChild(icEl('x', 16)); modelBack.onclick = () => modelSheetEl.classList.remove('open');
+  try { await getModelCatalog(); renderProviderModelPicker(); }
+  catch (e) { modelBody.innerHTML = '<div class="gnote">模型目录没拿到：' + instructionEsc(e.message) + '</div>'; }
+}
+pill.onclick = () => openProviderModelPicker('favorites');
 
 /* ---------- 添加照片和文件 ---------- */
 document.getElementById('plusBtn').onclick = () => sheets.add.classList.add('open');
