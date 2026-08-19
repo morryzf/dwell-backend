@@ -222,6 +222,19 @@ CREATE TABLE IF NOT EXISTS chat_instruction_presets (
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
     FOREIGN KEY (instruction_id) REFERENCES instruction_presets(id) ON DELETE CASCADE
 );
+
+-- 每家供应商拉取到的模型目录。收藏是用户的常用清单，不会改变供应商原始模型 ID。
+CREATE TABLE IF NOT EXISTS provider_models (
+    provider_id TEXT NOT NULL,
+    model_id    TEXT NOT NULL,
+    favorite    INTEGER NOT NULL DEFAULT 0,
+    manual      INTEGER NOT NULL DEFAULT 0,
+    made        INTEGER NOT NULL,
+    updated     INTEGER NOT NULL,
+    PRIMARY KEY (provider_id, model_id),
+    FOREIGN KEY (provider_id) REFERENCES provider_profiles(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_provider_models_favorite ON provider_models(favorite, updated DESC);
 """
 
 
@@ -874,6 +887,42 @@ def provider_in_use(provider_id: str) -> bool:
             "SELECT 1 FROM chats WHERE provider_id=? LIMIT 1", (provider_id,)
         ).fetchone()
     return bool(row)
+
+
+def provider_model_list(provider_id: str = "") -> list[dict]:
+    with conn() as cx:
+        if provider_id:
+            rows = cx.execute(
+                "SELECT * FROM provider_models WHERE provider_id=? ORDER BY favorite DESC, model_id COLLATE NOCASE",
+                (provider_id,),
+            ).fetchall()
+        else:
+            rows = cx.execute(
+                "SELECT * FROM provider_models ORDER BY favorite DESC, updated DESC, model_id COLLATE NOCASE"
+            ).fetchall()
+    return [{**dict(row), "favorite": bool(row["favorite"]), "manual": bool(row["manual"])} for row in rows]
+
+
+def provider_model_upsert(provider_id: str, model_id: str, favorite: bool | None = None,
+                          manual: bool | None = None) -> dict:
+    now = int(time.time())
+    old = next((item for item in provider_model_list(provider_id) if item["model_id"] == model_id), None)
+    fav = int(favorite if favorite is not None else (old or {}).get("favorite", False))
+    is_manual = int(manual if manual is not None else (old or {}).get("manual", False))
+    with conn() as cx:
+        cx.execute(
+            "INSERT INTO provider_models (provider_id,model_id,favorite,manual,made,updated) VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(provider_id,model_id) DO UPDATE SET favorite=excluded.favorite,manual=excluded.manual,updated=excluded.updated",
+            (provider_id, model_id, fav, is_manual, now, now),
+        )
+        row = cx.execute("SELECT * FROM provider_models WHERE provider_id=? AND model_id=?", (provider_id, model_id)).fetchone()
+    return {**dict(row), "favorite": bool(row["favorite"]), "manual": bool(row["manual"])}
+
+
+def provider_models_refresh(provider_id: str, model_ids: list[str]) -> int:
+    for model_id in dict.fromkeys(model_ids):
+        provider_model_upsert(provider_id, model_id, manual=False)
+    return len(list(dict.fromkeys(model_ids)))
 
 
 # ---------------------------------------------------------------- MCP 工具服务器
