@@ -1220,7 +1220,8 @@ def _get_or_create_current_chat() -> str:
     return chat["id"]
 
 
-async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None):
+async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None,
+                        proactive_watch: bool = False):
     """调用当前聊天所选供应商，边收边发事件给前端。"""
     history = db.message_list(chat_id, limit=100)
     instructions = [
@@ -1250,15 +1251,30 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         summary = str(watch_context.get("summary") or "").strip()[:3000]
         if summary:
             note += f"\nCloudy 刚刚自己整理的当前剧情笔记：\n{summary}"
-        for index in range(len(messages) - 1, -1, -1):
-            if messages[index]["role"] == "user":
-                content = [{"type": "text", "text": str(messages[index]["content"]) + note}]
-                for image in watch_context.get("images") or []:
-                    # 仅接收浏览器刚截出的 data: 图片；长度在 API 层也有限制。
-                    if isinstance(image, str) and image.startswith("data:image/"):
-                        content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
-                messages[index] = {**messages[index], "content": content}
-                break
+        images = [
+            image for image in (watch_context.get("images") or [])
+            if isinstance(image, str) and image.startswith("data:image/")
+        ]
+        if proactive_watch:
+            prompt = (
+                "【内部观影提醒】你刚收到当前画面和这段已播放剧情。"
+                "请像正在一起看的人那样，主动发一条自然、简短、无剧透的反应；"
+                "可以提画面细节、情绪或线索，但不要解释系统、截图、时间戳或这条指令。"
+            )
+            messages.append({"role": "user", "content": [
+                {"type": "text", "text": prompt + note},
+                *[{"type": "image_url", "image_url": {"url": image, "detail": "low"}} for image in images],
+            ]})
+        else:
+            for index in range(len(messages) - 1, -1, -1):
+                if messages[index]["role"] == "user":
+                    content = [{"type": "text", "text": str(messages[index]["content"]) + note}]
+                    content.extend(
+                        {"type": "image_url", "image_url": {"url": image, "detail": "low"}}
+                        for image in images
+                    )
+                    messages[index] = {**messages[index], "content": content}
+                    break
     buf = []
     selection = db.chat_model_get(chat_id)
     provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
@@ -1390,6 +1406,41 @@ async def send(request: Request):
     _running_tasks[chat_id] = task
 
     return {"ok": True}
+
+
+@app.post("/api/watch/proactive", dependencies=authed)
+async def watch_proactive(request: Request):
+    """把当前画面交给 Cloudy，并让他主动发一条文字反应；图片不落库。"""
+    payload = await _read_json(request)
+    chat_id = str(payload.get("chat_id", "")).strip()
+    if not chat_id or not db.chat_get(chat_id):
+        raise HTTPException(404, "请先选择一个存在的聊天")
+    running = _running_tasks.get(chat_id)
+    if running and not running.done():
+        return {"ok": True, "scheduled": False, "reason": "chat_busy"}
+
+    image = str(payload.get("image") or "")
+    if not image.startswith("data:image/") or len(image) > 1_000_000:
+        raise HTTPException(400, "需要一张有效且较小的当前截帧")
+    try:
+        at_ms = max(0, int(payload.get("at_ms") or 0))
+    except (TypeError, ValueError):
+        at_ms = 0
+    watch_id = str(payload.get("watch_id", "")).strip()[:100]
+    saved_note = _watch_notes.get((chat_id, watch_id), {}) if watch_id else {}
+    context = {
+        "title": str(payload.get("title") or "未命名视频"),
+        "at_ms": at_ms,
+        "subtitles": str(payload.get("subtitles") or ""),
+        "images": [image],
+        "summary": saved_note.get("summary", ""),
+    }
+    placeholder = db.message_add(chat_id, "assistant", "")
+    task = asyncio.create_task(
+        _run_ai_reply(chat_id, placeholder["id"], context, proactive_watch=True)
+    )
+    _running_tasks[chat_id] = task
+    return {"ok": True, "scheduled": True}
 
 
 @app.post("/api/watch/observe", dependencies=authed)
