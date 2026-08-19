@@ -5817,31 +5817,25 @@ async function loadApi() {
   const b = document.getElementById('apiBody');
   let st = { items: [] };
   try { st = await (await fetch('api/providers', { cache: 'no-store' })).json(); } catch (e) {}
-  let selected = {};
-  try { selected = await (await fetch('api/model', { cache: 'no-store' })).json(); } catch (e) {}
   const esc = s => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const profiles = st.items || [];
   const choices = `<option value="">＋ 新供应商</option>` + profiles.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.has_key ? '' : '（未填密钥）'}</option>`).join('');
   b.innerHTML =
     `<div class="sh-head"><h1>模型供应商</h1><div class="sub">每个聊天可自行选择；密钥只会保存到服务器。</div></div>`
-    + `<div class="ap-section"><div class="ap-section-title">供应商与模型</div>`
+    + `<div class="ap-section"><div class="ap-section-title">供应商连接</div>`
     + `<div class="ap-lb">已保存的供应商</div><select class="ap-in" id="apProfile">${choices}</select>`
     + `<div class="ap-lb">名称</div><input class="ap-in" id="apName" placeholder="例如：聚梦 AG">`
     + `<div class="ap-lb">接口地址</div>`
     + `<input class="ap-in" id="apBase" placeholder="https://api.jumengai.net/v1">`
     + `<div class="ap-lb">令牌</div>`
-    + `<input class="ap-in" id="apTok" type="password" placeholder="已保存时留空；输入空值不会读取旧密钥">`
-    + `<div class="ap-lb">这个聊天使用的模型名</div>`
-    + `<input class="ap-in" id="apModel" placeholder="例如：gemini-3.5-flash-low"></div>`
-    + `<div class="ap-section"><div class="ap-section-title">测试与应用</div>`
-    + `<div class="ap-btns"><button class="ap-b" id="apTest">试一试</button>`
-    + `<button class="ap-b go" id="apSave">保存并用于当前聊天</button></div>`
+    + `<input class="ap-in" id="apTok" type="password" placeholder="已保存时留空；输入空值不会读取旧密钥"></div>`
+    + `<div class="ap-section"><div class="ap-section-title">保存供应商</div>`
+    + `<div class="ap-btns single"><button class="ap-b go" id="apSave">保存供应商</button></div>`
     + `<div class="ap-msg" id="apMsg"></div></div>`
     + `<div class="ap-section"><div class="ap-section-title">模型目录</div><div class="sub">获取供应商的模型后，挑进常用模型；聊天页只显示常用项。</div>`
     + `<div class="ap-btns single"><button class="ap-b" id="apOpenCatalog">管理模型与常用项</button></div></div>`
     + `<div class="ap-note">密钥经服务器加密后保存，网页之后只能看到“已保存”，拿不回来。<br>`
-    + `「试一试」只测试当前填写的地址、密钥和模型，不会保存它们。<br>`
-    + `保存后，当前聊天直接走这里选的供应商；其他聊天不受影响。</div>`;
+    + `保存后，到聊天输入框下方选择模型；「获取 / 刷新」模型即可验证供应商连接。</div>`;
 
   const msg = document.getElementById('apMsg');
   const profile = document.getElementById('apProfile');
@@ -5851,35 +5845,22 @@ async function loadApi() {
     document.getElementById('apBase').value = p ? p.base_url : '';
     document.getElementById('apTok').placeholder = p && p.has_key ? '已保存 · 不换就留空' : '粘贴 API 密钥';
   };
-  if (selected.provider_id) profile.value = selected.provider_id;
-  document.getElementById('apModel').value = selected.model || '';
   profile.onchange = fill; fill();
   const vals = () => ({
     id: profile.value,
     name: document.getElementById('apName').value.trim(),
     base_url: document.getElementById('apBase').value.trim(),
     token: document.getElementById('apTok').value.trim(),
-    model: document.getElementById('apModel').value.trim(),
   });
   const say = (t, bad) => { msg.textContent = t; msg.className = 'ap-msg on' + (bad ? ' bad' : ''); };
 
-  document.getElementById('apTest').onclick = async () => {
-    say('正在敲门…');
-    try {
-      const r = await (await fetch('api/provider-test', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(vals()) })).json();
-      if (r.ok) say('通了 —— 对面回的模型是 ' + (r.model || '(没报名字)') + '\n' + r.url);
-      else say('没通（' + (r.code || '连不上') + '）\n' + (r.detail || '') + '\n' + (r.url || ''), true);
-    } catch (e) { say('没通：' + e.message, true); }
-  };
   document.getElementById('apSave').onclick = async () => {
     say('正在安全保存…');
     try {
       const v = vals();
       const r = await (await fetch('api/providers', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(v) })).json();
       if (!r.ok) throw new Error(r.detail || '服务器没有保存');
-      const m = await (await fetch('api/model', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ provider_id:r.provider.id, model:v.model }) })).json();
-      if (!m.ok) throw new Error(m.detail || '模型没有切换');
-      setModelPill(v.model); say('保存好了 · 当前聊天已改走 ' + r.provider.name);
+      say('保存好了 · 到聊天输入框下方选择这个供应商的模型');
       setTimeout(loadApi, 800);
     } catch (e) { say('没存上：' + e.message, true); }
   };
