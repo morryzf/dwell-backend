@@ -1166,7 +1166,7 @@ def _get_or_create_current_chat() -> str:
     return chat["id"]
 
 
-async def _run_ai_reply(chat_id: str, msg_id: str):
+async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None):
     """调用当前聊天所选供应商，边收边发事件给前端。"""
     history = db.message_list(chat_id, limit=100)
     instructions = [
@@ -1179,6 +1179,30 @@ async def _run_ai_reply(chat_id: str, msg_id: str):
         for m in history
         if m["content"] or m["role"] != "assistant"
     ]
+    # 观影页的画面只在本次模型请求中出现，不把截帧或隐形提示写进聊天记录。
+    if watch_context:
+        title = str(watch_context.get("title") or "未命名视频")[:160]
+        try:
+            at_ms = max(0, int(watch_context.get("at_ms") or 0))
+        except (TypeError, ValueError):
+            at_ms = 0
+        timestamp = f"{at_ms // 3_600_000:02d}:{(at_ms // 60_000) % 60:02d}:{(at_ms // 1000) % 60:02d}"
+        subtitles = str(watch_context.get("subtitles") or "").strip()[:6000]
+        note = (
+            "\n\n【正在一起看视频】\n"
+            f"片名：{title}\n当前播放位置：{timestamp}\n"
+            "以下画面和字幕只描述已经播放到的此刻；不要猜测或剧透后续。"
+        )
+        if subtitles:
+            note += f"\n附近字幕：\n{subtitles}"
+        for index in range(len(messages) - 1, -1, -1):
+            if messages[index]["role"] == "user":
+                content = [{"type": "text", "text": str(messages[index]["content"]) + note}]
+                for image in watch_context.get("images") or []:
+                    if isinstance(image, str) and image.startswith("data:image/"):
+                        content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
+                messages[index] = {**messages[index], "content": content}
+                break
     buf = []
     selection = db.chat_model_get(chat_id)
     provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
@@ -1312,6 +1336,35 @@ async def send(request: Request):
     return {"ok": True}
 
 
+@app.post("/api/watch/send", dependencies=authed)
+async def watch_send(request: Request):
+    """观影页专用发送：保留普通聊天记录，同时把本地截帧临时交给视觉模型。"""
+    payload = await _read_json(request)
+    text = str(payload.get("text", "")).strip()
+    chat_id = str(payload.get("chat_id", "")).strip()
+    if not text:
+        raise HTTPException(400, "消息不能是空的")
+    if not chat_id or not db.chat_get(chat_id):
+        raise HTTPException(404, "请先选择一个存在的聊天")
+
+    raw_images = payload.get("images") or []
+    if not isinstance(raw_images, list):
+        raise HTTPException(400, "images 必须是列表")
+    images = [image for image in raw_images[:2]
+              if isinstance(image, str) and image.startswith("data:image/") and len(image) <= 1_500_000]
+    watch_context = {
+        "title": str(payload.get("title") or "未命名视频"),
+        "at_ms": payload.get("at_ms") or 0,
+        "subtitles": str(payload.get("subtitles") or ""),
+        "images": images,
+    }
+    db.message_add(chat_id, "user", text)
+    _emit(chat_id, {"type": "echo", "text": text})
+    placeholder = db.message_add(chat_id, "assistant", "")
+    task = asyncio.create_task(_run_ai_reply(chat_id, placeholder["id"], watch_context))
+    _running_tasks[chat_id] = task
+    return {"ok": True, "frames": len(images)}
+
 @app.post("/api/stop", dependencies=authed)
 async def stop():
     chat_id = _get_or_create_current_chat()
@@ -1323,9 +1376,10 @@ async def stop():
 
 
 @app.get("/api/poll", dependencies=authed)
-async def poll(since: str = "", timeout: int = 25):
+async def poll(since: str = "", timeout: int = 25, chat_id: str = ""):
     """长轮询：返回 {next, events}。只从 _event_log 里拿，不用 Queue。"""
-    chat_id = _get_or_create_current_chat()
+    if not chat_id or not db.chat_get(chat_id):
+        chat_id = _get_or_create_current_chat()
     _get_queue(chat_id)  # 确保初始化
 
     try:
@@ -1431,6 +1485,11 @@ async def manifest():
     }
 
 # ---------------------------------------------------------------- 前端
+
+@app.get("/watch")
+async def watch_page():
+    """本地电影夜页面；登录状态仍由同源 cookie 和 /api/* 统一保护。"""
+    return FileResponse(STATIC_DIR / "watch.html")
 
 @app.get("/")
 async def index():
