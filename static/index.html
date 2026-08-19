@@ -6019,10 +6019,10 @@ async function loadInstructions(editId = '') {
     body.innerHTML = `<div class="sh-head"><h1>聊天指令</h1><div class="sub">在这里写好；每间聊天再从输入框下方选择要用哪些。</div></div>`
       + `<div class="group-label">已保存的指令</div>`
       + (items.length ? `<div class="group">${items.map(item => `<button class="grow instruction-edit" data-id="${instructionEsc(item.id)}"><span>${instructionEsc(item.name)}</span><span class="val">编辑 ›</span></button>`).join('')}</div>` : '<div class="gnote">还没有指令。写第一条吧。</div>')
-      + `<div class="ap-section"><div class="ap-section-title">${current ? '编辑指令' : '新建指令'}</div>`
+      + `<div class="ap-section"><div class="ap-section-title">${current ? '编辑指令' : '添加指令'}</div>`
       + `<div class="ap-lb">名称</div><input class="ap-in" id="instructionName" maxlength="80" placeholder="例如：OB">`
       + `<div class="ap-lb">指令内容</div><textarea class="ap-in" id="instructionContent" rows="7" maxlength="50000" placeholder="写给模型看的规则或背景…"></textarea>`
-      + `<div class="ap-btns ${current ? '' : 'single'}"><button class="ap-b go" id="instructionSave">保存指令</button>${current ? '<button class="ap-b" id="instructionDelete">删除</button>' : ''}</div><div class="ap-msg" id="instructionMsg"></div></div>`;
+      + `<div class="ap-btns ${current ? '' : 'single'}"><button class="ap-b go" id="instructionSave">${current ? '保存修改' : '添加指令'}</button>${current ? '<button class="ap-b" id="instructionDelete">删除</button>' : ''}</div><div class="ap-msg" id="instructionMsg"></div></div>`;
     document.getElementById('instructionName').value = current ? current.name : '';
     document.getElementById('instructionContent').value = current ? current.content : '';
     body.querySelectorAll('.instruction-edit').forEach(el => el.onclick = () => loadInstructions(el.dataset.id));
@@ -6033,7 +6033,8 @@ async function loadInstructions(editId = '') {
       try {
         const r = await (await fetch('api/instructions', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:current ? current.id : '',name,content})})).json();
         if (!r.ok) throw new Error(r.detail || '没有保存');
-        loadInstructions(r.instruction.id); refreshInstructionButton();
+        // 新建保存后回到空白的“添加指令”；只有点上面的已有项才进入编辑。
+        loadInstructions(); refreshInstructionButton();
       } catch (e) { say('没存上：' + e.message, true); }
     };
     if (current) document.getElementById('instructionDelete').onclick = async () => {
