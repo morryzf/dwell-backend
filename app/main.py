@@ -21,6 +21,7 @@ from . import auth, db, provider_secrets
 from app.pet_assets import ensure_pet_assets
 from app.llm_client import stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
+from app.web_tools import WebToolError, web_fetch, web_search
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
@@ -28,6 +29,17 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 # 正在跑的 AI 回复任务。key=chat_id，value=asyncio.Task
 _running_tasks: dict[str, asyncio.Task] = {}
+
+WEB_TOOLS = [
+    {"type": "function", "function": {
+        "name": "WebSearch", "description": "Search the public web for current information. Use this when a question needs current or source-based information.",
+        "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Search query"}}, "required": ["query"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "WebFetch", "description": "Read the text content of a public web page from a full http(s) URL. Use after search or when the user provides a link.",
+        "parameters": {"type": "object", "properties": {"url": {"type": "string", "description": "Public http(s) URL"}}, "required": ["url"], "additionalProperties": False},
+    }},
+]
 # 每个 chat 一条事件队列，poll 从这里拿事件推给前端。
 _event_queues: dict[str, asyncio.Queue] = {}
 # 每个 chat 的事件游标，从 1 开始
@@ -1174,7 +1186,9 @@ async def _run_ai_reply(chat_id: str, msg_id: str):
         if not provider or not provider["enabled"]:
             raise RuntimeError("这个聊天还没有可用的供应商；请在设置里添加并选择一个")
         tool_map = {}
-        tools = []
+        tools = list(WEB_TOOLS)
+        tool_map["WebSearch"] = "builtin:search"
+        tool_map["WebFetch"] = "builtin:fetch"
         for server in db.chat_mcp_servers(chat_id):
             try:
                 server_tools = await mcp_list_tools(server)
@@ -1210,16 +1224,41 @@ async def _run_ai_reply(chat_id: str, msg_id: str):
             for call in assistant_calls:
                 name = call["function"]["name"]
                 server = tool_map.get(name)
+                raw_arguments = call["function"]["arguments"]
+                record = db.tool_call_add(chat_id, msg_id, name, raw_arguments)
                 try:
-                    arguments = json.loads(call["function"]["arguments"])
+                    preview_input = json.loads(raw_arguments)
+                    if not isinstance(preview_input, dict):
+                        preview_input = {}
+                except json.JSONDecodeError:
+                    preview_input = {}
+                _emit(chat_id, {"type": "tool_call", "tool": {
+                    "id": record["id"], "name": name, "input": preview_input,
+                }})
+                try:
+                    arguments = json.loads(raw_arguments)
                     if not isinstance(arguments, dict):
                         raise ValueError("参数必须是对象")
-                    if not server:
+                    if server == "builtin:search":
+                        result = await web_search(arguments.get("query", ""))
+                        is_error = False
+                    elif server == "builtin:fetch":
+                        result = await web_fetch(arguments.get("url", ""))
+                        is_error = False
+                    elif not server:
                         raise ValueError("模型请求了未启用的 MCP 工具")
-                    tool_name = name.split("__", 2)[-1]
-                    result = await mcp_call_tool(server, tool_name, arguments)
+                    else:
+                        tool_name = name.split("__", 2)[-1]
+                        result = await mcp_call_tool(server, tool_name, arguments)
+                        try:
+                            is_error = bool(json.loads(result).get("is_error", False))
+                        except (TypeError, json.JSONDecodeError):
+                            is_error = False
                 except Exception as exc:
                     result = json.dumps({"is_error": True, "content": [{"type": "text", "text": str(exc)}]}, ensure_ascii=False)
+                    is_error = True
+                db.tool_call_finish(record["id"], result, is_error)
+                _emit(chat_id, {"type": "tool_result", "tool_call_id": record["id"], "is_error": is_error, "content": result})
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
         else:
             raise RuntimeError("MCP 工具调用轮数超过上限")
