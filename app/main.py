@@ -1086,6 +1086,30 @@ async def messages_get(chat_id: str = "", limit: int = 400, before: int | None =
     data = db.message_ui_list(chat_id, limit, before)
     return {"ok": True, **data}
 
+
+@app.patch("/api/messages/{message_id}", dependencies=authed)
+async def messages_edit(message_id: str, request: Request):
+    message = db.message_get(message_id)
+    current = _get_or_create_current_chat()
+    if not message or message["chat_id"] != current or message["role"] != "assistant":
+        raise HTTPException(404, "找不到这条 AI 回复")
+    payload = await _read_json(request)
+    content = str(payload.get("content") or "").strip()[:50000]
+    if not content:
+        raise HTTPException(400, "回复不能是空的")
+    db.message_update(message_id, content)
+    return {"ok": True, "id": message_id, "content": content}
+
+
+@app.delete("/api/messages/{message_id}", dependencies=authed)
+async def messages_delete(message_id: str):
+    message = db.message_get(message_id)
+    current = _get_or_create_current_chat()
+    if not message or message["chat_id"] != current or message["role"] != "assistant":
+        raise HTTPException(404, "找不到这条 AI 回复")
+    db.message_delete(message_id)
+    return {"ok": True, "id": message_id}
+
 # ---------------------------------------------------------------- 聊天：发送 / 停止 / 长轮询
 
 CURRENT_CHAT_KEY = "current_chat_id"
