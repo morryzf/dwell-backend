@@ -632,8 +632,14 @@ html[data-theme="dark"] .composer {
   .model-catalog-provider { color: var(--dim); font-size: 12px; white-space: nowrap; }
   .model-catalog-action { flex: none; min-width: 42px; min-height: 32px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); color: var(--text); font-size: 13px; font-weight: 700; }
   .model-catalog-action.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
-  .msg-actions { display: flex; gap: 7px; margin-top: 7px; }
-  .msg-action { padding: 3px 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--dim); background: var(--panel); font-size: 12px; }
+  .row { position: relative; }
+  .msg-actions { display: none; position: absolute; z-index: 8; left: 0; bottom: calc(100% + 7px); gap: 6px; max-width: calc(100vw - 36px); padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: 0 8px 22px rgba(0,0,0,.16); }
+  .row.me .msg-actions { left: auto; right: 0; }
+  .msg-actions.on { display: flex; }
+  .msg-action { padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--dim); background: var(--panel); font-size: 12px; white-space: nowrap; }
+  .msg-action.danger { color: var(--red); }
+  .version-card { background: var(--panel); border-radius: 13px; padding: 12px; margin-top: 9px; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.65; }
+  .version-card .version-meta { color: var(--dim); font-size: 12px; margin-bottom: 6px; }
   .catalog-bar { display: flex; gap: 9px; margin: 14px 0 10px; }
   .catalog-bar .ap-in { flex: 1; min-width: 0; }
 
@@ -1794,6 +1800,13 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   </div><div class="body" id="editMessageBody"></div></div>
 </div>
 
+<div class="sheetWrap" id="messageVersionsSheet">
+  <div class="shade" data-close="messageVersions"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="messageVersions"><span class="ic" data-i="x"></span></button><div class="ht">回复版本</div><div class="hspace"></div>
+  </div><div class="body" id="messageVersionsBody"></div></div>
+</div>
+
 <div class="sheetWrap" id="wakeTargetSheet">
   <div class="shade" data-close="wakeTarget"></div>
   <div class="sheet"><div class="grabber"></div><div class="head">
@@ -2232,15 +2245,17 @@ function row(cls) {
   log.appendChild(d);
   return d;
 }
-function addMe(text) {
+function addMe(text, message) {
   const r = row('me');
   const b = document.createElement('div');
   b.className = 'bubble';
   b.textContent = text;
   r.appendChild(b);
   renderRich(b);
+  if (message) attachMessageActions(b, message);
   scroll(true);
   guEl = null; endThink(); closeGroup();
+  return b;
 }
 
 const thinkStore = [];
@@ -2317,21 +2332,45 @@ function ensureGu() {
   scroll();
   return guEl;
 }
-function attachAssistantActions(el, message) {
+function closeMessageActions(except) {
+  document.querySelectorAll('.msg-actions.on').forEach(actions => { if (actions !== except) actions.classList.remove('on'); });
+}
+function attachMessageActions(el, message) {
   if (!message || !message.id || el._actionsAttached) return;
   el._actionsAttached = true;
+  const rowEl = el.parentElement;
+  rowEl.dataset.messageId = message.id;
   const actions = document.createElement('div'); actions.className = 'msg-actions';
-  const edit = document.createElement('button'); edit.className = 'msg-action'; edit.textContent = '编辑'; edit.onclick = () => openMessageEditor(message);
+  el.addEventListener('click', (event) => {
+    if (event.target.closest('button,a')) return;
+    event.stopPropagation();
+    const opening = !actions.classList.contains('on'); closeMessageActions(actions);
+    actions.classList.toggle('on', opening);
+  });
+  const edit = document.createElement('button'); edit.className = 'msg-action'; edit.textContent = '编辑'; edit.onclick = (event) => { event.stopPropagation(); actions.classList.remove('on'); openMessageEditor(message); };
   const del = document.createElement('button'); del.className = 'msg-action'; del.textContent = '删除'; del.onclick = async () => {
-    if (!confirm('删除这条 AI 回复？之后的聊天不会再读到它。')) return;
+    if (!confirm('删除这条消息？之后的聊天不会再读到它。')) return;
     try { const r = await fetch('api/messages/' + encodeURIComponent(message.id), {method:'DELETE'}); if (!r.ok) throw new Error('没有删除'); await loadSaid(); }
     catch (e) { note('（没删掉：' + e.message + '）', 'err'); }
   };
-  actions.append(edit, del); el.parentElement?.appendChild(actions);
+  del.classList.add('danger');
+  actions.append(edit, del);
+  if (message.role === 'assistant') {
+    const regen = document.createElement('button'); regen.className = 'msg-action'; regen.textContent = '重新生成'; regen.onclick = async (event) => {
+      event.stopPropagation(); actions.classList.remove('on');
+      if (!confirm('重新生成这条回复？当前回复会保留在版本记录中。')) return;
+      try { const r = await fetch('api/messages/' + encodeURIComponent(message.id) + '/regenerate',{method:'POST'}); const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.detail||'没有开始生成'); }
+      catch (e) { note('（没能重新生成：' + e.message + '）', 'err'); }
+    };
+    const versions = document.createElement('button'); versions.className = 'msg-action'; versions.textContent = '版本'; versions.onclick = (event) => { event.stopPropagation(); actions.classList.remove('on'); openMessageVersions(message); };
+    actions.append(regen, versions);
+  }
+  actions.onclick = event => event.stopPropagation();
+  rowEl.appendChild(actions);
 }
 function openMessageEditor(message) {
   const body = document.getElementById('editMessageBody');
-  body.innerHTML = '<div class="ap-section"><div class="ap-section-title">修改后的内容会成为后续聊天的上下文</div><textarea class="ap-in" id="editMessageText" rows="12" maxlength="50000"></textarea><div class="ap-btns single"><button class="ap-b go" id="editMessageSave">保存修改</button></div><div class="ap-msg" id="editMessageMsg"></div></div>';
+  body.innerHTML = '<div class="ap-section"><div class="ap-section-title">修改后的内容会成为后续聊天的上下文' + (message.role === 'assistant' ? '，原回复会保存为版本' : '') + '</div><textarea class="ap-in" id="editMessageText" rows="12" maxlength="50000"></textarea><div class="ap-btns single"><button class="ap-b go" id="editMessageSave">保存修改</button></div><div class="ap-msg" id="editMessageMsg"></div></div>';
   body.querySelector('#editMessageText').value = message.text || '';
   body.querySelector('#editMessageSave').onclick = async () => {
     const content = body.querySelector('#editMessageText').value.trim(); const msg = body.querySelector('#editMessageMsg');
@@ -2340,6 +2379,16 @@ function openMessageEditor(message) {
   };
   sheets.editMessage.classList.add('open');
 }
+async function openMessageVersions(message) {
+  const body = document.getElementById('messageVersionsBody');
+  body.innerHTML = '<div class="gnote">正在读取版本记录…</div>'; sheets.messageVersions.classList.add('open');
+  try {
+    const r = await fetch('api/messages/' + encodeURIComponent(message.id) + '/versions',{cache:'no-store'}); const d = await r.json(); if(!r.ok||!d.ok) throw new Error(d.detail||'没有读取到');
+    const card = (label, text, made) => '<div class="version-card"><div class="version-meta">' + escapeHtml(label + (made ? ' · ' + new Date(made * 1000).toLocaleString() : '')) + '</div>' + escapeHtml(text || '（空）') + '</div>';
+    body.innerHTML = '<div class="gnote">后续上下文只会读取当前版本；旧版本仅供你查看。</div>' + card('当前版本', d.current, null) + (d.versions||[]).map((item,index)=>card('旧版本 ' + (index + 1) + (item.reason==='regenerated'?'（重新生成前）':'（编辑前）'),item.content,item.made)).join('');
+  } catch (e) { body.innerHTML = '<div class="gnote">版本记录没拿到：' + escapeHtml(e.message) + '</div>'; }
+}
+document.addEventListener('click', () => closeMessageActions());
 function note(text, cls, sticky) {
   const [t1, t2] = toastSplit(text);
   const el = toast(t1, t2, cls === 'err' ? 'zap' : 'check', sticky);
@@ -2944,7 +2993,7 @@ toolBack.onclick = () => {
 
 function renderSaid(msgs) {
   for (const m of msgs) {
-    if (m.kind === 'me') { endThink(); addMe(m.text); }
+    if (m.kind === 'me') { endThink(); addMe(m.text, m); }
     else if (m.kind === 'gu') {
       endThink();                    // 该说正文了，思考那段收工
       const el = ensureGu();
@@ -2953,7 +3002,7 @@ function renderSaid(msgs) {
       el.textContent = m.text;
       trimOrphanTail(el);            // 库里的半截消息拖着「课」这种孤尾——历史这条路也要摘
       renderRich(el);
-      attachAssistantActions(el, m);
+      attachMessageActions(el, m);
       guEl = null;                   // 每条各归各位，别粘成一坨
     } else if (m.kind === 'think') {
       // 一轮思考在库里是好几条记录（想一段、歇一下、再想）。以前这里每条
@@ -3045,6 +3094,7 @@ async function loadOlder() {
 
 /* ---------- 事件流 ---------- */
 let cursor = 0, polling = false, pollAbort = null, pollGeneration = 0;
+let regeneratingMessageId = '';
 let armedFresh = false;        // 「新窗口」上膛了没——handle() 要用，所以在这儿先立着
 let uiVer = null;              // 网页那份文件的版本，换了就自己重载
 let pendingVer = null;
@@ -3118,6 +3168,11 @@ function handle(d) {
   if (d.type === 'echo') { if (armedFresh) setArmed(false); addMe(d.text); petSet('thinking'); return; }
   if (d.type === 'system' && d.subtype === 'newchat') { setArmed(false); log.innerHTML = ''; guEl = null; earliestSeq = null; olderBtn = null; note(d.text); return; }
   if (d.type === 'system' && d.subtype === 'switched') { setArmed(false); log.innerHTML = ''; guEl = null; earliestSeq = null; olderBtn = null; note(d.text); return; }
+  if (d.type === 'system' && d.subtype === 'regenerating') {
+    regeneratingMessageId = d.message_id || '';
+    document.querySelector('#log .row[data-message-id="' + CSS.escape(regeneratingMessageId) + '"]')?.remove();
+    guEl = null; endThink(); closeGroup(); setBusy(true); petSet('thinking'); return;
+  }
 
   if (d.type === 'stream_event') {
     const ev = d.event || {};
@@ -3184,6 +3239,12 @@ function handle(d) {
   if (d.type === 'result') {
     guEl?.querySelector('.caret')?.remove();
     guEl = null; endThink(); closeGroup();
+    if (regeneratingMessageId) {
+      regeneratingMessageId = '';
+      loadSaid().then((upto) => { if (upto) cursor = Math.max(cursor, upto); }).catch(() => {});
+      setBusy(false); petSet('happy', 4000); scroll();
+      return;
+    }
     fetch('api/messages?limit=16', { cache: 'no-store' }).then(r => r.json()).then(dd => {
       const gus = (dd.msgs || []).filter(m => m.kind === 'gu');
       if (!gus.length) return;
@@ -3614,6 +3675,7 @@ const sheets = {
   mcp: document.getElementById('mcpSheet'),
   chatMcp: document.getElementById('chatMcpSheet'),
   editMessage: document.getElementById('editMessageSheet'),
+  messageVersions: document.getElementById('messageVersionsSheet'),
   wakeTarget: document.getElementById('wakeTargetSheet'),
   instructions: document.getElementById('instructionsSheet'),
   chatInstructions: document.getElementById('chatInstructionsSheet'),
