@@ -204,24 +204,6 @@ CREATE TABLE IF NOT EXISTS chat_mcp_servers (
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
     FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
 );
-
--- 可复用的聊天指令，以及每间聊天各自启用的集合。
-CREATE TABLE IF NOT EXISTS instruction_presets (
-    id      TEXT PRIMARY KEY,
-    name    TEXT NOT NULL,
-    content TEXT NOT NULL,
-    made    INTEGER NOT NULL,
-    updated INTEGER NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS ix_instruction_presets_name ON instruction_presets(name);
-
-CREATE TABLE IF NOT EXISTS chat_instruction_presets (
-    chat_id        TEXT NOT NULL,
-    instruction_id TEXT NOT NULL,
-    PRIMARY KEY (chat_id, instruction_id),
-    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
-    FOREIGN KEY (instruction_id) REFERENCES instruction_presets(id) ON DELETE CASCADE
-);
 """
 
 
@@ -943,71 +925,6 @@ def chat_mcp_servers_set(chat_id: str, server_ids: list[str]) -> bool:
         cx.executemany(
             "INSERT INTO chat_mcp_servers (chat_id,server_id) VALUES (?,?)",
             [(chat_id, server_id) for server_id in clean],
-        )
-    return True
-
-
-# ---------------------------------------------------------------- 聊天指令
-
-def instruction_list() -> list[dict]:
-    with conn() as cx:
-        rows = cx.execute(
-            "SELECT id,name,content,made,updated FROM instruction_presets ORDER BY made ASC"
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def instruction_get(instruction_id: str) -> dict | None:
-    with conn() as cx:
-        row = cx.execute("SELECT * FROM instruction_presets WHERE id=?", (instruction_id,)).fetchone()
-    return dict(row) if row else None
-
-
-def instruction_upsert(instruction_id: str, name: str, content: str) -> dict:
-    now = int(time.time())
-    instruction_id = instruction_id or new_id()
-    with conn() as cx:
-        cx.execute(
-            "INSERT INTO instruction_presets (id,name,content,made,updated) VALUES (?,?,?,?,?) "
-            "ON CONFLICT(id) DO UPDATE SET name=excluded.name,content=excluded.content,updated=excluded.updated",
-            (instruction_id, name, content, now, now),
-        )
-    return instruction_get(instruction_id) or {}
-
-
-def instruction_delete(instruction_id: str) -> bool:
-    with conn() as cx:
-        cur = cx.execute("DELETE FROM instruction_presets WHERE id=?", (instruction_id,))
-    return cur.rowcount > 0
-
-
-def chat_instruction_ids(chat_id: str) -> list[str]:
-    with conn() as cx:
-        rows = cx.execute(
-            "SELECT instruction_id FROM chat_instruction_presets WHERE chat_id=? ORDER BY instruction_id",
-            (chat_id,),
-        ).fetchall()
-    return [row["instruction_id"] for row in rows]
-
-
-def chat_instructions(chat_id: str) -> list[dict]:
-    with conn() as cx:
-        rows = cx.execute(
-            "SELECT i.* FROM instruction_presets i JOIN chat_instruction_presets c "
-            "ON c.instruction_id=i.id WHERE c.chat_id=? ORDER BY i.made ASC", (chat_id,)
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def chat_instructions_set(chat_id: str, instruction_ids: list[str]) -> bool:
-    if not chat_get(chat_id):
-        return False
-    clean = list(dict.fromkeys(item_id for item_id in instruction_ids if instruction_get(item_id)))
-    with conn() as cx:
-        cx.execute("DELETE FROM chat_instruction_presets WHERE chat_id=?", (chat_id,))
-        cx.executemany(
-            "INSERT INTO chat_instruction_presets (chat_id,instruction_id) VALUES (?,?)",
-            [(chat_id, item_id) for item_id in clean],
         )
     return True
 # ---------------------------------------------------------------- 消息 seq

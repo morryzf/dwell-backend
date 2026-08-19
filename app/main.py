@@ -758,54 +758,6 @@ async def mcp_chat_set(request: Request):
     return {"ok": True, "chat_id": chat_id, "server_ids": db.chat_mcp_server_ids(chat_id)}
 
 
-# ---------------------------------------------------------------- 聊天指令
-
-@app.get("/api/instructions", dependencies=authed)
-async def instructions_get():
-    return {"ok": True, "items": db.instruction_list()}
-
-
-@app.post("/api/instructions", dependencies=authed)
-async def instructions_upsert(request: Request):
-    payload = await _read_json(request)
-    instruction_id = str(payload.get("id") or "").strip()
-    if instruction_id and not db.instruction_get(instruction_id):
-        raise HTTPException(404, "找不到这条指令")
-    name = str(payload.get("name") or "").strip()[:80]
-    content = str(payload.get("content") or "").strip()[:8000]
-    if not name:
-        raise HTTPException(400, "指令名称不能为空")
-    if not content:
-        raise HTTPException(400, "指令内容不能为空")
-    return {"ok": True, "instruction": db.instruction_upsert(instruction_id, name, content)}
-
-
-@app.delete("/api/instructions/{instruction_id}", dependencies=authed)
-async def instructions_delete(instruction_id: str):
-    if not db.instruction_delete(instruction_id):
-        raise HTTPException(404, "找不到这条指令")
-    return {"ok": True}
-
-
-@app.get("/api/instructions/chat", dependencies=authed)
-async def chat_instructions_get():
-    chat_id = _get_or_create_current_chat()
-    selected = set(db.chat_instruction_ids(chat_id))
-    return {"ok": True, "chat_id": chat_id,
-            "items": [{**item, "selected": item["id"] in selected} for item in db.instruction_list()]}
-
-
-@app.post("/api/instructions/chat", dependencies=authed)
-async def chat_instructions_set(request: Request):
-    payload = await _read_json(request)
-    instruction_ids = payload.get("instruction_ids")
-    if not isinstance(instruction_ids, list) or not all(isinstance(item, str) for item in instruction_ids):
-        raise HTTPException(400, "instruction_ids 必须是字符串数组")
-    chat_id = _get_or_create_current_chat()
-    db.chat_instructions_set(chat_id, instruction_ids)
-    return {"ok": True, "chat_id": chat_id, "instruction_ids": db.chat_instruction_ids(chat_id)}
-
-
 @app.post("/api/provider-test", dependencies=authed)
 async def provider_test(request: Request):
     """用浏览器刚填写、尚未保存的资料做一次最小 OpenAI 兼容请求。"""
@@ -1033,12 +985,7 @@ def _get_or_create_current_chat() -> str:
 async def _run_ai_reply(chat_id: str, msg_id: str):
     """调用当前聊天所选供应商，边收边发事件给前端。"""
     history = db.message_list(chat_id, limit=100)
-    instructions = [
-        {"role": "system", "content": item["content"]}
-        for item in db.chat_instructions(chat_id)
-        if item.get("content", "").strip()
-    ]
-    messages = instructions + [
+    messages = [
         {"role": m["role"], "content": m["content"]}
         for m in history
         if m["content"] or m["role"] != "assistant"
