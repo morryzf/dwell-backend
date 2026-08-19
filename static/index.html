@@ -2915,12 +2915,20 @@ function renderSaid(msgs) {
   closeGroup(); endThink();
 }
 
+let historyLoadVersion = 0;
 async function loadSaid() {
+  // 这条接口返回的是完整历史，不是增量。页面从后台回来时可能连续触发两次；
+  // 只收最后一次，并用它替换当前画面，绝不能往旧消息后面再追加。
+  const version = ++historyLoadVersion;
   try {
     const r = await fetch('api/messages?limit=400', { cache: 'no-store' });
     if (!r.ok) return 0;
     const d = await r.json();
+    if (version !== historyLoadVersion) return 0;
     const msgs = d.msgs || [];
+    log.innerHTML = '';
+    guEl = null; turnThink = null; curGroup = null;
+    earliestSeq = null; olderBtn = null;
     renderSaid(msgs);
     healEmptyGu();
     if (msgs.length) earliestSeq = msgs[0].seq;
