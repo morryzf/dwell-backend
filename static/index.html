@@ -1763,6 +1763,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
         <button class="grow" id="mcpRow"><span class="ic" data-i="bolt"></span>MCP 工具<span class="chev">›</span></button>
         <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
         <button class="grow" id="kelivoImportRow"><span class="ic" data-i="plus"></span>导入 Kelivo 聊天记录<span class="chev">›</span></button>
+        <button class="grow" id="longContextRow"><span class="ic" data-i="bookOpen"></span>对话长期上下文<span class="chev">›</span></button>
       </div>
     </div>
   </div>
@@ -1834,6 +1835,13 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   <div class="sheet"><div class="grabber"></div><div class="head">
     <button class="hbtn" data-close="chatInstructions"><span class="ic" data-i="x"></span></button><div class="ht">这间聊天的指令</div><div class="hspace"></div>
   </div><div class="body" id="chatInstructionsBody"></div></div>
+</div>
+
+<div class="sheetWrap" id="longContextSheet">
+  <div class="shade" data-close="longContext"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="longContext"><span class="ic" data-i="x"></span></button><div class="ht">对话长期上下文</div><div class="hspace"></div>
+  </div><div class="body" id="longContextBody"></div></div>
 </div>
 
 <div class="sheetWrap" id="gongSheet">
@@ -3696,6 +3704,7 @@ const sheets = {
   wakeTarget: document.getElementById('wakeTargetSheet'),
   instructions: document.getElementById('instructionsSheet'),
   chatInstructions: document.getElementById('chatInstructionsSheet'),
+  longContext: document.getElementById('longContextSheet'),
   settings: document.getElementById('settingsSheet'),
   usage: document.getElementById('usageSheet'),
   model: document.getElementById('modelSheet'),
@@ -6208,6 +6217,47 @@ async function loadInstructions(editId = '') {
 document.getElementById('instructionsBtn').onclick = () => { sheets.chatInstructions.classList.add('open'); loadChatInstructions(); };
 document.getElementById('instructionsRow').onclick = () => { sheets.instructions.classList.add('open'); loadInstructions(); };
 refreshInstructionButton();
+
+/* ---------- 长期上下文：原聊天不动，只为当前窗口保留可重建的压缩记录 ---------- */
+let longContextPoll = null;
+async function currentChatForMemory() {
+  const data = await (await fetch('api/chats?scope=live', {cache:'no-store'})).json();
+  return (data.items || []).find(item => item.current) || null;
+}
+function stopLongContextPoll() { if (longContextPoll) { clearTimeout(longContextPoll); longContextPoll = null; } }
+async function loadLongContext() {
+  const body = document.getElementById('longContextBody');
+  stopLongContextPoll();
+  body.innerHTML = '<div class="gnote">正在读取这间聊天的上下文…</div>';
+  try {
+    const chat = await currentChatForMemory();
+    if (!chat) { body.innerHTML = '<div class="gnote">先打开一间聊天，再回来设置它的长期上下文。</div>'; return; }
+    const response = await fetch('api/chats/' + encodeURIComponent(chat.id) + '/long-context', {cache:'no-store'});
+    const state = await response.json(); if (!response.ok || !state.ok) throw new Error(state.detail || '没有读取到');
+    const working = state.status === 'queued' || state.status === 'running';
+    const generated = state.generated_at ? new Date(state.generated_at * 1000).toLocaleString('zh-CN') : '尚未生成';
+    const status = working ? '正在整理。可以离开这里，完成后会自动用于后续消息。' : state.status === 'error' ? ('没有生成成功：' + instructionEsc(state.error || '未知错误')) : (state.enabled ? '已启用；后续每约 30 条离开近期窗口的消息会在后台更新。' : '尚未启用；模型目前只会看到最近消息。');
+    body.innerHTML = `<div class="sh-head"><h1>${instructionEsc(chat.name || '新对话')}</h1><div class="sub">原聊天记录不会改动或删除。长期上下文只是一份可从原文重新生成的压缩记录。</div></div>`
+      + `<div class="ap-section"><div class="ap-section-title">状态</div><div class="gnote">${status}</div><div class="gnote">原消息 ${state.message_count} 条；已压缩 ${state.segment_count} 段；最近 ${state.tail_messages} 条仍保持原文。</div><div class="gnote">最近生成：${generated}</div></div>`
+      + `<div class="ap-btns"><button class="ap-b go" id="longContextGenerate">${state.enabled ? '现在更新' : '生成长期上下文'}</button>${state.enabled ? '<button class="ap-b" id="longContextRebuild">从原文重建</button>' : ''}</div><div class="ap-msg" id="longContextMsg"></div>`
+      + (state.overview ? `<div class="ap-section"><div class="ap-section-title">当前摘要预览</div><div class="gnote" style="white-space:pre-wrap">${instructionEsc(state.overview)}</div></div>` : '');
+    const start = async (reset) => {
+      const msg = document.getElementById('longContextMsg');
+      if (reset && !confirm('重新从原聊天记录生成摘要？原记录不会删除。')) return;
+      msg.textContent = '已开始整理…'; msg.className = 'ap-msg on';
+      try {
+        const r = await fetch('api/chats/' + encodeURIComponent(chat.id) + '/long-context', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reset:!!reset})});
+        const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有开始');
+        setTimeout(loadLongContext, 500);
+      } catch (e) { msg.textContent = '没有开始：' + e.message; msg.className = 'ap-msg on bad'; }
+    };
+    document.getElementById('longContextGenerate').onclick = () => start(false);
+    const rebuild = document.getElementById('longContextRebuild'); if (rebuild) rebuild.onclick = () => start(true);
+    if (working) longContextPoll = setTimeout(loadLongContext, 1800);
+  } catch (e) { body.innerHTML = '<div class="gnote">长期上下文没拿到：' + instructionEsc(e.message) + '</div>'; }
+}
+document.getElementById('longContextRow').onclick = () => { sheets.longContext.classList.add('open'); loadLongContext(); };
+document.querySelector('[data-close="longContext"]').addEventListener('click', stopLongContextPoll);
 
 (async () => {
   try {
