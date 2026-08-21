@@ -165,6 +165,31 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS ix_messages_chat ON messages(chat_id, made ASC);
 
+-- 聊天的长期上下文。原始 messages 永远是唯一原始记录；这里仅存可重新生成的
+-- 派生摘要，以及它已覆盖到的消息位置。
+CREATE TABLE IF NOT EXISTS chat_memory_state (
+    chat_id          TEXT PRIMARY KEY,
+    enabled          INTEGER NOT NULL DEFAULT 0,
+    overview         TEXT NOT NULL DEFAULT '',
+    through_rowid    INTEGER NOT NULL DEFAULT 0,
+    status           TEXT NOT NULL DEFAULT 'idle',
+    error            TEXT NOT NULL DEFAULT '',
+    generated_at     INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS chat_memory_segments (
+    id           TEXT PRIMARY KEY,
+    chat_id      TEXT NOT NULL,
+    start_rowid  INTEGER NOT NULL,
+    end_rowid    INTEGER NOT NULL,
+    content      TEXT NOT NULL,
+    made         INTEGER NOT NULL,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_chat_memory_segments_chat
+ON chat_memory_segments(chat_id, start_rowid, end_rowid);
+
 -- AI 回复的旧版本。重新生成或手动编辑时先存一份，当前 messages 表始终只保留
 -- 后续上下文真正会读到的那一版。
 CREATE TABLE IF NOT EXISTS message_versions (
@@ -826,6 +851,117 @@ def message_list(chat_id: str, limit: int = 400, before: int | None = None) -> l
                 (chat_id, limit),
             ).fetchall()
     return [dict(r) for r in reversed(rows)]
+
+
+# ---------------------------------------------------------------- 聊天长期上下文
+
+def chat_memory_get(chat_id: str) -> dict:
+    """返回派生摘要状态；不存在时给一个未启用的空状态。"""
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT * FROM chat_memory_state WHERE chat_id=?", (chat_id,)
+        ).fetchone()
+        total = cx.execute(
+            "SELECT COUNT(*) FROM messages WHERE chat_id=? AND content<>''", (chat_id,)
+        ).fetchone()[0]
+        last = cx.execute(
+            "SELECT COALESCE(MAX(rowid),0) FROM messages WHERE chat_id=?", (chat_id,)
+        ).fetchone()[0]
+        segments = cx.execute(
+            "SELECT COUNT(*) FROM chat_memory_segments WHERE chat_id=?", (chat_id,)
+        ).fetchone()[0]
+    out = dict(row) if row else {
+        "chat_id": chat_id, "enabled": 0, "overview": "", "through_rowid": 0,
+        "status": "idle", "error": "", "generated_at": 0,
+    }
+    out["enabled"] = bool(out["enabled"])
+    out["message_count"] = int(total)
+    out["last_rowid"] = int(last)
+    out["segment_count"] = int(segments)
+    return out
+
+
+def chat_memory_set_status(chat_id: str, status: str, error: str = "", enabled: bool | None = None) -> None:
+    current = chat_memory_get(chat_id)
+    values = {
+        "chat_id": chat_id,
+        "enabled": int(current["enabled"] if enabled is None else enabled),
+        "overview": current["overview"],
+        "through_rowid": current["through_rowid"],
+        "status": status,
+        "error": error[:1000],
+        "generated_at": current["generated_at"],
+    }
+    with conn() as cx:
+        cx.execute(
+            """INSERT INTO chat_memory_state
+               (chat_id,enabled,overview,through_rowid,status,error,generated_at)
+               VALUES (:chat_id,:enabled,:overview,:through_rowid,:status,:error,:generated_at)
+               ON CONFLICT(chat_id) DO UPDATE SET enabled=excluded.enabled,
+               status=excluded.status,error=excluded.error""",
+            values,
+        )
+
+
+def chat_memory_reset(chat_id: str) -> None:
+    """只清除派生摘要，绝不动聊天原文。用于重新从头生成。"""
+    with conn() as cx:
+        cx.execute("DELETE FROM chat_memory_segments WHERE chat_id=?", (chat_id,))
+        cx.execute(
+            """INSERT INTO chat_memory_state
+               (chat_id,enabled,overview,through_rowid,status,error,generated_at)
+               VALUES (?,1,'',0,'queued','',0)
+               ON CONFLICT(chat_id) DO UPDATE SET enabled=1,overview='',through_rowid=0,
+               status='queued',error='',generated_at=0""",
+            (chat_id,),
+        )
+
+
+def chat_memory_add_segment(chat_id: str, start_rowid: int, end_rowid: int, content: str) -> dict:
+    row = {
+        "id": new_id(), "chat_id": chat_id, "start_rowid": start_rowid,
+        "end_rowid": end_rowid, "content": content.strip()[:12000], "made": int(time.time()),
+    }
+    with conn() as cx:
+        cx.execute(
+            """INSERT INTO chat_memory_segments (id,chat_id,start_rowid,end_rowid,content,made)
+               VALUES (:id,:chat_id,:start_rowid,:end_rowid,:content,:made)""", row
+        )
+    return row
+
+
+def chat_memory_segments(chat_id: str) -> list[dict]:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT * FROM chat_memory_segments WHERE chat_id=? ORDER BY start_rowid ASC",
+            (chat_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def chat_memory_finish(chat_id: str, overview: str, through_rowid: int) -> None:
+    now = int(time.time())
+    with conn() as cx:
+        cx.execute(
+            """INSERT INTO chat_memory_state
+               (chat_id,enabled,overview,through_rowid,status,error,generated_at)
+               VALUES (?,1,?,?,'ready','',?)
+               ON CONFLICT(chat_id) DO UPDATE SET enabled=1,overview=excluded.overview,
+               through_rowid=excluded.through_rowid,status='ready',error='',generated_at=excluded.generated_at""",
+            (chat_id, overview.strip()[:12000], int(through_rowid), now),
+        )
+
+
+def chat_memory_source_messages(chat_id: str, after_rowid: int, before_rowid: int, limit: int) -> list[dict]:
+    """取尚未进入摘要的原始消息，按时间顺序，含 rowid 供水位线追踪。"""
+    with conn() as cx:
+        rows = cx.execute(
+            """SELECT rowid,id,role,content,made FROM messages
+               WHERE chat_id=? AND rowid>? AND rowid<=? AND content<>''
+               ORDER BY rowid ASC LIMIT ?""",
+            (chat_id, int(after_rowid), int(before_rowid), int(limit)),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -> dict:
