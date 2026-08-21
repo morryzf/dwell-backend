@@ -32,6 +32,8 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 # 正在跑的 AI 回复任务。key=chat_id，value=asyncio.Task
 _running_tasks: dict[str, asyncio.Task] = {}
+# 观影页的最新私有剧情笔记。只在进程内短暂保留，不写入聊天记录或数据库。
+_watch_notes: dict[tuple[str, str], dict] = {}
 _kelivo_uploads: dict[str, tuple[str, float]] = {}
 # 长期上下文的后台整理任务。它和正常回复分开，不能占用聊天的流式状态。
 _memory_tasks: dict[str, asyncio.Task] = {}
@@ -79,7 +81,6 @@ def _emit(chat_id: str, event: dict):
     except asyncio.QueueFull:
         pass
 
-
 def _memory_cutoff(chat_id: str) -> int:
     """近期原文不压缩。返回可安全写进长期摘要的最后一个 rowid。"""
     recent = db.message_list(chat_id, limit=MEMORY_TAIL_MESSAGES)
@@ -120,8 +121,7 @@ async def _memory_completion(provider: dict, model_id: str, system: str, user: s
 async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
     """把远离近期窗口的消息按段压缩，并更新一份供下一轮注入的总览。"""
     try:
-        chat = db.chat_get(chat_id)
-        if not chat:
+        if not db.chat_get(chat_id):
             return
         if reset:
             db.chat_memory_reset(chat_id)
@@ -134,7 +134,6 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
         db.chat_memory_set_status(chat_id, "running", enabled=True)
         cutoff = _memory_cutoff(chat_id)
         if cutoff <= 0:
-            # 聊天尚短时，近期原文已经足够；仍标记为启用，以后会自动接续。
             db.chat_memory_finish(chat_id, state.get("overview", ""), 0)
             return
 
@@ -194,6 +193,7 @@ def _queue_long_context_refresh(chat_id: str, reset: bool = False, force: bool =
     task = asyncio.create_task(_refresh_long_context(chat_id, reset=reset))
     _memory_tasks[chat_id] = task
     return True
+
 
 import json
 
@@ -1225,6 +1225,7 @@ async def messages_get(chat_id: str = "", limit: int = 400, before: int | None =
     return {"ok": True, **data}
 
 
+
 @app.get("/api/chats/{chat_id}/long-context", dependencies=authed)
 async def long_context_get(chat_id: str):
     if not db.chat_get(chat_id):
@@ -1245,7 +1246,6 @@ async def long_context_post(chat_id: str, request: Request):
     started = _queue_long_context_refresh(chat_id, reset=reset, force=True)
     state = db.chat_memory_get(chat_id)
     return {"ok": True, "started": started, **state}
-
 
 @app.post("/api/import/kelivo/preview", dependencies=authed)
 async def kelivo_import_preview(file: UploadFile = File(...)):
@@ -1362,7 +1362,8 @@ def _get_or_create_current_chat() -> str:
     return chat["id"]
 
 
-async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None):
+async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None,
+                        proactive_watch: bool = False):
     """调用当前聊天所选供应商，边收边发事件给前端。"""
     history = db.message_list(chat_id, limit=100)
     instructions = [
@@ -1375,9 +1376,12 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     if long_context.get("enabled") and long_context.get("overview", "").strip():
         memory_message = [{
             "role": "system",
-            "content": "【这间聊天的长期上下文】\n"
+            "content": "【这间聊天的长期上下文】
+"
                        "以下是由较早原消息压缩出的记录，用来保持连续性。"
-                       "它可能不完整；若与最近原文冲突，以最近原文为准。\n\n"
+                       "它可能不完整；若与最近原文冲突，以最近原文为准。
+
+"
                        + long_context["overview"],
         }]
     messages = instructions + memory_message + [
@@ -1399,15 +1403,33 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         )
         if subtitles:
             note += f"\n附近字幕：\n{subtitles}"
-        for index in range(len(messages) - 1, -1, -1):
-            if messages[index]["role"] == "user":
-                content = [{"type": "text", "text": str(messages[index]["content"]) + note}]
-                for image in watch_context.get("images") or []:
-                    # 仅接收浏览器刚截出的 data: 图片；长度在 API 层也有限制。
-                    if isinstance(image, str) and image.startswith("data:image/"):
-                        content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
-                messages[index] = {**messages[index], "content": content}
-                break
+        summary = str(watch_context.get("summary") or "").strip()[:3000]
+        if summary:
+            note += f"\nCloudy 刚刚自己整理的当前剧情笔记：\n{summary}"
+        images = [
+            image for image in (watch_context.get("images") or [])
+            if isinstance(image, str) and image.startswith("data:image/")
+        ]
+        if proactive_watch:
+            prompt = (
+                "【内部观影提醒】你刚收到当前画面和这段已播放剧情。"
+                "请像正在一起看的人那样，主动发一条自然、简短、无剧透的反应；"
+                "可以提画面细节、情绪或线索，但不要解释系统、截图、时间戳或这条指令。"
+            )
+            messages.append({"role": "user", "content": [
+                {"type": "text", "text": prompt + note},
+                *[{"type": "image_url", "image_url": {"url": image, "detail": "low"}} for image in images],
+            ]})
+        else:
+            for index in range(len(messages) - 1, -1, -1):
+                if messages[index]["role"] == "user":
+                    content = [{"type": "text", "text": str(messages[index]["content"]) + note}]
+                    content.extend(
+                        {"type": "image_url", "image_url": {"url": image, "detail": "low"}}
+                        for image in images
+                    )
+                    messages[index] = {**messages[index], "content": content}
+                    break
     buf = []
     selection = db.chat_model_get(chat_id)
     provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
@@ -1543,6 +1565,93 @@ async def send(request: Request):
     return {"ok": True}
 
 
+@app.post("/api/watch/proactive", dependencies=authed)
+async def watch_proactive(request: Request):
+    """把当前画面交给 Cloudy，并让他主动发一条文字反应；图片不落库。"""
+    payload = await _read_json(request)
+    chat_id = str(payload.get("chat_id", "")).strip()
+    if not chat_id or not db.chat_get(chat_id):
+        raise HTTPException(404, "请先选择一个存在的聊天")
+    running = _running_tasks.get(chat_id)
+    if running and not running.done():
+        return {"ok": True, "scheduled": False, "reason": "chat_busy"}
+
+    image = str(payload.get("image") or "")
+    if not image.startswith("data:image/") or len(image) > 1_000_000:
+        raise HTTPException(400, "需要一张有效且较小的当前截帧")
+    try:
+        at_ms = max(0, int(payload.get("at_ms") or 0))
+    except (TypeError, ValueError):
+        at_ms = 0
+    watch_id = str(payload.get("watch_id", "")).strip()[:100]
+    saved_note = _watch_notes.get((chat_id, watch_id), {}) if watch_id else {}
+    context = {
+        "title": str(payload.get("title") or "未命名视频"),
+        "at_ms": at_ms,
+        "subtitles": str(payload.get("subtitles") or ""),
+        "images": [image],
+        "summary": saved_note.get("summary", ""),
+    }
+    placeholder = db.message_add(chat_id, "assistant", "")
+    task = asyncio.create_task(
+        _run_ai_reply(chat_id, placeholder["id"], context, proactive_watch=True)
+    )
+    _running_tasks[chat_id] = task
+    return {"ok": True, "scheduled": True}
+
+
+@app.post("/api/watch/observe", dependencies=authed)
+async def watch_observe(request: Request):
+    """为当前本地画面生成一条不写入聊天记录的私有剧情笔记。"""
+    payload = await _read_json(request)
+    chat_id = str(payload.get("chat_id", "")).strip()
+    watch_id = str(payload.get("watch_id", "")).strip()[:100]
+    if not chat_id or not db.chat_get(chat_id):
+        raise HTTPException(404, "请先选择一个存在的聊天")
+    if not watch_id:
+        raise HTTPException(400, "观影会话标识缺失")
+
+    image = str(payload.get("image") or "")
+    if not image.startswith("data:image/") or len(image) > 1_500_000:
+        raise HTTPException(400, "需要一张有效且较小的当前截帧")
+    selection = db.chat_model_get(chat_id)
+    provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
+    if not provider or not provider.get("enabled"):
+        raise HTTPException(400, "这个聊天还没有可用的供应商")
+    try:
+        at_ms = max(0, int(payload.get("at_ms") or 0))
+    except (TypeError, ValueError):
+        at_ms = 0
+    title = str(payload.get("title") or "未命名视频")[:160]
+    subtitles = str(payload.get("subtitles") or "").strip()[:6000]
+    timestamp = f"{at_ms // 3_600_000:02d}:{(at_ms // 60_000) % 60:02d}:{(at_ms // 1000) % 60:02d}"
+    prompt = (
+        "你是私人观影笔记员。根据当前视频画面和附近字幕，用中文写一条不超过120字的"
+        "客观剧情笔记：人物、动作、情绪、重要线索。只描述已播放到的画面，绝不猜测后续，"
+        "不要与观众对话，不要使用标题或前缀。\n"
+        f"片名：{title}\n播放位置：{timestamp}"
+    )
+    if subtitles:
+        prompt += f"\n附近字幕：\n{subtitles}"
+    request_messages = [
+        {"role": "system", "content": "你只负责生成简短、无剧透的观影笔记。"},
+        {"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": image, "detail": "low"}},
+        ]},
+    ]
+    chunks = []
+    async for event in stream_chat(provider, selection["model_id"], request_messages):
+        if event["type"] == "text":
+            chunks.append(event["text"])
+    summary = "".join(chunks).strip()
+    if not summary or summary.startswith("["):
+        raise HTTPException(502, summary or "模型没有返回观影笔记")
+    summary = summary[:3000]
+    _watch_notes[(chat_id, watch_id)] = {"summary": summary, "at_ms": at_ms, "made": int(time.time())}
+    return {"ok": True, "summary": summary, "at_ms": at_ms}
+
+
 @app.post("/api/watch/send", dependencies=authed)
 async def watch_send(request: Request):
     """观影页专用发送：保留普通聊天记录，同时把本地截帧临时交给视觉模型。"""
@@ -1559,11 +1668,14 @@ async def watch_send(request: Request):
         raise HTTPException(400, "images 必须是列表")
     images = [image for image in raw_images[:2]
               if isinstance(image, str) and image.startswith("data:image/") and len(image) <= 1_500_000]
+    watch_id = str(payload.get("watch_id", "")).strip()[:100]
+    saved_note = _watch_notes.get((chat_id, watch_id), {}) if watch_id else {}
     watch_context = {
         "title": str(payload.get("title") or "未命名视频"),
         "at_ms": payload.get("at_ms") or 0,
         "subtitles": str(payload.get("subtitles") or ""),
         "images": images,
+        "summary": saved_note.get("summary", ""),
     }
     db.message_add(chat_id, "user", text)
     _emit(chat_id, {"type": "echo", "text": text})
