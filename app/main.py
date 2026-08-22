@@ -1253,6 +1253,22 @@ async def long_context_post(chat_id: str, request: Request):
     state = db.chat_memory_get(chat_id)
     return {"ok": True, "started": started, **state}
 
+@app.put("/api/chats/{chat_id}/long-context", dependencies=authed)
+async def long_context_put(chat_id: str, request: Request):
+    """保存用户编辑过的长期记忆；原聊天和分段记录不受影响。"""
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    task = _memory_tasks.get(chat_id)
+    if task and not task.done():
+        raise HTTPException(409, "长期上下文正在整理，请完成后再编辑")
+    payload = await _read_json(request)
+    overview = payload.get("overview")
+    if not isinstance(overview, str):
+        raise HTTPException(400, "overview 必须是文本")
+    db.chat_memory_save_overview(chat_id, overview)
+    state = db.chat_memory_get(chat_id)
+    return {"ok": True, **state}
+
 @app.post("/api/import/kelivo/preview", dependencies=authed)
 async def kelivo_import_preview(file: UploadFile = File(...)):
     """Receive only a Kelivo .db file, inspect its conversations, and cache it briefly."""
