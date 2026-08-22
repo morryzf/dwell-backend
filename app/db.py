@@ -989,6 +989,21 @@ def chat_memory_finish(chat_id: str, overview: str, through_rowid: int) -> None:
         )
 
 
+def chat_memory_save_overview(chat_id: str, overview: str) -> None:
+    """保存用户校订过的长期记忆；后续自动更新会以它作为已有记忆。"""
+    current = chat_memory_get(chat_id)
+    now = int(time.time())
+    with conn() as cx:
+        cx.execute(
+            """INSERT INTO chat_memory_state
+               (chat_id,enabled,overview,through_rowid,status,error,generated_at)
+               VALUES (?,1,?,?,'ready','',?)
+               ON CONFLICT(chat_id) DO UPDATE SET enabled=1,overview=excluded.overview,
+               status='ready',error='',generated_at=excluded.generated_at""",
+            (chat_id, overview.strip()[:12000], int(current["through_rowid"]), now),
+        )
+
+
 def chat_memory_source_messages(chat_id: str, after_rowid: int, before_rowid: int, limit: int) -> list[dict]:
     """取尚未进入摘要的原始消息，按时间顺序，含 rowid 供水位线追踪。"""
     with conn() as cx:
