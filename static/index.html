@@ -6347,7 +6347,7 @@ async function loadLongContext() {
     body.innerHTML = `<div class="sh-head"><h1>${instructionEsc(chat.name || '新对话')}</h1><div class="sub">原聊天记录不会改动或删除。长期上下文只是一份可从原文重新生成的压缩记录。</div></div>`
       + `<div class="ap-section"><div class="ap-section-title">状态</div><div class="gnote">${status}</div><div class="gnote">原消息 ${state.message_count} 条；已压缩 ${state.segment_count} 段；最近 ${state.tail_messages} 条仍保持原文。</div><div class="gnote">最近生成：${generated}</div></div>`
       + `<div class="ap-btns"><button class="ap-b go" id="longContextGenerate">${state.enabled ? '现在更新' : '生成长期上下文'}</button>${state.enabled ? '<button class="ap-b" id="longContextRebuild">从原文重建</button>' : ''}</div><div class="ap-msg" id="longContextMsg"></div>`
-      + (state.overview ? `<div class="ap-section"><div class="ap-section-title">当前摘要预览</div><div class="gnote" style="white-space:pre-wrap">${instructionEsc(state.overview)}</div></div>` : '');
+      + (state.overview ? `<div class="ap-section"><div class="ap-section-title">Cloudy 的长期记忆</div><div class="gnote">这是模型整理的初稿。你可以删掉冗余、补充遗漏或直接改写；保存后会成为后续更新的基础。</div><textarea id="longContextOverview" maxlength="12000" style="width:100%;min-height:260px;margin-top:12px;box-sizing:border-box;resize:vertical">${instructionEsc(state.overview)}</textarea><div class="ap-btns"><button class="ap-b go" id="longContextSave">保存修改</button></div></div>` : '');
     const start = async (reset) => {
       const msg = document.getElementById('longContextMsg');
       if (reset && !confirm('重新从原聊天记录生成摘要？原记录不会删除。')) return;
@@ -6360,6 +6360,17 @@ async function loadLongContext() {
     };
     document.getElementById('longContextGenerate').onclick = () => start(false);
     const rebuild = document.getElementById('longContextRebuild'); if (rebuild) rebuild.onclick = () => start(true);
+    const save = document.getElementById('longContextSave');
+    if (save) save.onclick = async () => {
+      const msg = document.getElementById('longContextMsg');
+      const overview = document.getElementById('longContextOverview').value;
+      msg.textContent = '正在保存…'; msg.className = 'ap-msg on';
+      try {
+        const r = await fetch('api/chats/' + encodeURIComponent(chat.id) + '/long-context', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({overview})});
+        const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
+        msg.textContent = '已保存。之后自动更新会以这份记忆为基础。'; msg.className = 'ap-msg on';
+      } catch (e) { msg.textContent = '没有保存：' + e.message; msg.className = 'ap-msg on bad'; }
+    };
     if (working) longContextPoll = setTimeout(loadLongContext, 1800);
   } catch (e) { body.innerHTML = '<div class="gnote">长期上下文没拿到：' + instructionEsc(e.message) + '</div>'; }
 }
