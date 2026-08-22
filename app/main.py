@@ -1327,6 +1327,24 @@ async def messages_delete(message_id: str):
     return {"ok": True, "id": message_id}
 
 
+@app.post("/api/messages/bulk-delete", dependencies=authed)
+async def messages_bulk_delete(request: Request):
+    payload = await _read_json(request)
+    raw_ids = payload.get("ids") if isinstance(payload, dict) else None
+    if not isinstance(raw_ids, list):
+        raise HTTPException(400, "请选择要删除的消息")
+    ids = list(dict.fromkeys(str(item) for item in raw_ids if str(item).strip()))[:400]
+    if not ids:
+        raise HTTPException(400, "请选择要删除的消息")
+    current = _get_or_create_current_chat()
+    for message_id in ids:
+        message = db.message_get(message_id)
+        if not message or message["chat_id"] != current or message["role"] not in ("assistant", "user"):
+            raise HTTPException(400, "选择中含有不属于当前聊天的消息，请重新选择")
+    deleted = db.message_delete_many(ids)
+    return {"ok": True, "deleted": deleted}
+
+
 @app.get("/api/messages/{message_id}/versions", dependencies=authed)
 async def messages_versions(message_id: str):
     message = db.message_get(message_id)
