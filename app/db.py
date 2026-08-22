@@ -761,6 +761,43 @@ def chat_switch(chat_id: str) -> bool:
     return True
 
 
+def chat_branch_from_message(source_chat_id: str, message_id: str) -> dict | None:
+    """复制从开头到指定消息的一条时间线，原聊天不受影响。"""
+    with conn() as cx:
+        source = cx.execute("SELECT * FROM chats WHERE id=?", (source_chat_id,)).fetchone()
+        pivot = cx.execute("SELECT rowid,* FROM messages WHERE id=? AND chat_id=?", (message_id, source_chat_id)).fetchone()
+        if not source or not pivot:
+            return None
+        suffix = " · 分支"
+        base_name = (source["name"] or "对话").strip() or "对话"
+        branch = {"id": new_id(), "name": base_name[:max(1, 60 - len(suffix))] + suffix,
+                  "made": int(time.time()), "provider_id": source["provider_id"],
+                  "model_id": source["model_id"], "reasoning_effort": source["reasoning_effort"]}
+        cx.execute("""INSERT INTO chats (id,name,made,archived,provider_id,model_id,reasoning_effort)
+                      VALUES (:id,:name,:made,0,:provider_id,:model_id,:reasoning_effort)""", branch)
+        rows = cx.execute("SELECT rowid,* FROM messages WHERE chat_id=? AND rowid<=? ORDER BY rowid ASC",
+                          (source_chat_id, pivot["rowid"])).fetchall()
+        id_map: dict[str, str] = {}
+        for row in rows:
+            fresh = new_id(); id_map[row["id"]] = fresh
+            cx.execute("INSERT INTO messages (id,chat_id,role,content,made) VALUES (?,?,?,?,?)",
+                       (fresh, branch["id"], row["role"], row["content"], row["made"]))
+        for old_id, fresh in id_map.items():
+            versions = cx.execute("SELECT content,reason,made FROM message_versions WHERE message_id=? ORDER BY rowid ASC", (old_id,)).fetchall()
+            cx.executemany("INSERT INTO message_versions (id,message_id,content,reason,made) VALUES (?,?,?,?,?)",
+                           [(new_id(), fresh, item["content"], item["reason"], item["made"]) for item in versions])
+            calls = cx.execute("""SELECT name,arguments,result,is_error,made FROM tool_calls
+                                  WHERE assistant_message_id=? ORDER BY rowid ASC""", (old_id,)).fetchall()
+            cx.executemany("""INSERT INTO tool_calls (id,chat_id,assistant_message_id,name,arguments,result,is_error,made)
+                              VALUES (?,?,?,?,?,?,?,?)""",
+                           [(new_id(), branch["id"], fresh, item["name"], item["arguments"], item["result"], item["is_error"], item["made"]) for item in calls])
+        cx.execute("INSERT INTO chat_mcp_servers (chat_id,server_id) SELECT ?,server_id FROM chat_mcp_servers WHERE chat_id=?",
+                   (branch["id"], source_chat_id))
+        cx.execute("INSERT INTO chat_instruction_presets (chat_id,instruction_id) SELECT ?,instruction_id FROM chat_instruction_presets WHERE chat_id=?",
+                   (branch["id"], source_chat_id))
+    return {"id": branch["id"], "name": branch["name"], "made": branch["made"]}
+
+
 def chat_model_get(chat_id: str) -> dict:
     with conn() as cx:
         row = cx.execute(
