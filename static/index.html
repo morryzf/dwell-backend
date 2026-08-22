@@ -3699,6 +3699,25 @@ if (window.visualViewport) {
 /* 底部弹层的表单也要避开手机键盘。聊天输入框有自己的 fitKeyboard，
    这里仅滚动弹层内部的 .body，不移动整页或聊天 footer。 */
 let sheetFieldTimer = null;
+function fitOpenSheetsToKeyboard() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const gap = Math.max(0, Math.round(window.innerHeight - vv.height));
+  const keyboardOn = vv.offsetTop > 1 || gap > 20;
+  for (const sheet of document.querySelectorAll('.sheetWrap.open:not(.page) .sheet')) {
+    if (!keyboardOn) {
+      sheet.style.transform = '';
+      sheet.style.maxHeight = '';
+      continue;
+    }
+    // 弹层本身也必须离开键盘；仅滚动内部 body 不足以露出底部按钮。
+    sheet.style.maxHeight = Math.max(300, Math.floor(vv.height)) + 'px';
+    const seenBottom = vv.offsetTop + vv.height;
+    const rect = sheet.getBoundingClientRect();
+    const shift = Math.min(0, seenBottom - rect.bottom);
+    sheet.style.transform = shift ? 'translateY(' + shift + 'px)' : '';
+  }
+}
 function revealSheetField(field = document.activeElement) {
   if (!(field instanceof HTMLElement) || !field.matches('input:not([type="hidden"]), textarea, select, [contenteditable="true"]')) return;
   const wrap = field.closest('.sheetWrap.open');
@@ -3718,9 +3737,9 @@ function revealSheetField(field = document.activeElement) {
 }
 function scheduleSheetFieldReveal() {
   clearTimeout(sheetFieldTimer);
-  requestAnimationFrame(revealSheetField);
+  requestAnimationFrame(() => { fitOpenSheetsToKeyboard(); revealSheetField(); });
   // iOS 的键盘是动画弹出的；在动画结束后再校准一次。
-  sheetFieldTimer = setTimeout(revealSheetField, 380);
+  sheetFieldTimer = setTimeout(() => { fitOpenSheetsToKeyboard(); revealSheetField(); }, 380);
 }
 document.addEventListener('focusin', (event) => {
   if (event.target instanceof HTMLElement && event.target.closest('.sheetWrap.open')) scheduleSheetFieldReveal();
