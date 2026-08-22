@@ -1312,3 +1312,16 @@ def message_delete(msg_id: str) -> bool:
         cur = cx.execute("DELETE FROM messages WHERE id=?", (msg_id,))
     return cur.rowcount > 0
 
+
+def message_delete_many(msg_ids: list[str]) -> int:
+    """一次删多条消息，也一起清掉各自的版本和工具记录。"""
+    ids = list(dict.fromkeys(msg_ids))
+    if not ids:
+        return 0
+    marks = ",".join("?" for _ in ids)
+    with conn() as cx:
+        cx.execute(f"DELETE FROM message_versions WHERE message_id IN ({marks})", ids)
+        cx.execute(f"DELETE FROM tool_calls WHERE assistant_message_id IN ({marks})", ids)
+        cur = cx.execute(f"DELETE FROM messages WHERE id IN ({marks})", ids)
+    return cur.rowcount
+
