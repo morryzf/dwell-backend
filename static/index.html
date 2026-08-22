@@ -1796,7 +1796,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
         <button class="grow" id="rewakeRow"><span class="ic" data-i="refresh"></span>叫他重新醒一次<span class="val" id="rewakeVal">他要是卡住了就按</span></button>
         <button class="grow" id="themeRow"><span class="ic" data-i="moon"></span>夜间模式<span class="sw wait" id="themeSw"></span></button>
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>接入 API<span class="val" id="apiVal">…</span><span class="chev">›</span></button>
-        <button class="grow" id="mcpRow"><span class="ic" data-i="bolt"></span>MCP 工具<span class="chev">›</span></button>
+        <button class="grow" id="mcpRow"><span class="ic" data-i="tool"></span>MCP 工具<span class="chev">›</span></button>
         <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
         <button class="grow" id="kelivoImportRow"><span class="ic" data-i="plus"></span>导入 Kelivo 聊天记录<span class="chev">›</span></button>
         <button class="grow" id="longContextRow"><span class="ic" data-i="bookOpen"></span>对话长期上下文<span class="chev">›</span></button>
@@ -6886,6 +6886,7 @@ async function pickEffort(e) {
   try {
     const d = await (await fetch('api/model')).json();
     curEffort = d.effort || 'high';
+    currentProviderId = d.provider_id || '';
     setModelPill(d.model || '');
   } catch { setModelPill(''); }
 })();
@@ -6894,6 +6895,7 @@ async function pickEffort(e) {
 let catalogMode = 'favorites';
 let catalogData = { providers: [], items: [], favorites: [] };
 let catalogProviderId = '';
+let currentProviderId = '';
 
 async function getModelCatalog() {
   const d = await (await fetch('api/model-catalog', {cache:'no-store'})).json();
@@ -6905,6 +6907,7 @@ async function chooseCatalogModel(item) {
   try {
     const r = await (await fetch('api/model', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:item.provider_id,model:item.model_id})})).json();
     if (!r.ok) throw new Error(r.detail || '没有切换');
+    currentProviderId = item.provider_id || currentProviderId;
     setModelPill(item.model_id); modelSheetEl.classList.remove('open');
     note('（这间聊天换成 ' + item.model_id + ' 了）');
   } catch (e) { note('（没换上：' + e.message + '）', 'err'); }
@@ -6916,17 +6919,23 @@ async function setCatalogFavorite(item, favorite) {
     await getModelCatalog(); renderProviderModelPicker();
   } catch (e) { note('（常用模型没改上：' + e.message + '）', 'err'); }
 }
-function catalogRow(item, compact) {
+function catalogRow(item) {
   const row = document.createElement('div'); row.className = 'model-catalog-row';
   const name = document.createElement('span'); name.className = 'model-catalog-name'; name.textContent = item.model_id;
-  const provider = document.createElement('span'); provider.className = 'model-catalog-provider'; provider.textContent = item.provider_name || '';
-  const use = document.createElement('button'); use.className = 'model-catalog-action primary'; use.textContent = '使用'; use.onclick = () => chooseCatalogModel(item);
-  row.append(name, provider, use);
-  if (!compact) {
-    const fav = document.createElement('button'); fav.className = 'model-catalog-action'; fav.textContent = item.favorite ? '已常用' : '＋ 常用'; fav.onclick = () => setCatalogFavorite(item, !item.favorite); row.appendChild(fav);
-  } else {
-    const fav = document.createElement('button'); fav.className = 'model-catalog-action'; fav.textContent = '−'; fav.title = '移出常用'; fav.onclick = () => setCatalogFavorite(item, false); row.appendChild(fav);
+  const fav = document.createElement('button'); fav.className = 'model-catalog-action';
+  fav.textContent = item.favorite ? '已常用' : '＋ 常用';
+  fav.onclick = () => setCatalogFavorite(item, !item.favorite);
+  row.append(name, fav);
+  return row;
+}
+function composerModelRow(item) {
+  const row = document.createElement('button'); row.className = 'grow';
+  const name = document.createElement('span'); name.textContent = item.model_id;
+  row.appendChild(name);
+  if (item.provider_id === currentProviderId && item.model_id === curModel) {
+    const check = icEl('check', 17); check.classList.add('ck'); row.appendChild(check);
   }
+  row.onclick = () => chooseCatalogModel(item);
   return row;
 }
 function renderProviderModelPicker() {
@@ -6937,11 +6946,18 @@ function renderProviderModelPicker() {
   change.onclick = () => { catalogMode = catalogMode === 'favorites' ? 'browse' : 'favorites'; renderProviderModelPicker(); };
   top.appendChild(change); modelBody.appendChild(top);
   if (catalogMode === 'favorites') {
+    const current = (catalogData.items || []).find(item => item.provider_id === currentProviderId && item.model_id === curModel)
+      || (curModel ? { provider_id: currentProviderId, model_id: curModel } : null);
+    if (current) {
+      const label = document.createElement('div'); label.className = 'group-label'; label.textContent = '当前使用'; modelBody.appendChild(label);
+      const group = document.createElement('div'); group.className = 'group'; group.appendChild(composerModelRow(current)); modelBody.appendChild(group);
+    }
     const label = document.createElement('div'); label.className = 'group-label'; label.textContent = '常用模型'; modelBody.appendChild(label);
-    if (!catalogData.favorites.length) {
-      const empty = document.createElement('div'); empty.className = 'gnote'; empty.textContent = '还没有常用模型。去模型目录获取或手动添加，然后点「＋ 常用」。'; modelBody.appendChild(empty);
+    const favorites = (catalogData.favorites || []).filter(item => !(item.provider_id === currentProviderId && item.model_id === curModel));
+    if (!favorites.length) {
+      const empty = document.createElement('div'); empty.className = 'gnote'; empty.textContent = '还没有其他常用模型。常用项请在设置的模型目录里管理。'; modelBody.appendChild(empty);
     } else {
-      const group = document.createElement('div'); group.className = 'group'; catalogData.favorites.forEach(item => group.appendChild(catalogRow(item, true))); modelBody.appendChild(group);
+      const group = document.createElement('div'); group.className = 'group'; favorites.forEach(item => group.appendChild(composerModelRow(item))); modelBody.appendChild(group);
     }
     return;
   }
@@ -6958,7 +6974,7 @@ function renderProviderModelPicker() {
   const search = document.createElement('input'); search.className = 'ap-in'; search.placeholder = '输入模型名筛选'; modelBody.appendChild(search);
   const group = document.createElement('div'); group.className = 'group'; group.style.marginTop = '12px'; modelBody.appendChild(group);
   const all = () => catalogData.items.filter(item => item.provider_id === catalogProviderId && item.model_id.toLowerCase().includes(search.value.trim().toLowerCase())).slice(0, 300);
-  const draw = () => { group.innerHTML = ''; const items = all(); if (!items.length) { group.innerHTML = '<div class="gnote">还没有模型。先点「获取 / 刷新」，或在下面手动添加。</div>'; } else items.forEach(item => group.appendChild(catalogRow(item, false))); };
+  const draw = () => { group.innerHTML = ''; const items = all(); if (!items.length) { group.innerHTML = '<div class="gnote">还没有模型。先点「获取 / 刷新」，或在下面手动添加。</div>'; } else items.forEach(item => group.appendChild(catalogRow(item))); };
   search.oninput = draw; draw();
   const manual = document.createElement('div'); manual.className = 'ap-section'; manual.innerHTML = '<div class="ap-section-title">手动添加</div><div class="ap-lb">模型原始名称</div><input class="ap-in" id="catalogManualModel" placeholder="例如：[AG]gemini-3.5-flash-low"><div class="ap-btns single"><button class="ap-b" id="catalogManualSave">添加到常用</button></div>';
   manual.querySelector('#catalogManualSave').onclick = async () => { const model_id = manual.querySelector('#catalogManualModel').value.trim(); if (!model_id) return; try { const r=await (await fetch('api/model-catalog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:catalogProviderId,model_id,favorite:true,manual:true})})).json(); if(!r.ok) throw new Error(r.detail||'没有保存'); await getModelCatalog(); renderProviderModelPicker(); } catch(e) { note('（手动添加失败：'+e.message+'）','err'); } };
@@ -6967,8 +6983,13 @@ function renderProviderModelPicker() {
 async function openProviderModelPicker(mode = 'favorites') {
   catalogMode = mode; modelTitle.textContent = '模型'; modelBody.innerHTML = '<div class="gnote">正在打开模型目录…</div>'; modelSheetEl.classList.add('open');
   modelBack.innerHTML = ''; modelBack.appendChild(icEl('x', 16)); modelBack.onclick = () => modelSheetEl.classList.remove('open');
-  try { await getModelCatalog(); renderProviderModelPicker(); }
-  catch (e) { modelBody.innerHTML = '<div class="gnote">模型目录没拿到：' + instructionEsc(e.message) + '</div>'; }
+  try {
+    const selection = await (await fetch('api/model', {cache:'no-store'})).json();
+    currentProviderId = selection.provider_id || '';
+    setModelPill(selection.model || '');
+    await getModelCatalog();
+    renderProviderModelPicker();
+  } catch (e) { modelBody.innerHTML = '<div class="gnote">模型目录没拿到：' + instructionEsc(e.message) + '</div>'; }
 }
 pill.onclick = () => openProviderModelPicker('favorites');
 
