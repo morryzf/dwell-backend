@@ -52,6 +52,55 @@ WEB_TOOLS = [
         "parameters": {"type": "object", "properties": {"url": {"type": "string", "description": "Public http(s) URL"}}, "required": ["url"], "additionalProperties": False},
     }},
 ]
+
+HOME_TODO_TOOLS = [
+    {"type": "function", "function": {
+        "name": "DwellTodoList", "description": "Read the shared Dwell todo lists. Use this to check what is pending or completed at home.",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "DwellTodoAdd", "description": "Add a todo to Dwell. Use hers for the user's list and mine for Cloudy's list.",
+        "parameters": {"type": "object", "properties": {
+            "list": {"type": "string", "enum": ["hers", "mine"], "description": "Which Dwell todo list"},
+            "text": {"type": "string", "description": "The todo text"},
+            "at": {"type": "string", "description": "Optional natural reminder/time text"},
+            "daily": {"type": "boolean", "description": "Whether this is a repeating fixed todo"},
+        }, "required": ["list", "text"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "DwellTodoToggle", "description": "Toggle a Dwell todo between pending and done. Read the list first to get its id.",
+        "parameters": {"type": "object", "properties": {
+            "list": {"type": "string", "enum": ["hers", "mine"], "description": "Which Dwell todo list"},
+            "id": {"type": "string", "description": "Todo id from DwellTodoList"},
+        }, "required": ["list", "id"], "additionalProperties": False},
+    }},
+]
+
+
+def home_todo_tool(name: str, arguments: dict) -> str:
+    """执行用户为这间聊天明确开启的 Dwell 待办工具。"""
+    if name == "DwellTodoList":
+        return json.dumps({"ok": True, "todos": db.todos_all()}, ensure_ascii=False)
+    side = str(arguments.get("list") or "").strip()
+    if side not in {"hers", "mine"}:
+        raise ValueError("待办列表只能是 hers 或 mine")
+    if name == "DwellTodoAdd":
+        todo_text = str(arguments.get("text") or "").strip()
+        if not todo_text:
+            raise ValueError("待办内容不能为空")
+        item = db.todo_add(
+            side, todo_text, str(arguments.get("at") or ""),
+            by="cloudy", fixed=bool(arguments.get("daily")),
+        )
+        return json.dumps({"ok": True, "todo": item, "todos": db.todos_all()}, ensure_ascii=False)
+    if name == "DwellTodoToggle":
+        item_id = str(arguments.get("id") or "").strip()
+        if not item_id:
+            raise ValueError("需要待办 id")
+        if not db.todo_toggle(side, item_id):
+            raise ValueError("没有找到这条待办")
+        return json.dumps({"ok": True, "todos": db.todos_all()}, ensure_ascii=False)
+    raise ValueError("未知的家里工具")
 # 每个 chat 一条事件队列，poll 从这里拿事件推给前端。
 _event_queues: dict[str, asyncio.Queue] = {}
 # 每个 chat 的事件游标，从 1 开始
@@ -958,8 +1007,12 @@ async def mcp_test(request: Request):
 async def mcp_chat_get():
     chat_id = _get_or_create_current_chat()
     selected = set(db.chat_mcp_server_ids(chat_id))
-    return {"ok": True, "chat_id": chat_id,
-            "items": [{**item, "selected": item["id"] in selected} for item in db.mcp_server_list()]}
+    return {
+        "ok": True,
+        "chat_id": chat_id,
+        "home_todos_enabled": db.chat_home_todos_enabled(chat_id),
+        "items": [{**item, "selected": item["id"] in selected} for item in db.mcp_server_list()],
+    }
 
 
 @app.post("/api/mcp/chat", dependencies=authed)
@@ -968,9 +1021,18 @@ async def mcp_chat_set(request: Request):
     server_ids = payload.get("server_ids")
     if not isinstance(server_ids, list) or not all(isinstance(item, str) for item in server_ids):
         raise HTTPException(400, "server_ids 必须是字符串数组")
+    enabled = payload.get("home_todos_enabled", False)
+    if not isinstance(enabled, bool):
+        raise HTTPException(400, "home_todos_enabled 必须是布尔值")
     chat_id = _get_or_create_current_chat()
     db.chat_mcp_servers_set(chat_id, server_ids)
-    return {"ok": True, "chat_id": chat_id, "server_ids": db.chat_mcp_server_ids(chat_id)}
+    db.chat_home_todos_set(chat_id, enabled)
+    return {
+        "ok": True,
+        "chat_id": chat_id,
+        "server_ids": db.chat_mcp_server_ids(chat_id),
+        "home_todos_enabled": db.chat_home_todos_enabled(chat_id),
+    }
 
 
 # ---------------------------------------------------------------- 聊天指令
@@ -1491,6 +1553,10 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         tools = list(WEB_TOOLS)
         tool_map["WebSearch"] = "builtin:search"
         tool_map["WebFetch"] = "builtin:fetch"
+        if db.chat_home_todos_enabled(chat_id):
+            tools.extend(HOME_TODO_TOOLS)
+            for tool in HOME_TODO_TOOLS:
+                tool_map[tool["function"]["name"]] = "builtin:home"
         for server in db.chat_mcp_servers(chat_id):
             try:
                 server_tools = await mcp_list_tools(server)
@@ -1546,6 +1612,9 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                         is_error = False
                     elif server == "builtin:fetch":
                         result = await web_fetch(arguments.get("url", ""))
+                        is_error = False
+                    elif server == "builtin:home":
+                        result = home_todo_tool(name, arguments)
                         is_error = False
                     elif not server:
                         raise ValueError("模型请求了未启用的 MCP 工具")
