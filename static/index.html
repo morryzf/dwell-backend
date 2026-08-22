@@ -633,11 +633,18 @@ html[data-theme="dark"] .composer {
   .model-catalog-action { flex: none; min-width: 42px; min-height: 32px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); color: var(--text); font-size: 13px; font-weight: 700; }
   .model-catalog-action.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
   .row { position: relative; }
-  .msg-actions { display: none; position: absolute; z-index: 8; left: 0; bottom: calc(100% + 7px); gap: 6px; max-width: calc(100vw - 36px); padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: 0 8px 22px rgba(0,0,0,.16); }
+  .row.actions-on { padding-bottom: 46px; }
+  .msg-actions { display: none; position: absolute; z-index: 8; left: 0; bottom: 0; gap: 7px; max-width: calc(100vw - 36px); padding: 4px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: 0 8px 22px rgba(0,0,0,.16); }
   .row.me .msg-actions { left: auto; right: 0; }
   .msg-actions.on { display: flex; }
-  .msg-action { padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--dim); background: var(--panel); font-size: 12px; white-space: nowrap; }
+  .msg-action { width: 36px; height: 36px; padding: 0; border: 1px solid var(--line); border-radius: 10px; color: var(--dim); background: var(--panel); display: flex; align-items: center; justify-content: center; }
+  .msg-action .ic { width: 17px; height: 17px; }
   .msg-action.danger { color: var(--red); }
+  .msg-more { display: none; position: absolute; left: 0; bottom: calc(100% + 6px); min-width: 148px; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: 0 8px 22px rgba(0,0,0,.16); }
+  .row.me .msg-more { left: auto; right: 0; }
+  .msg-more.on { display: grid; }
+  .msg-more button { padding: 9px 10px; border-radius: 8px; background: transparent; color: var(--text); text-align: left; font-size: 13px; white-space: nowrap; }
+  .msg-more button:active { background: var(--panel); }
   #messageSelectBar {
     position: fixed; z-index: 50; left: 50%; top: calc(env(safe-area-inset-top) + 10px); transform: translateX(-50%);
     display: none; align-items: center; gap: 8px; min-width: min(440px, calc(100vw - 24px));
@@ -1706,7 +1713,6 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
 </footer>
 
 <div class="menuCard" id="dotsMenu">
-  <button class="mi" data-act="selectMessages"><span class="ic" data-i="checkSquare"></span>选择消息</button>
   <button class="mi" data-act="find"><span class="ic" data-i="search"></span>搜索</button>
   <button class="mi" data-act="ctx"><span class="ic" data-i="gauge"></span>容量</button>
   <button class="mi" data-act="rename"><span class="ic" data-i="tag"></span>备注</button>
@@ -2151,6 +2157,8 @@ const ICONS = {
   sliders: S('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
   chat: S('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'),
   pen: S('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>'),
+  volume: S('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/>'),
+  branch: S('<circle cx="6" cy="4.5" r="2"/><circle cx="18" cy="5.5" r="2"/><circle cx="6" cy="19.5" r="2"/><path d="M6 6.5v11"/><path d="M8 6.5c5 0 3-1 8-1"/>'),
   image: S('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>'),
   bookOpen: S('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>'),
   book: S('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'),
@@ -2377,7 +2385,12 @@ function ensureGu() {
   return guEl;
 }
 function closeMessageActions(except) {
-  document.querySelectorAll('.msg-actions.on').forEach(actions => { if (actions !== except) actions.classList.remove('on'); });
+  document.querySelectorAll('.msg-actions.on').forEach(actions => {
+    if (actions === except) return;
+    actions.classList.remove('on'); actions.classList.remove('more-on');
+    actions.parentElement?.classList.remove('actions-on');
+    actions.querySelector('.msg-more')?.classList.remove('on');
+  });
 }
 let messageSelectionMode = false;
 const selectedMessageIds = new Set();
@@ -2429,31 +2442,52 @@ function attachMessageActions(el, message) {
   const rowEl = el.parentElement;
   rowEl.dataset.messageId = message.id;
   const actions = document.createElement('div'); actions.className = 'msg-actions';
+  const close = () => { actions.classList.remove('on'); actions.classList.remove('more-on'); rowEl.classList.remove('actions-on'); actions.querySelector('.msg-more')?.classList.remove('on'); };
+  const addAction = (icon, title, handler, danger) => {
+    const button = document.createElement('button'); button.className = 'msg-action' + (danger ? ' danger' : '');
+    button.title = title; button.setAttribute('aria-label', title); button.appendChild(icEl(icon, 17));
+    button.onclick = async (event) => { event.stopPropagation(); await handler(); };
+    actions.appendChild(button);
+  };
   el.addEventListener('click', (event) => {
     if (event.target.closest('button,a')) return;
     event.stopPropagation();
     if (messageSelectionMode) { toggleMessageSelection(message.id); return; }
     const opening = !actions.classList.contains('on'); closeMessageActions(actions);
-    actions.classList.toggle('on', opening);
+    actions.classList.toggle('on', opening); rowEl.classList.toggle('actions-on', opening);
   });
-  const edit = document.createElement('button'); edit.className = 'msg-action'; edit.textContent = '编辑'; edit.onclick = (event) => { event.stopPropagation(); actions.classList.remove('on'); openMessageEditor(message); };
-  const del = document.createElement('button'); del.className = 'msg-action'; del.textContent = '删除'; del.onclick = async () => {
-    if (!confirm('删除这条消息？之后的聊天不会再读到它。')) return;
-    try { const r = await fetch('api/messages/' + encodeURIComponent(message.id), {method:'DELETE'}); if (!r.ok) throw new Error('没有删除'); await loadSaid(); }
-    catch (e) { note('（没删掉：' + e.message + '）', 'err'); }
-  };
-  del.classList.add('danger');
-  actions.append(edit, del);
+  addAction('pen', '编辑消息', () => { close(); openMessageEditor(message); });
   if (message.role === 'assistant') {
-    const regen = document.createElement('button'); regen.className = 'msg-action'; regen.textContent = '重新生成'; regen.onclick = async (event) => {
-      event.stopPropagation(); actions.classList.remove('on');
+    addAction('refresh', '重新生成', async () => {
+      close();
       if (!confirm('重新生成这条回复？当前回复会保留在版本记录中。')) return;
       try { const r = await fetch('api/messages/' + encodeURIComponent(message.id) + '/regenerate',{method:'POST'}); const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.detail||'没有开始生成'); }
       catch (e) { note('（没能重新生成：' + e.message + '）', 'err'); }
-    };
-    const versions = document.createElement('button'); versions.className = 'msg-action'; versions.textContent = '版本'; versions.onclick = (event) => { event.stopPropagation(); actions.classList.remove('on'); openMessageVersions(message); };
-    actions.append(regen, versions);
+    });
+    addAction('volume', '生成语音（即将接入）', () => note('（语音功能还在接线，先给它留了位置）'));
   }
+  addAction('trash', '删除消息', async () => {
+    close();
+    if (!confirm('删除这条消息？之后的聊天不会再读到它。')) return;
+    try { const r = await fetch('api/messages/' + encodeURIComponent(message.id), {method:'DELETE'}); if (!r.ok) throw new Error('没有删除'); await loadSaid(); }
+    catch (e) { note('（没删掉：' + e.message + '）', 'err'); }
+  }, true);
+  const more = document.createElement('button'); more.className = 'msg-action'; more.title = '更多消息操作'; more.setAttribute('aria-label', '更多消息操作'); more.appendChild(icEl('dots', 17));
+  const moreMenu = document.createElement('div'); moreMenu.className = 'msg-more';
+  const addMore = (label, handler) => { const button = document.createElement('button'); button.textContent = label; button.onclick = async (event) => { event.stopPropagation(); await handler(); }; moreMenu.appendChild(button); };
+  addMore('选择消息', () => { close(); setMessageSelectionMode(true); toggleMessageSelection(message.id); });
+  if (message.role === 'assistant') addMore('查看版本', () => { close(); openMessageVersions(message); });
+  addMore('创建分支', async () => {
+    close();
+    if (!confirm('从这条消息创建一条新分支？新聊天会保留这条及之前的历史，原聊天不会改变。')) return;
+    try {
+      const r = await fetch('api/messages/' + encodeURIComponent(message.id) + '/branch', {method:'POST'}); const d = await r.json();
+      if (!r.ok || !d.ok || !d.chat) throw new Error(d.detail || '没能创建分支');
+      showChatHere(d.chat); note('（从这里开出了一条新分支）');
+    } catch (e) { note('（没开成分支：' + e.message + '）', 'err'); }
+  });
+  more.onclick = (event) => { event.stopPropagation(); const open = !moreMenu.classList.contains('on'); moreMenu.classList.toggle('on', open); actions.classList.toggle('more-on', open); };
+  actions.append(more, moreMenu);
   actions.onclick = event => event.stopPropagation();
   rowEl.appendChild(actions);
 }
@@ -5657,7 +5691,6 @@ dotsMenu.querySelectorAll('.mi').forEach(b => b.onclick = async () => {
   dotsMenu.classList.remove('open');
   const act = b.dataset.act;
   if (act === 'scroll-bottom') scroll(true);
-  if (act === 'selectMessages') setMessageSelectionMode(true);
   if (act === 'settings') sheets.settings.classList.add('open');
   if (act === 'ctx') { sheets.ctx.classList.add('open'); loadContext(); }
   if (act === 'rename') {
