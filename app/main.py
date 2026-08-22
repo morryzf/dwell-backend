@@ -1345,6 +1345,19 @@ async def messages_bulk_delete(request: Request):
     return {"ok": True, "deleted": deleted}
 
 
+@app.post("/api/messages/{message_id}/branch", dependencies=authed)
+async def messages_branch(message_id: str):
+    current = _get_or_create_current_chat()
+    message = db.message_get(message_id)
+    if not message or message["chat_id"] != current or message["role"] not in ("assistant", "user"):
+        raise HTTPException(404, "找不到这条消息")
+    branch = db.chat_branch_from_message(current, message_id)
+    if not branch:
+        raise HTTPException(400, "没能创建分支")
+    db.chat_switch(branch["id"])
+    return {"ok": True, "chat": branch}
+
+
 @app.get("/api/messages/{message_id}/versions", dependencies=authed)
 async def messages_versions(message_id: str):
     message = db.message_get(message_id)
