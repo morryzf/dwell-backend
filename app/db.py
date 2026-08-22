@@ -254,6 +254,13 @@ CREATE TABLE IF NOT EXISTS chat_mcp_servers (
     FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
 );
 
+-- Dwell 自己的“家里工具”也按聊天单独授权；目前先放待办，后续可平滑扩展。
+CREATE TABLE IF NOT EXISTS chat_home_tools (
+    chat_id            TEXT PRIMARY KEY,
+    todos_enabled      INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+
 -- 可复用的聊天指令，以及每间聊天各自启用的集合。
 CREATE TABLE IF NOT EXISTS instruction_presets (
     id      TEXT PRIMARY KEY,
@@ -1223,6 +1230,26 @@ def chat_mcp_servers_set(chat_id: str, server_ids: list[str]) -> bool:
         cx.executemany(
             "INSERT INTO chat_mcp_servers (chat_id,server_id) VALUES (?,?)",
             [(chat_id, server_id) for server_id in clean],
+        )
+    return True
+
+
+def chat_home_todos_enabled(chat_id: str) -> bool:
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT todos_enabled FROM chat_home_tools WHERE chat_id=?", (chat_id,)
+        ).fetchone()
+    return bool(row and row["todos_enabled"])
+
+
+def chat_home_todos_set(chat_id: str, enabled: bool) -> bool:
+    if not chat_get(chat_id):
+        return False
+    with conn() as cx:
+        cx.execute(
+            "INSERT INTO chat_home_tools (chat_id,todos_enabled) VALUES (?,?) "
+            "ON CONFLICT(chat_id) DO UPDATE SET todos_enabled=excluded.todos_enabled",
+            (chat_id, 1 if enabled else 0),
         )
     return True
 
