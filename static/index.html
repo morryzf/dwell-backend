@@ -3707,8 +3707,13 @@ function revealSheetField(field = document.activeElement) {
   if (!wrap || !body) return;
   const fieldRect = field.getBoundingClientRect();
   const bodyRect = body.getBoundingClientRect();
-  const targetY = bodyRect.top + Math.max(48, Math.min(bodyRect.height * .34, bodyRect.height - 48));
-  const delta = fieldRect.top + Math.min(fieldRect.height, 48) / 2 - targetY;
+  const vv = window.visualViewport;
+  // 大文本框不能只把顶部移进来；可见底线必须取键盘上沿。
+  const visibleTop = Math.max(bodyRect.top + 16, (vv ? vv.offsetTop : 0) + 16);
+  const visibleBottom = Math.min(bodyRect.bottom - 16, vv ? vv.offsetTop + vv.height - 16 : window.innerHeight - 16);
+  let delta = 0;
+  if (fieldRect.bottom > visibleBottom) delta = fieldRect.bottom - visibleBottom;
+  else if (fieldRect.top < visibleTop) delta = fieldRect.top - visibleTop;
   if (Math.abs(delta) > 6) body.scrollBy({ top: delta, behavior: 'smooth' });
 }
 function scheduleSheetFieldReveal() {
