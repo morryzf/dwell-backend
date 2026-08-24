@@ -32,8 +32,6 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 # 正在跑的 AI 回复任务。key=chat_id，value=asyncio.Task
 _running_tasks: dict[str, asyncio.Task] = {}
-# 观影页的最新私有剧情笔记。只在进程内短暂保留，不写入聊天记录或数据库。
-_watch_notes: dict[tuple[str, str], dict] = {}
 _kelivo_uploads: dict[str, tuple[str, float]] = {}
 # 长期上下文的后台整理任务。它和正常回复分开，不能占用聊天的流式状态。
 _memory_tasks: dict[str, asyncio.Task] = {}
@@ -52,55 +50,6 @@ WEB_TOOLS = [
         "parameters": {"type": "object", "properties": {"url": {"type": "string", "description": "Public http(s) URL"}}, "required": ["url"], "additionalProperties": False},
     }},
 ]
-
-HOME_TODO_TOOLS = [
-    {"type": "function", "function": {
-        "name": "DwellTodoList", "description": "Read the shared Dwell todo lists. Use this to check what is pending or completed at home.",
-        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-    }},
-    {"type": "function", "function": {
-        "name": "DwellTodoAdd", "description": "Add a todo to Dwell. Use hers for the user's list and mine for Cloudy's list.",
-        "parameters": {"type": "object", "properties": {
-            "list": {"type": "string", "enum": ["hers", "mine"], "description": "Which Dwell todo list"},
-            "text": {"type": "string", "description": "The todo text"},
-            "at": {"type": "string", "description": "Optional natural reminder/time text"},
-            "daily": {"type": "boolean", "description": "Whether this is a repeating fixed todo"},
-        }, "required": ["list", "text"], "additionalProperties": False},
-    }},
-    {"type": "function", "function": {
-        "name": "DwellTodoToggle", "description": "Toggle a Dwell todo between pending and done. Read the list first to get its id.",
-        "parameters": {"type": "object", "properties": {
-            "list": {"type": "string", "enum": ["hers", "mine"], "description": "Which Dwell todo list"},
-            "id": {"type": "string", "description": "Todo id from DwellTodoList"},
-        }, "required": ["list", "id"], "additionalProperties": False},
-    }},
-]
-
-
-def home_todo_tool(name: str, arguments: dict) -> str:
-    """执行用户为这间聊天明确开启的 Dwell 待办工具。"""
-    if name == "DwellTodoList":
-        return json.dumps({"ok": True, "todos": db.todos_all()}, ensure_ascii=False)
-    side = str(arguments.get("list") or "").strip()
-    if side not in {"hers", "mine"}:
-        raise ValueError("待办列表只能是 hers 或 mine")
-    if name == "DwellTodoAdd":
-        todo_text = str(arguments.get("text") or "").strip()
-        if not todo_text:
-            raise ValueError("待办内容不能为空")
-        item = db.todo_add(
-            side, todo_text, str(arguments.get("at") or ""),
-            by="cloudy", fixed=bool(arguments.get("daily")),
-        )
-        return json.dumps({"ok": True, "todo": item, "todos": db.todos_all()}, ensure_ascii=False)
-    if name == "DwellTodoToggle":
-        item_id = str(arguments.get("id") or "").strip()
-        if not item_id:
-            raise ValueError("需要待办 id")
-        if not db.todo_toggle(side, item_id):
-            raise ValueError("没有找到这条待办")
-        return json.dumps({"ok": True, "todos": db.todos_all()}, ensure_ascii=False)
-    raise ValueError("未知的家里工具")
 # 每个 chat 一条事件队列，poll 从这里拿事件推给前端。
 _event_queues: dict[str, asyncio.Queue] = {}
 # 每个 chat 的事件游标，从 1 开始
@@ -129,6 +78,7 @@ def _emit(chat_id: str, event: dict):
         _event_queues[chat_id].put_nowait(event)
     except asyncio.QueueFull:
         pass
+
 
 def _memory_cutoff(chat_id: str) -> int:
     """近期原文不压缩。返回可安全写进长期摘要的最后一个 rowid。"""
@@ -170,7 +120,8 @@ async def _memory_completion(provider: dict, model_id: str, system: str, user: s
 async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
     """把远离近期窗口的消息按段压缩，并更新一份供下一轮注入的总览。"""
     try:
-        if not db.chat_get(chat_id):
+        chat = db.chat_get(chat_id)
+        if not chat:
             return
         if reset:
             db.chat_memory_reset(chat_id)
@@ -183,6 +134,7 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
         db.chat_memory_set_status(chat_id, "running", enabled=True)
         cutoff = _memory_cutoff(chat_id)
         if cutoff <= 0:
+            # 聊天尚短时，近期原文已经足够；仍标记为启用，以后会自动接续。
             db.chat_memory_finish(chat_id, state.get("overview", ""), 0)
             return
 
@@ -248,7 +200,6 @@ def _queue_long_context_refresh(chat_id: str, reset: bool = False, force: bool =
     task = asyncio.create_task(_refresh_long_context(chat_id, reset=reset))
     _memory_tasks[chat_id] = task
     return True
-
 
 import json
 
@@ -1007,12 +958,8 @@ async def mcp_test(request: Request):
 async def mcp_chat_get():
     chat_id = _get_or_create_current_chat()
     selected = set(db.chat_mcp_server_ids(chat_id))
-    return {
-        "ok": True,
-        "chat_id": chat_id,
-        "home_todos_enabled": db.chat_home_todos_enabled(chat_id),
-        "items": [{**item, "selected": item["id"] in selected} for item in db.mcp_server_list()],
-    }
+    return {"ok": True, "chat_id": chat_id,
+            "items": [{**item, "selected": item["id"] in selected} for item in db.mcp_server_list()]}
 
 
 @app.post("/api/mcp/chat", dependencies=authed)
@@ -1021,18 +968,9 @@ async def mcp_chat_set(request: Request):
     server_ids = payload.get("server_ids")
     if not isinstance(server_ids, list) or not all(isinstance(item, str) for item in server_ids):
         raise HTTPException(400, "server_ids 必须是字符串数组")
-    enabled = payload.get("home_todos_enabled", False)
-    if not isinstance(enabled, bool):
-        raise HTTPException(400, "home_todos_enabled 必须是布尔值")
     chat_id = _get_or_create_current_chat()
     db.chat_mcp_servers_set(chat_id, server_ids)
-    db.chat_home_todos_set(chat_id, enabled)
-    return {
-        "ok": True,
-        "chat_id": chat_id,
-        "server_ids": db.chat_mcp_server_ids(chat_id),
-        "home_todos_enabled": db.chat_home_todos_enabled(chat_id),
-    }
+    return {"ok": True, "chat_id": chat_id, "server_ids": db.chat_mcp_server_ids(chat_id)}
 
 
 # ---------------------------------------------------------------- 聊天指令
@@ -1081,6 +1019,21 @@ async def chat_instructions_set(request: Request):
     chat_id = _get_or_create_current_chat()
     db.chat_instructions_set(chat_id, instruction_ids)
     return {"ok": True, "chat_id": chat_id, "instruction_ids": db.chat_instruction_ids(chat_id)}
+
+
+@app.get("/api/reply-style", dependencies=authed)
+async def reply_style_get():
+    chat_id = _get_or_create_current_chat()
+    return {"ok": True, "chat_id": chat_id, "split_replies": db.chat_split_replies_get(chat_id)}
+
+
+@app.post("/api/reply-style", dependencies=authed)
+async def reply_style_set(request: Request):
+    payload = await _read_json(request)
+    chat_id = _get_or_create_current_chat()
+    enabled = bool(payload.get("split_replies"))
+    db.chat_split_replies_set(chat_id, enabled)
+    return {"ok": True, "chat_id": chat_id, "split_replies": enabled}
 
 
 @app.post("/api/provider-test", dependencies=authed)
@@ -1293,7 +1246,6 @@ async def messages_get(chat_id: str = "", limit: int = 400, before: int | None =
     return {"ok": True, **data}
 
 
-
 @app.get("/api/chats/{chat_id}/long-context", dependencies=authed)
 async def long_context_get(chat_id: str):
     if not db.chat_get(chat_id):
@@ -1315,21 +1267,6 @@ async def long_context_post(chat_id: str, request: Request):
     state = db.chat_memory_get(chat_id)
     return {"ok": True, "started": started, **state}
 
-@app.put("/api/chats/{chat_id}/long-context", dependencies=authed)
-async def long_context_put(chat_id: str, request: Request):
-    """保存用户编辑过的长期记忆；原聊天和分段记录不受影响。"""
-    if not db.chat_get(chat_id):
-        raise HTTPException(404, "chat 不存在")
-    task = _memory_tasks.get(chat_id)
-    if task and not task.done():
-        raise HTTPException(409, "长期上下文正在整理，请完成后再编辑")
-    payload = await _read_json(request)
-    overview = payload.get("overview")
-    if not isinstance(overview, str):
-        raise HTTPException(400, "overview 必须是文本")
-    db.chat_memory_save_overview(chat_id, overview)
-    state = db.chat_memory_get(chat_id)
-    return {"ok": True, **state}
 
 @app.post("/api/import/kelivo/preview", dependencies=authed)
 async def kelivo_import_preview(file: UploadFile = File(...)):
@@ -1423,19 +1360,6 @@ async def messages_bulk_delete(request: Request):
     return {"ok": True, "deleted": deleted}
 
 
-@app.post("/api/messages/{message_id}/branch", dependencies=authed)
-async def messages_branch(message_id: str):
-    current = _get_or_create_current_chat()
-    message = db.message_get(message_id)
-    if not message or message["chat_id"] != current or message["role"] not in ("assistant", "user"):
-        raise HTTPException(404, "找不到这条消息")
-    branch = db.chat_branch_from_message(current, message_id)
-    if not branch:
-        raise HTTPException(400, "没能创建分支")
-    db.chat_switch(branch["id"])
-    return {"ok": True, "chat": branch}
-
-
 @app.get("/api/messages/{message_id}/versions", dependencies=authed)
 async def messages_versions(message_id: str):
     message = db.message_get(message_id)
@@ -1477,8 +1401,7 @@ def _get_or_create_current_chat() -> str:
     return chat["id"]
 
 
-async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None,
-                        proactive_watch: bool = False):
+async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None):
     """调用当前聊天所选供应商，边收边发事件给前端。"""
     history = db.message_list(chat_id, limit=100)
     instructions = [
@@ -1486,6 +1409,14 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         for item in db.chat_instructions(chat_id)
         if item.get("content", "").strip()
     ]
+    split_replies = db.chat_split_replies_get(chat_id)
+    if split_replies:
+        instructions.append({
+            "role": "system",
+            "content": "【输出方式】这是分条聊天。每当你想自然停顿、换一句继续时，"
+                       "在两条消息之间单独输出 <dwell-split>。不要把这个标记展示给用户；"
+                       "不要为了普通段落、列表或代码块而机械拆分。",
+        })
     long_context = db.chat_memory_get(chat_id)
     memory_message = []
     if long_context.get("enabled") and long_context.get("overview", "").strip():
@@ -1516,34 +1447,19 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         )
         if subtitles:
             note += f"\n附近字幕：\n{subtitles}"
-        summary = str(watch_context.get("summary") or "").strip()[:3000]
-        if summary:
-            note += f"\nCloudy 刚刚自己整理的当前剧情笔记：\n{summary}"
-        images = [
-            image for image in (watch_context.get("images") or [])
-            if isinstance(image, str) and image.startswith("data:image/")
-        ]
-        if proactive_watch:
-            prompt = (
-                "【内部观影提醒】你刚收到当前画面和这段已播放剧情。"
-                "请像正在一起看的人那样，主动发一条自然、简短、无剧透的反应；"
-                "可以提画面细节、情绪或线索，但不要解释系统、截图、时间戳或这条指令。"
-            )
-            messages.append({"role": "user", "content": [
-                {"type": "text", "text": prompt + note},
-                *[{"type": "image_url", "image_url": {"url": image, "detail": "low"}} for image in images],
-            ]})
-        else:
-            for index in range(len(messages) - 1, -1, -1):
-                if messages[index]["role"] == "user":
-                    content = [{"type": "text", "text": str(messages[index]["content"]) + note}]
-                    content.extend(
-                        {"type": "image_url", "image_url": {"url": image, "detail": "low"}}
-                        for image in images
-                    )
-                    messages[index] = {**messages[index], "content": content}
-                    break
+        for index in range(len(messages) - 1, -1, -1):
+            if messages[index]["role"] == "user":
+                content = [{"type": "text", "text": str(messages[index]["content"]) + note}]
+                for image in watch_context.get("images") or []:
+                    # 仅接收浏览器刚截出的 data: 图片；长度在 API 层也有限制。
+                    if isinstance(image, str) and image.startswith("data:image/"):
+                        content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
+                messages[index] = {**messages[index], "content": content}
+                break
     buf = []
+    split_marker = "<dwell-split>"
+    split_pending = ""
+    current_message_id = msg_id
     selection = db.chat_model_get(chat_id)
     provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
     try:
@@ -1553,10 +1469,6 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         tools = list(WEB_TOOLS)
         tool_map["WebSearch"] = "builtin:search"
         tool_map["WebFetch"] = "builtin:fetch"
-        if db.chat_home_todos_enabled(chat_id):
-            tools.extend(HOME_TODO_TOOLS)
-            for tool in HOME_TODO_TOOLS:
-                tool_map[tool["function"]["name"]] = "builtin:home"
         for server in db.chat_mcp_servers(chat_id):
             try:
                 server_tools = await mcp_list_tools(server)
@@ -1566,17 +1478,51 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 tools.append(tool)
                 tool_map[tool["function"]["name"]] = server
 
+        def append_stream_text(text: str):
+            if not text:
+                return
+            buf.append(text)
+            db.message_update(current_message_id, "".join(buf))
+            _emit(chat_id, {
+                "type": "stream_event",
+                "event": {"delta": {"type": "text_delta", "text": text}},
+            })
+
+        def split_stream_message():
+            nonlocal current_message_id, buf
+            text = "".join(buf).strip()
+            if not text:
+                return
+            db.message_update(current_message_id, text)
+            _emit(chat_id, {"type": "assistant_split", "message_id": current_message_id, "text": text})
+            current_message_id = db.message_add(chat_id, "assistant", "")["id"]
+            buf = []
+
+        def consume_stream_chunk(chunk: str, final: bool = False):
+            nonlocal split_pending
+            if not split_replies:
+                append_stream_text(chunk)
+                return
+            split_pending += chunk
+            while True:
+                marker_at = split_pending.find(split_marker)
+                if marker_at >= 0:
+                    append_stream_text(split_pending[:marker_at])
+                    split_pending = split_pending[marker_at + len(split_marker):]
+                    split_stream_message()
+                    continue
+                safe_length = len(split_pending) if final else max(0, len(split_pending) - len(split_marker) + 1)
+                if safe_length:
+                    append_stream_text(split_pending[:safe_length])
+                    split_pending = split_pending[safe_length:]
+                break
+
         for round_no in range(8):
             calls = []
             async for event in stream_chat(provider, selection["model_id"], messages, tools or None):
                 if event["type"] == "text":
                     chunk = event["text"]
-                    buf.append(chunk)
-                    db.message_update(msg_id, "".join(buf))
-                    _emit(chat_id, {
-                        "type": "stream_event",
-                        "event": {"delta": {"type": "text_delta", "text": chunk}},
-                    })
+                    consume_stream_chunk(chunk)
                 elif event["type"] == "tool_calls":
                     calls.extend(event["calls"])
             if not calls:
@@ -1613,9 +1559,6 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     elif server == "builtin:fetch":
                         result = await web_fetch(arguments.get("url", ""))
                         is_error = False
-                    elif server == "builtin:home":
-                        result = home_todo_tool(name, arguments)
-                        is_error = False
                     elif not server:
                         raise ValueError("模型请求了未启用的 MCP 工具")
                     else:
@@ -1633,7 +1576,9 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
         else:
             raise RuntimeError("MCP 工具调用轮数超过上限")
+        consume_stream_chunk("", final=True)
         full = "".join(buf).strip()
+        db.message_update(current_message_id, full)
         _emit(chat_id, {
             "type": "assistant",
             "message": {
@@ -1645,7 +1590,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         _queue_long_context_refresh(chat_id)
     except asyncio.CancelledError:
         if buf:
-            db.message_update(msg_id, "".join(buf) + "\n[已停止]")
+            db.message_update(current_message_id, "".join(buf) + "\n[已停止]")
             _emit(chat_id, {
                 "type": "assistant",
                 "message": {
@@ -1656,7 +1601,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         raise
     except Exception as exc:
         text = f"[配置错误] {exc}"
-        db.message_update(msg_id, text)
+        db.message_update(current_message_id, text)
         _emit(chat_id, {
             "type": "assistant",
             "message": {"content": [{"type": "text", "text": text}]},
@@ -1685,93 +1630,6 @@ async def send(request: Request):
     return {"ok": True}
 
 
-@app.post("/api/watch/proactive", dependencies=authed)
-async def watch_proactive(request: Request):
-    """把当前画面交给 Cloudy，并让他主动发一条文字反应；图片不落库。"""
-    payload = await _read_json(request)
-    chat_id = str(payload.get("chat_id", "")).strip()
-    if not chat_id or not db.chat_get(chat_id):
-        raise HTTPException(404, "请先选择一个存在的聊天")
-    running = _running_tasks.get(chat_id)
-    if running and not running.done():
-        return {"ok": True, "scheduled": False, "reason": "chat_busy"}
-
-    image = str(payload.get("image") or "")
-    if not image.startswith("data:image/") or len(image) > 1_000_000:
-        raise HTTPException(400, "需要一张有效且较小的当前截帧")
-    try:
-        at_ms = max(0, int(payload.get("at_ms") or 0))
-    except (TypeError, ValueError):
-        at_ms = 0
-    watch_id = str(payload.get("watch_id", "")).strip()[:100]
-    saved_note = _watch_notes.get((chat_id, watch_id), {}) if watch_id else {}
-    context = {
-        "title": str(payload.get("title") or "未命名视频"),
-        "at_ms": at_ms,
-        "subtitles": str(payload.get("subtitles") or ""),
-        "images": [image],
-        "summary": saved_note.get("summary", ""),
-    }
-    placeholder = db.message_add(chat_id, "assistant", "")
-    task = asyncio.create_task(
-        _run_ai_reply(chat_id, placeholder["id"], context, proactive_watch=True)
-    )
-    _running_tasks[chat_id] = task
-    return {"ok": True, "scheduled": True}
-
-
-@app.post("/api/watch/observe", dependencies=authed)
-async def watch_observe(request: Request):
-    """为当前本地画面生成一条不写入聊天记录的私有剧情笔记。"""
-    payload = await _read_json(request)
-    chat_id = str(payload.get("chat_id", "")).strip()
-    watch_id = str(payload.get("watch_id", "")).strip()[:100]
-    if not chat_id or not db.chat_get(chat_id):
-        raise HTTPException(404, "请先选择一个存在的聊天")
-    if not watch_id:
-        raise HTTPException(400, "观影会话标识缺失")
-
-    image = str(payload.get("image") or "")
-    if not image.startswith("data:image/") or len(image) > 1_500_000:
-        raise HTTPException(400, "需要一张有效且较小的当前截帧")
-    selection = db.chat_model_get(chat_id)
-    provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
-    if not provider or not provider.get("enabled"):
-        raise HTTPException(400, "这个聊天还没有可用的供应商")
-    try:
-        at_ms = max(0, int(payload.get("at_ms") or 0))
-    except (TypeError, ValueError):
-        at_ms = 0
-    title = str(payload.get("title") or "未命名视频")[:160]
-    subtitles = str(payload.get("subtitles") or "").strip()[:6000]
-    timestamp = f"{at_ms // 3_600_000:02d}:{(at_ms // 60_000) % 60:02d}:{(at_ms // 1000) % 60:02d}"
-    prompt = (
-        "你是私人观影笔记员。根据当前视频画面和附近字幕，用中文写一条不超过120字的"
-        "客观剧情笔记：人物、动作、情绪、重要线索。只描述已播放到的画面，绝不猜测后续，"
-        "不要与观众对话，不要使用标题或前缀。\n"
-        f"片名：{title}\n播放位置：{timestamp}"
-    )
-    if subtitles:
-        prompt += f"\n附近字幕：\n{subtitles}"
-    request_messages = [
-        {"role": "system", "content": "你只负责生成简短、无剧透的观影笔记。"},
-        {"role": "user", "content": [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": image, "detail": "low"}},
-        ]},
-    ]
-    chunks = []
-    async for event in stream_chat(provider, selection["model_id"], request_messages):
-        if event["type"] == "text":
-            chunks.append(event["text"])
-    summary = "".join(chunks).strip()
-    if not summary or summary.startswith("["):
-        raise HTTPException(502, summary or "模型没有返回观影笔记")
-    summary = summary[:3000]
-    _watch_notes[(chat_id, watch_id)] = {"summary": summary, "at_ms": at_ms, "made": int(time.time())}
-    return {"ok": True, "summary": summary, "at_ms": at_ms}
-
-
 @app.post("/api/watch/send", dependencies=authed)
 async def watch_send(request: Request):
     """观影页专用发送：保留普通聊天记录，同时把本地截帧临时交给视觉模型。"""
@@ -1788,14 +1646,11 @@ async def watch_send(request: Request):
         raise HTTPException(400, "images 必须是列表")
     images = [image for image in raw_images[:2]
               if isinstance(image, str) and image.startswith("data:image/") and len(image) <= 1_500_000]
-    watch_id = str(payload.get("watch_id", "")).strip()[:100]
-    saved_note = _watch_notes.get((chat_id, watch_id), {}) if watch_id else {}
     watch_context = {
         "title": str(payload.get("title") or "未命名视频"),
         "at_ms": payload.get("at_ms") or 0,
         "subtitles": str(payload.get("subtitles") or ""),
         "images": images,
-        "summary": saved_note.get("summary", ""),
     }
     db.message_add(chat_id, "user", text)
     _emit(chat_id, {"type": "echo", "text": text})
