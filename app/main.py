@@ -1083,6 +1083,21 @@ async def chat_instructions_set(request: Request):
     return {"ok": True, "chat_id": chat_id, "instruction_ids": db.chat_instruction_ids(chat_id)}
 
 
+@app.get("/api/reply-style", dependencies=authed)
+async def reply_style_get():
+    chat_id = _get_or_create_current_chat()
+    return {"ok": True, "chat_id": chat_id, "split_replies": db.chat_split_replies_get(chat_id)}
+
+
+@app.post("/api/reply-style", dependencies=authed)
+async def reply_style_set(request: Request):
+    payload = await _read_json(request)
+    chat_id = _get_or_create_current_chat()
+    enabled = bool(payload.get("split_replies"))
+    db.chat_split_replies_set(chat_id, enabled)
+    return {"ok": True, "chat_id": chat_id, "split_replies": enabled}
+
+
 @app.post("/api/provider-test", dependencies=authed)
 async def provider_test(request: Request):
     """用浏览器刚填写、尚未保存的资料做一次最小 OpenAI 兼容请求。"""
@@ -1486,6 +1501,14 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         for item in db.chat_instructions(chat_id)
         if item.get("content", "").strip()
     ]
+    split_replies = db.chat_split_replies_get(chat_id)
+    if split_replies:
+        instructions.append({
+            "role": "system",
+            "content": "【输出方式】这是分条聊天。每当你想自然停顿、换一句继续时，"
+                       "在两条消息之间单独输出 <dwell-split>。不要把这个标记展示给用户；"
+                       "不要为了普通段落、列表或代码块而机械拆分。",
+        })
     long_context = db.chat_memory_get(chat_id)
     memory_message = []
     if long_context.get("enabled") and long_context.get("overview", "").strip():
@@ -1544,6 +1567,46 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     messages[index] = {**messages[index], "content": content}
                     break
     buf = []
+    split_marker = "<dwell-split>"
+    split_pending = ""
+    current_message_id = msg_id
+
+    def append_stream_text(text: str):
+        if not text:
+            return
+        buf.append(text)
+        db.message_update(current_message_id, "".join(buf))
+        _emit(chat_id, {"type": "stream_event", "event": {"delta": {"type": "text_delta", "text": text}}})
+
+    def split_stream_message():
+        nonlocal current_message_id, buf
+        text = "".join(buf).strip()
+        if not text:
+            return
+        db.message_update(current_message_id, text)
+        _emit(chat_id, {"type": "assistant_split", "message_id": current_message_id, "text": text})
+        current_message_id = db.message_add(chat_id, "assistant", "")["id"]
+        buf = []
+
+    def consume_stream_chunk(chunk: str, final: bool = False):
+        nonlocal split_pending
+        if not split_replies:
+            append_stream_text(chunk)
+            return
+        split_pending += chunk
+        while True:
+            marker_at = split_pending.find(split_marker)
+            if marker_at >= 0:
+                append_stream_text(split_pending[:marker_at])
+                split_pending = split_pending[marker_at + len(split_marker):]
+                split_stream_message()
+                continue
+            safe_length = len(split_pending) if final else max(0, len(split_pending) - len(split_marker) + 1)
+            if safe_length:
+                append_stream_text(split_pending[:safe_length])
+                split_pending = split_pending[safe_length:]
+            break
+
     selection = db.chat_model_get(chat_id)
     provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
     try:
@@ -1571,12 +1634,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             async for event in stream_chat(provider, selection["model_id"], messages, tools or None):
                 if event["type"] == "text":
                     chunk = event["text"]
-                    buf.append(chunk)
-                    db.message_update(msg_id, "".join(buf))
-                    _emit(chat_id, {
-                        "type": "stream_event",
-                        "event": {"delta": {"type": "text_delta", "text": chunk}},
-                    })
+                    consume_stream_chunk(chunk)
                 elif event["type"] == "tool_calls":
                     calls.extend(event["calls"])
             if not calls:
@@ -1593,7 +1651,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 name = call["function"]["name"]
                 server = tool_map.get(name)
                 raw_arguments = call["function"]["arguments"]
-                record = db.tool_call_add(chat_id, msg_id, name, raw_arguments)
+                record = db.tool_call_add(chat_id, current_message_id, name, raw_arguments)
                 try:
                     preview_input = json.loads(raw_arguments)
                     if not isinstance(preview_input, dict):
@@ -1633,6 +1691,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
         else:
             raise RuntimeError("MCP 工具调用轮数超过上限")
+        consume_stream_chunk("", final=True)
         full = "".join(buf).strip()
         _emit(chat_id, {
             "type": "assistant",
@@ -1645,7 +1704,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         _queue_long_context_refresh(chat_id)
     except asyncio.CancelledError:
         if buf:
-            db.message_update(msg_id, "".join(buf) + "\n[已停止]")
+            db.message_update(current_message_id, "".join(buf) + "\n[已停止]")
             _emit(chat_id, {
                 "type": "assistant",
                 "message": {
@@ -1656,7 +1715,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         raise
     except Exception as exc:
         text = f"[配置错误] {exc}"
-        db.message_update(msg_id, text)
+        db.message_update(current_message_id, text)
         _emit(chat_id, {
             "type": "assistant",
             "message": {"content": [{"type": "text", "text": text}]},

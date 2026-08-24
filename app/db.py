@@ -306,6 +306,8 @@ def init_db():
             cx.execute("ALTER TABLE chats ADD COLUMN model_id TEXT NOT NULL DEFAULT ''")
         if "reasoning_effort" not in cols:
             cx.execute("ALTER TABLE chats ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''")
+        if "split_replies" not in cols:
+            cx.execute("ALTER TABLE chats ADD COLUMN split_replies INTEGER NOT NULL DEFAULT 0")
 
 
 # ---------------------------------------------------------------- 日记
@@ -832,6 +834,18 @@ def chat_model_set(chat_id: str, provider_id: str | None = None,
             values,
         )
     return True
+
+
+def chat_split_replies_get(chat_id: str) -> bool:
+    with conn() as cx:
+        row = cx.execute("SELECT COALESCE(split_replies,0) AS split_replies FROM chats WHERE id=?", (chat_id,)).fetchone()
+    return bool(row and row["split_replies"])
+
+
+def chat_split_replies_set(chat_id: str, enabled: bool) -> bool:
+    with conn() as cx:
+        cur = cx.execute("UPDATE chats SET split_replies=? WHERE id=?", (1 if enabled else 0, chat_id))
+    return cur.rowcount > 0
 
 
 def chat_del(chat_id: str) -> bool:
