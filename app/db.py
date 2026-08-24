@@ -254,13 +254,6 @@ CREATE TABLE IF NOT EXISTS chat_mcp_servers (
     FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
 );
 
--- Dwell 自己的“家里工具”也按聊天单独授权；目前先放待办，后续可平滑扩展。
-CREATE TABLE IF NOT EXISTS chat_home_tools (
-    chat_id            TEXT PRIMARY KEY,
-    todos_enabled      INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
-);
-
 -- 可复用的聊天指令，以及每间聊天各自启用的集合。
 CREATE TABLE IF NOT EXISTS instruction_presets (
     id      TEXT PRIMARY KEY,
@@ -306,6 +299,8 @@ def init_db():
             cx.execute("ALTER TABLE chats ADD COLUMN model_id TEXT NOT NULL DEFAULT ''")
         if "reasoning_effort" not in cols:
             cx.execute("ALTER TABLE chats ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''")
+        if "split_replies" not in cols:
+            cx.execute("ALTER TABLE chats ADD COLUMN split_replies INTEGER NOT NULL DEFAULT 0")
 
 
 # ---------------------------------------------------------------- 日记
@@ -768,43 +763,6 @@ def chat_switch(chat_id: str) -> bool:
     return True
 
 
-def chat_branch_from_message(source_chat_id: str, message_id: str) -> dict | None:
-    """复制从开头到指定消息的一条时间线，原聊天不受影响。"""
-    with conn() as cx:
-        source = cx.execute("SELECT * FROM chats WHERE id=?", (source_chat_id,)).fetchone()
-        pivot = cx.execute("SELECT rowid,* FROM messages WHERE id=? AND chat_id=?", (message_id, source_chat_id)).fetchone()
-        if not source or not pivot:
-            return None
-        suffix = " · 分支"
-        base_name = (source["name"] or "对话").strip() or "对话"
-        branch = {"id": new_id(), "name": base_name[:max(1, 60 - len(suffix))] + suffix,
-                  "made": int(time.time()), "provider_id": source["provider_id"],
-                  "model_id": source["model_id"], "reasoning_effort": source["reasoning_effort"]}
-        cx.execute("""INSERT INTO chats (id,name,made,archived,provider_id,model_id,reasoning_effort)
-                      VALUES (:id,:name,:made,0,:provider_id,:model_id,:reasoning_effort)""", branch)
-        rows = cx.execute("SELECT rowid,* FROM messages WHERE chat_id=? AND rowid<=? ORDER BY rowid ASC",
-                          (source_chat_id, pivot["rowid"])).fetchall()
-        id_map: dict[str, str] = {}
-        for row in rows:
-            fresh = new_id(); id_map[row["id"]] = fresh
-            cx.execute("INSERT INTO messages (id,chat_id,role,content,made) VALUES (?,?,?,?,?)",
-                       (fresh, branch["id"], row["role"], row["content"], row["made"]))
-        for old_id, fresh in id_map.items():
-            versions = cx.execute("SELECT content,reason,made FROM message_versions WHERE message_id=? ORDER BY rowid ASC", (old_id,)).fetchall()
-            cx.executemany("INSERT INTO message_versions (id,message_id,content,reason,made) VALUES (?,?,?,?,?)",
-                           [(new_id(), fresh, item["content"], item["reason"], item["made"]) for item in versions])
-            calls = cx.execute("""SELECT name,arguments,result,is_error,made FROM tool_calls
-                                  WHERE assistant_message_id=? ORDER BY rowid ASC""", (old_id,)).fetchall()
-            cx.executemany("""INSERT INTO tool_calls (id,chat_id,assistant_message_id,name,arguments,result,is_error,made)
-                              VALUES (?,?,?,?,?,?,?,?)""",
-                           [(new_id(), branch["id"], fresh, item["name"], item["arguments"], item["result"], item["is_error"], item["made"]) for item in calls])
-        cx.execute("INSERT INTO chat_mcp_servers (chat_id,server_id) SELECT ?,server_id FROM chat_mcp_servers WHERE chat_id=?",
-                   (branch["id"], source_chat_id))
-        cx.execute("INSERT INTO chat_instruction_presets (chat_id,instruction_id) SELECT ?,instruction_id FROM chat_instruction_presets WHERE chat_id=?",
-                   (branch["id"], source_chat_id))
-    return {"id": branch["id"], "name": branch["name"], "made": branch["made"]}
-
-
 def chat_model_get(chat_id: str) -> dict:
     with conn() as cx:
         row = cx.execute(
@@ -832,6 +790,18 @@ def chat_model_set(chat_id: str, provider_id: str | None = None,
             values,
         )
     return True
+
+
+def chat_split_replies_get(chat_id: str) -> bool:
+    with conn() as cx:
+        row = cx.execute("SELECT COALESCE(split_replies,0) AS split_replies FROM chats WHERE id=?", (chat_id,)).fetchone()
+    return bool(row and row["split_replies"])
+
+
+def chat_split_replies_set(chat_id: str, enabled: bool) -> bool:
+    with conn() as cx:
+        cur = cx.execute("UPDATE chats SET split_replies=? WHERE id=?", (1 if enabled else 0, chat_id))
+    return cur.rowcount > 0
 
 
 def chat_del(chat_id: str) -> bool:
@@ -993,21 +963,6 @@ def chat_memory_finish(chat_id: str, overview: str, through_rowid: int) -> None:
                ON CONFLICT(chat_id) DO UPDATE SET enabled=1,overview=excluded.overview,
                through_rowid=excluded.through_rowid,status='ready',error='',generated_at=excluded.generated_at""",
             (chat_id, overview.strip()[:12000], int(through_rowid), now),
-        )
-
-
-def chat_memory_save_overview(chat_id: str, overview: str) -> None:
-    """保存用户校订过的长期记忆；后续自动更新会以它作为已有记忆。"""
-    current = chat_memory_get(chat_id)
-    now = int(time.time())
-    with conn() as cx:
-        cx.execute(
-            """INSERT INTO chat_memory_state
-               (chat_id,enabled,overview,through_rowid,status,error,generated_at)
-               VALUES (?,1,?,?,'ready','',?)
-               ON CONFLICT(chat_id) DO UPDATE SET enabled=1,overview=excluded.overview,
-               status='ready',error='',generated_at=excluded.generated_at""",
-            (chat_id, overview.strip()[:12000], int(current["through_rowid"]), now),
         )
 
 
@@ -1230,26 +1185,6 @@ def chat_mcp_servers_set(chat_id: str, server_ids: list[str]) -> bool:
         cx.executemany(
             "INSERT INTO chat_mcp_servers (chat_id,server_id) VALUES (?,?)",
             [(chat_id, server_id) for server_id in clean],
-        )
-    return True
-
-
-def chat_home_todos_enabled(chat_id: str) -> bool:
-    with conn() as cx:
-        row = cx.execute(
-            "SELECT todos_enabled FROM chat_home_tools WHERE chat_id=?", (chat_id,)
-        ).fetchone()
-    return bool(row and row["todos_enabled"])
-
-
-def chat_home_todos_set(chat_id: str, enabled: bool) -> bool:
-    if not chat_get(chat_id):
-        return False
-    with conn() as cx:
-        cx.execute(
-            "INSERT INTO chat_home_tools (chat_id,todos_enabled) VALUES (?,?) "
-            "ON CONFLICT(chat_id) DO UPDATE SET todos_enabled=excluded.todos_enabled",
-            (chat_id, 1 if enabled else 0),
         )
     return True
 
