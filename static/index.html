@@ -476,6 +476,56 @@ html[data-theme="dark"] .composer {
     border-top: 2.4px solid #fff; transform: rotate(45deg) translate(-2px, 2px);
   }
 
+  /* 开屏滑块下的风铃：不占操作区域，只在拖动时跟着手势偏摆。 */
+  .lk-chimes {
+    position: relative; width: min(88vw, 352px); height: clamp(116px, 18vh, 162px);
+    margin-top: 13px; pointer-events: none;
+  }
+  .lk-chime {
+    position: absolute; top: 0; display: flex; flex-direction: column; align-items: center;
+    transform-origin: 50% 0; transition: transform .42s cubic-bezier(.23,1,.32,1);
+    will-change: transform;
+  }
+  .lk-chime i {
+    display: block; width: 1px; height: var(--cord); flex: none;
+    background: linear-gradient(to bottom, color-mix(in srgb, var(--sage) 68%, transparent), rgba(156,177,143,.18));
+    box-shadow: 0 0 5px rgba(156,177,143,.16);
+  }
+  .lk-charm {
+    position: relative; display: grid; place-items: center; margin-top: -1px;
+    width: var(--size); height: var(--size); border-radius: 50%;
+    color: var(--charm); font-size: calc(var(--size) * .68); line-height: 1;
+    text-shadow: 0 1px 10px color-mix(in srgb, var(--charm) 42%, transparent);
+    background: color-mix(in srgb, var(--charm) 11%, transparent);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.65), 0 5px 14px color-mix(in srgb, var(--charm) 16%, transparent);
+  }
+  .lk-charm::before {
+    content: ''; position: absolute; width: 5px; height: 5px; top: -3px; border-radius: 50%;
+    background: color-mix(in srgb, var(--charm) 68%, white); box-shadow: 0 0 0 2px var(--bg);
+  }
+  .lk-chime:nth-child(1) { left: 4%;  --cord: 66px;  --size: 29px; --charm: #efad67; }
+  .lk-chime:nth-child(2) { left: 23%; --cord: 104px; --size: 34px; --charm: #d996bf; }
+  .lk-chime:nth-child(3) { left: 47%; --cord: 48px;  --size: 28px; --charm: #8fbdd2; }
+  .lk-chime:nth-child(4) { left: 68%; --cord: 112px; --size: 37px; --charm: #b9a1d4; }
+  .lk-chime:nth-child(5) { left: 88%; --cord: 72px;  --size: 30px; --charm: #e8b26d; }
+  .lk-chime:nth-child(3) .lk-charm { border-radius: 10px 10px 16px 16px; transform: rotate(8deg); }
+  .lk-chime:nth-child(4) .lk-charm { border-radius: 50% 50% 50% 10px; transform: rotate(-19deg); }
+  #lockWrap.is-ringing .lk-chime { animation: lkChimeRing .88s cubic-bezier(.23,1,.32,1) both; }
+  #lockWrap.is-ringing .lk-chime:nth-child(2), #lockWrap.is-ringing .lk-chime:nth-child(4) { animation-delay: 35ms; }
+  #lockWrap.is-ringing .lk-chime:nth-child(3) { animation-delay: 70ms; }
+  @keyframes lkChimeRing {
+    0% { transform: rotate(0deg); }
+    20% { transform: rotate(-7deg); }
+    44% { transform: rotate(5deg); }
+    67% { transform: rotate(-3deg); }
+    84% { transform: rotate(1.5deg); }
+    100% { transform: rotate(0deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lk-chime { transition: none; }
+    #lockWrap.is-ringing .lk-chime { animation: none; }
+  }
+
   /* ============ 侧边栏 ============ */
   #drawerWrap { position: fixed; inset: 0; z-index: 40; display: none; }
   #drawerWrap.open { display: block; }
@@ -2008,6 +2058,13 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   <div class="lk-track" id="lkTrack">
     <span class="lk-hint" id="lkHint">slide to unlock</span>
     <div class="lk-knob" id="lkKnob"></div>
+  </div>
+  <div class="lk-chimes" id="lkChimes" aria-hidden="true">
+    <span class="lk-chime"><i></i><b class="lk-charm">✦</b></span>
+    <span class="lk-chime"><i></i><b class="lk-charm">♡</b></span>
+    <span class="lk-chime"><i></i><b class="lk-charm">♪</b></span>
+    <span class="lk-chime"><i></i><b class="lk-charm">✧</b></span>
+    <span class="lk-chime"><i></i><b class="lk-charm">✦</b></span>
   </div>
 </div>
 
@@ -7153,6 +7210,51 @@ document.addEventListener('touchend', (e) => {
   const track = document.getElementById('lkTrack');
   const hint = document.getElementById('lkHint');
 
+  const chimes = Array.from(document.querySelectorAll('.lk-chime'));
+  let ringTimer = 0;
+
+  function swayChimes(progress) {
+    /* 每根绳略有差异，手势带来的摆动看起来才不会像一个整体在转。 */
+    const angles = [4.8, -6.2, 3.5, -5.3, 4.1];
+    chimes.forEach((el, i) => {
+      el.style.transform = 'rotate(' + (angles[i] * progress) + 'deg)';
+    });
+  }
+  function resetChimes() {
+    chimes.forEach(el => { el.style.transform = ''; });
+  }
+  function playChime() {
+    /* 声音在用户的 pointer 手势里才生成，移动端不会把它当作自动播放拦掉。 */
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    let ctx;
+    try { ctx = new Ctx(); } catch (e) { return; }
+    const now = ctx.currentTime;
+    if (ctx.state === 'suspended') ctx.resume();
+    [[783.99, 0], [1046.5, .11], [1318.5, .23]].forEach(([freq, delay]) => {
+      const gain = ctx.createGain();
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + delay);
+      gain.gain.setValueAtTime(.0001, now + delay);
+      gain.gain.exponentialRampToValueAtTime(.075, now + delay + .018);
+      gain.gain.exponentialRampToValueAtTime(.0001, now + delay + .72);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + delay);
+      osc.stop(now + delay + .76);
+    });
+    setTimeout(() => { try { ctx.close(); } catch (e) {} }, 1150);
+  }
+  function ringChimes() {
+    resetChimes();
+    wrap.classList.remove('is-ringing');
+    void wrap.offsetWidth;
+    wrap.classList.add('is-ringing');
+    clearTimeout(ringTimer);
+    ringTimer = setTimeout(() => wrap.classList.remove('is-ringing'), 980);
+    playChime();
+  }
+
   /* 锁屏上那句话：按时候换，不是固定标语 */
   const LOCK_WORD = 'slide to unlock';
   const LOCK_WHEN = [
@@ -7183,10 +7285,12 @@ document.addEventListener('touchend', (e) => {
     x = Math.max(0, Math.min(MAX(), px));
     knob.style.transform = 'translateX(' + x + 'px)';
     hint.style.opacity = String(Math.max(0, 1 - x / MAX() * 1.6));
+    swayChimes(MAX() ? x / MAX() : 0);
   }
   function open_() {
     clearInterval(timer);
     document.documentElement.style.overflow = '';
+    ringChimes();
     wrap.classList.add('gone');
     setTimeout(() => { wrap.remove(); try { box.focus(); } catch (e) {} }, 560);
   }
@@ -7195,7 +7299,7 @@ document.addEventListener('touchend', (e) => {
     dragging = false;
     knob.classList.remove('dragging');
     if (x >= MAX() * 0.82) { move(MAX()); open_(); }
-    else { move(0); }
+    else { move(0); resetChimes(); }
   }
   knob.addEventListener('pointerdown', (e) => {
     dragging = true; startX = e.clientX - x;
