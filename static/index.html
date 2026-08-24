@@ -483,13 +483,27 @@ html[data-theme="dark"] .composer {
   }
   .lk-chime {
     position: absolute; top: 0; display: flex; flex-direction: column; align-items: center;
+    width: 40px; margin-left: -20px;
     transform-origin: 50% 0; transition: transform .42s cubic-bezier(.23,1,.32,1);
     will-change: transform;
   }
-  .lk-chime i {
-    display: block; width: 1px; height: var(--cord); flex: none;
-    background: linear-gradient(to bottom, color-mix(in srgb, var(--sage) 68%, transparent), rgba(156,177,143,.18));
-    box-shadow: 0 0 5px rgba(156,177,143,.16);
+  .lk-cord { display: block; width: 22px; height: var(--cord); flex: none; overflow: visible; }
+  .lk-cord path {
+    fill: none; stroke: color-mix(in srgb, var(--sage) 76%, transparent); stroke-width: 1.15;
+    stroke-linecap: round; filter: drop-shadow(0 0 2px rgba(156,177,143,.2));
+  }
+  .lk-beads { position: absolute; top: 0; left: 9px; width: 22px; height: var(--cord); }
+  .lk-beads b {
+    position: absolute; display: block; border-radius: 50%;
+    background: color-mix(in srgb, var(--charm) 64%, white);
+    box-shadow: inset 1px 1px 1px rgba(255,255,255,.78), 0 1px 4px color-mix(in srgb, var(--charm) 30%, transparent);
+  }
+  .lk-beads b:nth-child(1) { top: 18%; left: 4px;  width: 6px; height: 6px; }
+  .lk-beads b:nth-child(2) { top: 39%; left: 11px; width: 4px; height: 4px; }
+  .lk-beads b:nth-child(3) { top: 61%; left: 2px;  width: 7px; height: 7px; }
+  .lk-beads b:nth-child(4) { top: 81%; left: 12px; width: 4px; height: 4px; opacity: .82; }
+  #lockWrap.is-ringing .lk-cord {
+    transform-origin: 50% 0; animation: lkCordBreathe .88s cubic-bezier(.23,1,.32,1) both;
   }
   .lk-charm {
     position: relative; display: grid; place-items: center; margin-top: -1px;
@@ -521,9 +535,15 @@ html[data-theme="dark"] .composer {
     84% { transform: rotate(1.5deg); }
     100% { transform: rotate(0deg); }
   }
+  @keyframes lkCordBreathe {
+    0%, 100% { transform: skewX(0deg) scaleX(1); }
+    28% { transform: skewX(-10deg) scaleX(1.13); }
+    52% { transform: skewX(7deg) scaleX(.92); }
+    74% { transform: skewX(-3deg) scaleX(1.04); }
+  }
   @media (prefers-reduced-motion: reduce) {
     .lk-chime { transition: none; }
-    #lockWrap.is-ringing .lk-chime { animation: none; }
+    #lockWrap.is-ringing .lk-chime, #lockWrap.is-ringing .lk-cord { animation: none; }
   }
 
   /* ============ 侧边栏 ============ */
@@ -2060,11 +2080,11 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     <div class="lk-knob" id="lkKnob"></div>
   </div>
   <div class="lk-chimes" id="lkChimes" aria-hidden="true">
-    <span class="lk-chime"><i></i><b class="lk-charm">✦</b></span>
-    <span class="lk-chime"><i></i><b class="lk-charm">♡</b></span>
-    <span class="lk-chime"><i></i><b class="lk-charm">♪</b></span>
-    <span class="lk-chime"><i></i><b class="lk-charm">✧</b></span>
-    <span class="lk-chime"><i></i><b class="lk-charm">✦</b></span>
+    <span class="lk-chime"><svg class="lk-cord" viewBox="0 0 24 100" preserveAspectRatio="none"><path d="M12 0 C5 24 18 49 11 100"/></svg><span class="lk-beads"><b></b><b></b><b></b><b></b></span><b class="lk-charm">✦</b></span>
+    <span class="lk-chime"><svg class="lk-cord" viewBox="0 0 24 100" preserveAspectRatio="none"><path d="M12 0 C18 27 5 63 13 100"/></svg><span class="lk-beads"><b></b><b></b><b></b><b></b></span><b class="lk-charm">♡</b></span>
+    <span class="lk-chime"><svg class="lk-cord" viewBox="0 0 24 100" preserveAspectRatio="none"><path d="M12 0 C7 28 17 63 12 100"/></svg><span class="lk-beads"><b></b><b></b><b></b><b></b></span><b class="lk-charm">♪</b></span>
+    <span class="lk-chime"><svg class="lk-cord" viewBox="0 0 24 100" preserveAspectRatio="none"><path d="M12 0 C18 25 5 54 11 100"/></svg><span class="lk-beads"><b></b><b></b><b></b><b></b></span><b class="lk-charm">✧</b></span>
+    <span class="lk-chime"><svg class="lk-cord" viewBox="0 0 24 100" preserveAspectRatio="none"><path d="M12 0 C6 29 19 59 12 100"/></svg><span class="lk-beads"><b></b><b></b><b></b><b></b></span><b class="lk-charm">✦</b></span>
   </div>
 </div>
 
