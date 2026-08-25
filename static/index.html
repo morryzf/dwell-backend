@@ -1731,6 +1731,151 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
 html:not([data-theme="light"]) #newSession { background: #f5f4ef; color: #262624; }
 }
 html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
+  /* ============ Bunny music-box visual system ============
+     A quiet pink-and-grey layer: plaid and lace are deliberately kept subtle
+     so the conversation remains the visual centre of the app. */
+  :root {
+    --bg: #fcf9fa;
+    --card: #fffdfd;
+    --panel: #f1edef;
+    --line: #dfd7da;
+    --text: #575156;
+    --dim: #948a91;
+    --accent: #d9a7b7;
+    --accent-soft: #e9c6d0;
+    --user-bubble: #f8eaef;
+    --sage: #aaa4a9;
+    --sage-track: #ebe6e9;
+    --pink-track: #f7e1e8;
+    --green: #7f9a84;
+    --red: #bd7187;
+    --amber: #c99a65;
+    --amber-track: #f5e7d7;
+    --red-track: #f6dfe5;
+    --overlay: rgba(69, 62, 68, .34);
+    --glass: color-mix(in srgb, var(--card) 84%, transparent);
+    --pink: #e3b2c2;
+    --ease-out: cubic-bezier(.23, 1, .32, 1);
+  }
+  html[data-theme="dark"] {
+    --bg: #393538; --card: #4a4448; --panel: #544d51; --line: #6a6065;
+    --text: #fff9fb; --dim: #d1c3c9; --accent: #efb9cb; --accent-soft: #d78da7;
+    --user-bubble: #5d4853; --sage: #c0b4bd; --sage-track: #5c545a;
+    --pink-track: #654b57; --overlay: rgba(20, 17, 19, .62);
+    --glass: color-mix(in srgb, var(--card) 89%, transparent);
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) {
+      --bg: #393538; --card: #4a4448; --panel: #544d51; --line: #6a6065;
+      --text: #fff9fb; --dim: #d1c3c9; --accent: #efb9cb; --accent-soft: #d78da7;
+      --user-bubble: #5d4853; --sage: #c0b4bd; --sage-track: #5c545a;
+      --pink-track: #654b57; --overlay: rgba(20, 17, 19, .62);
+      --glass: color-mix(in srgb, var(--card) 89%, transparent);
+    }
+  }
+
+  body {
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--dim) 20%, transparent) 1px, transparent 1.2px),
+      linear-gradient(90deg, color-mix(in srgb, var(--accent) 10%, transparent) 1px, transparent 1px),
+      linear-gradient(color-mix(in srgb, var(--accent) 10%, transparent) 1px, transparent 1px);
+    background-size: 14px 14px, 32px 32px, 32px 32px;
+  }
+  header {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--card) 92%, transparent), color-mix(in srgb, var(--card) 73%, transparent));
+    border-bottom: 1px dotted color-mix(in srgb, var(--accent) 56%, var(--line));
+    box-shadow: 0 7px 20px rgba(87, 68, 76, .06);
+  }
+  header .title h1 { letter-spacing: .045em; color: var(--text); }
+  header .title h1::before { content: '✦  '; color: var(--accent); font-size: .72em; vertical-align: .14em; }
+  header .title h1::after { content: '  ୨୧'; color: var(--accent); font-size: .88em; }
+  header .iconbtn, #plusBtn, #instructionsBtn, #mcpChatBtn, .pill {
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+    background: color-mix(in srgb, var(--card) 84%, var(--accent-soft));
+    box-shadow: 0 2px 8px rgba(100, 72, 84, .07);
+    transition: transform 150ms var(--ease-out), background-color 150ms ease, border-color 150ms ease;
+  }
+  header .iconbtn:active, #plusBtn:active, #instructionsBtn:active, #mcpChatBtn:active, .pill:active, #send:active { transform: scale(.97); }
+
+  .glass, .composer, #nkPop, .nk-say, .board-toggle, .menuCard, .crow, .songcard, #drawer, .sheet {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--card) 96%, transparent), color-mix(in srgb, var(--card) 82%, var(--accent-soft))) !important;
+    border: 1px solid color-mix(in srgb, var(--accent) 37%, var(--line)) !important;
+    outline: 1px dotted color-mix(in srgb, var(--accent) 34%, transparent);
+    outline-offset: -5px;
+    box-shadow: 0 10px 26px rgba(96, 70, 81, .10), inset 0 1px 0 rgba(255,255,255,.88) !important;
+  }
+  #log .gu, #log .bubble { border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); }
+  #log .gu { background: color-mix(in srgb, var(--card) 86%, var(--panel)); }
+  #log .bubble { background: var(--user-bubble); }
+  .composer { border-radius: 22px; }
+  .composer textarea, .composer input, #box { color: var(--text); }
+  .composer textarea::placeholder, .composer input::placeholder, #box::placeholder { color: color-mix(in srgb, var(--dim) 74%, transparent); }
+  #send { background: linear-gradient(135deg, #deaabd, #c992a4); color: #fff; box-shadow: 0 5px 12px rgba(181, 111, 136, .22); }
+  #send:hover { background: linear-gradient(135deg, #e9b9c9, #d29bad); }
+
+  #lockWrap {
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--dim) 19%, transparent) 1px, transparent 1.2px),
+      linear-gradient(90deg, color-mix(in srgb, var(--accent) 12%, transparent) 1px, transparent 1px),
+      linear-gradient(color-mix(in srgb, var(--accent) 12%, transparent) 1px, transparent 1px);
+    background-size: 13px 13px, 30px 30px, 30px 30px;
+  }
+  #lockWrap::before {
+    content: 'ᕱ⑅ᕱ'; position: absolute; left: 50%; top: max(20px, env(safe-area-inset-top));
+    transform: translateX(-50%); color: color-mix(in srgb, var(--accent) 72%, var(--dim));
+    font-size: 25px; letter-spacing: .18em; opacity: .82; pointer-events: none;
+  }
+  #lockWrap::after {
+    content: '✦  ♫  ୨୧'; position: absolute; left: 50%; bottom: max(22px, env(safe-area-inset-bottom));
+    transform: translateX(-50%); color: var(--accent); font-size: 15px; letter-spacing: .35em; opacity: .74; pointer-events: none;
+  }
+  .lk-word { color: var(--text); text-shadow: 0 1px 0 rgba(255,255,255,.82); }
+  .lk-track {
+    background-color: color-mix(in srgb, var(--card) 68%, var(--accent-soft));
+    background-image: linear-gradient(90deg, color-mix(in srgb, var(--dim) 20%, transparent) 50%, transparent 50%), linear-gradient(color-mix(in srgb, var(--dim) 14%, transparent) 50%, transparent 50%);
+    background-size: 12px 12px;
+    border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--line));
+    box-shadow: inset 0 1px 2px rgba(79,60,67,.08), 0 6px 16px rgba(104, 76, 88, .08);
+  }
+  .lk-knob { background: #686167; box-shadow: 0 4px 10px rgba(66, 55, 60, .22); }
+  .lk-cord { stroke: color-mix(in srgb, var(--sage) 84%, var(--accent)); }
+  .lk-beads b { border-color: color-mix(in srgb, var(--card) 76%, transparent); box-shadow: 0 2px 5px rgba(97, 73, 85, .16); }
+  .lk-chime:nth-child(1) .lk-beads b, .lk-chime:nth-child(5) .lk-beads b { background: #efc8ba; }
+  .lk-chime:nth-child(2) .lk-beads b { background: #e9bbd4; }
+  .lk-chime:nth-child(3) .lk-beads b { background: #a9cfe1; }
+  .lk-chime:nth-child(4) .lk-beads b { background: #cbbce4; }
+  .lk-pendant { filter: drop-shadow(0 5px 9px color-mix(in srgb, var(--accent) 20%, transparent)); }
+
+  /* The cords need their own geometry: a pendulum can bend, a straight rule cannot. */
+  .lk-chimes { margin-top: -3px; }
+  .lk-chime { width: 40px; margin-left: -20px; }
+  .lk-cord { display: block; width: 22px; height: var(--cord); flex: none; overflow: visible; }
+  .lk-cord path {
+    fill: none; stroke: color-mix(in srgb, var(--sage) 76%, transparent); stroke-width: 1.15;
+    stroke-linecap: round; filter: drop-shadow(0 0 2px rgba(156,177,143,.2));
+  }
+  .lk-beads { position: absolute; top: 0; left: 9px; width: 22px; height: var(--cord); }
+  .lk-chime .lk-beads i {
+    position: absolute; display: block; border-radius: 50%;
+    background: color-mix(in srgb, var(--charm) 64%, white);
+    border: 1px solid color-mix(in srgb, var(--card) 76%, transparent);
+    box-shadow: inset 1px 1px 1px rgba(255,255,255,.78), 0 1px 4px color-mix(in srgb, var(--charm) 30%, transparent);
+  }
+  .lk-beads i:nth-child(1) { top: 18%; left: 4px;  width: 6px; height: 6px; }
+  .lk-beads i:nth-child(2) { top: 39%; left: 11px; width: 4px; height: 4px; }
+  .lk-beads i:nth-child(3) { top: 61%; left: 2px;  width: 7px; height: 7px; }
+  .lk-beads i:nth-child(4) { top: 81%; left: 12px; width: 4px; height: 4px; opacity: .82; }
+  .lk-chime:nth-child(1) { left: 9%; }
+  .lk-chime:nth-child(2) { left: 28%; }
+  .lk-chime:nth-child(3) { left: 50%; }
+  .lk-chime:nth-child(4) { left: 72%; }
+  .lk-chime:nth-child(5) { left: 91%; }
+
+  @media (prefers-reduced-motion: reduce) {
+    header .iconbtn, #plusBtn, #instructionsBtn, #mcpChatBtn, .pill, #send { transition: background-color 150ms ease, border-color 150ms ease; }
+  }
 </style>
 </head>
 <body>
@@ -2060,11 +2205,11 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     <div class="lk-knob" id="lkKnob"></div>
   </div>
   <div class="lk-chimes" id="lkChimes" aria-hidden="true">
-    <span class="lk-chime"><i></i><b class="lk-charm">✦</b></span>
-    <span class="lk-chime"><i></i><b class="lk-charm">♡</b></span>
-    <span class="lk-chime"><i></i><b class="lk-charm">♪</b></span>
-    <span class="lk-chime"><i></i><b class="lk-charm">✧</b></span>
-    <span class="lk-chime"><i></i><b class="lk-charm">✦</b></span>
+    <span class="lk-chime"><svg class="lk-cord" viewBox="0 0 24 100" preserveAspectRatio="none"><path d="M12 0 C5 24 18 49 11 100"/></svg><span class="lk-beads"><i></i><i></i><i></i><i></i></span><b class="lk-charm">✦</b></span>
+    <span class="lk-chime"><svg class="lk-cord" viewBox="0 0 24 100" preserveAspectRatio="none"><path d="M12 0 C18 27 5 63 13 100"/></svg><span class="lk-beads"><i></i><i></i><i></i><i></i></span><b class="lk-charm">♡</b></span>
+    <span class="lk-chime"><svg class="lk-cord" viewBox="0 0 24 100" preserveAspectRatio="none"><path d="M12 0 C7 28 17 63 12 100"/></svg><span class="lk-beads"><i></i><i></i><i></i><i></i></span><b class="lk-charm">♪</b></span>
+    <span class="lk-chime"><svg class="lk-cord" viewBox="0 0 24 100" preserveAspectRatio="none"><path d="M12 0 C18 25 5 54 11 100"/></svg><span class="lk-beads"><i></i><i></i><i></i><i></i></span><b class="lk-charm">✧</b></span>
+    <span class="lk-chime"><svg class="lk-cord" viewBox="0 0 24 100" preserveAspectRatio="none"><path d="M12 0 C6 29 19 59 12 100"/></svg><span class="lk-beads"><i></i><i></i><i></i><i></i></span><b class="lk-charm">✦</b></span>
   </div>
 </div>
 
@@ -7211,17 +7356,41 @@ document.addEventListener('touchend', (e) => {
   const hint = document.getElementById('lkHint');
 
   const chimes = Array.from(document.querySelectorAll('.lk-chime'));
-  let ringTimer = 0;
+  const chimeStates = chimes.map((el, i) => ({
+    el, path: el.querySelector('.lk-cord path'), angle: 0, velocity: 0,
+    bias: [-1.4, 1.1, -.7, 1.5, -1][i], drag: [7.4, -8.3, 5.2, -7.1, 6.5][i]
+  }));
+  let physicsFrame = 0, physicsLast = 0;
 
-  function swayChimes(progress) {
-    /* 每根绳略有差异，手势带来的摆动看起来才不会像一个整体在转。 */
-    const angles = [4.8, -6.2, 3.5, -5.3, 4.1];
-    chimes.forEach((el, i) => {
-      el.style.transform = 'rotate(' + (angles[i] * progress) + 'deg)';
-    });
+  function drawChime(s) {
+    /* Angle carries the pendulum; velocity bends the line so it trails the charm. */
+    s.el.style.transform = 'rotate(' + s.angle.toFixed(2) + 'deg)';
+    if (!s.path) return;
+    const bend = Math.max(-8, Math.min(8, s.bias - s.angle * .4 + s.velocity * .042));
+    const endX = 12 + s.angle * .16;
+    s.path.setAttribute('d', 'M12 0 C' + (12 + bend).toFixed(2) + ' 25 '
+      + (12 - bend * .6).toFixed(2) + ' 66 ' + endX.toFixed(2) + ' 100');
   }
-  function resetChimes() {
-    chimes.forEach(el => { el.style.transform = ''; });
+  function stepChimes(now) {
+    const dt = Math.min(.034, (now - physicsLast) / 1000 || .016);
+    physicsLast = now;
+    let moving = false;
+    chimeStates.forEach(s => {
+      s.velocity += (-15 * s.angle - 3.55 * s.velocity) * dt;
+      s.angle += s.velocity * dt;
+      drawChime(s);
+      if (Math.abs(s.angle) + Math.abs(s.velocity) > .08) moving = true;
+    });
+    if (moving) physicsFrame = requestAnimationFrame(stepChimes);
+    else physicsFrame = 0;
+  }
+  function releaseChimes(kick) {
+    const weights = [1.08, .84, 1.2, .76, 1.02];
+    chimeStates.forEach((s, i) => { s.velocity += kick * weights[i]; });
+    if (!physicsFrame) { physicsLast = performance.now(); physicsFrame = requestAnimationFrame(stepChimes); }
+  }
+  function swayChimes(progress) {
+    chimeStates.forEach(s => { s.angle = s.drag * progress; s.velocity = 0; drawChime(s); });
   }
   function playChime() {
     /* 声音在用户的 pointer 手势里才生成，移动端不会把它当作自动播放拦掉。 */
@@ -7245,13 +7414,8 @@ document.addEventListener('touchend', (e) => {
     });
     setTimeout(() => { try { ctx.close(); } catch (e) {} }, 1150);
   }
-  function ringChimes() {
-    resetChimes();
-    wrap.classList.remove('is-ringing');
-    void wrap.offsetWidth;
-    wrap.classList.add('is-ringing');
-    clearTimeout(ringTimer);
-    ringTimer = setTimeout(() => wrap.classList.remove('is-ringing'), 980);
+  function ringChimes(gestureVelocity) {
+    releaseChimes(Math.max(-92, Math.min(92, (gestureVelocity || .17) * 350)));
     playChime();
   }
 
@@ -7279,18 +7443,18 @@ document.addEventListener('touchend', (e) => {
   const timer = setInterval(tick, 20000);
 
   const MAX = () => track.clientWidth - knob.offsetWidth - 10;
-  let dragging = false, startX = 0, x = 0;
+  let dragging = false, startX = 0, x = 0, dragVelocity = 0, lastDragX = 0, lastDragAt = 0;
 
-  function move(px) {
+  function move(px, moveChimes = true) {
     x = Math.max(0, Math.min(MAX(), px));
     knob.style.transform = 'translateX(' + x + 'px)';
     hint.style.opacity = String(Math.max(0, 1 - x / MAX() * 1.6));
-    swayChimes(MAX() ? x / MAX() : 0);
+    if (moveChimes) swayChimes(MAX() ? x / MAX() : 0);
   }
-  function open_() {
+  function open_(gestureVelocity) {
     clearInterval(timer);
     document.documentElement.style.overflow = '';
-    ringChimes();
+    ringChimes(gestureVelocity);
     wrap.classList.add('gone');
     setTimeout(() => { wrap.remove(); try { box.focus(); } catch (e) {} }, 560);
   }
@@ -7298,20 +7462,32 @@ document.addEventListener('touchend', (e) => {
     if (!dragging) return;
     dragging = false;
     knob.classList.remove('dragging');
-    if (x >= MAX() * 0.82) { move(MAX()); open_(); }
-    else { move(0); resetChimes(); }
+    if (x >= MAX() * 0.82) { move(MAX(), false); open_(dragVelocity); }
+    else {
+      move(0, false);
+      releaseChimes(dragVelocity * 260);
+    }
   }
   knob.addEventListener('pointerdown', (e) => {
+    if (physicsFrame) { cancelAnimationFrame(physicsFrame); physicsFrame = 0; }
     dragging = true; startX = e.clientX - x;
+    lastDragX = x; lastDragAt = performance.now(); dragVelocity = 0;
     knob.classList.add('dragging');
     knob.setPointerCapture(e.pointerId);
   });
-  knob.addEventListener('pointermove', (e) => { if (dragging) move(e.clientX - startX); });
+  knob.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const nextX = Math.max(0, Math.min(MAX(), e.clientX - startX));
+    const now = performance.now(), elapsed = Math.max(8, now - lastDragAt);
+    dragVelocity = (nextX - lastDragX) / elapsed;
+    lastDragX = nextX; lastDragAt = now;
+    move(nextX);
+  });
   knob.addEventListener('pointerup', end);
   knob.addEventListener('pointercancel', end);
   track.addEventListener('click', (e) => {
     if (dragging || e.target === knob) return;
-    if (e.offsetX > track.clientWidth * 0.6) { move(MAX()); open_(); }
+    if (e.offsetX > track.clientWidth * 0.6) { move(MAX(), false); open_(.17); }
   });
 })();
 
