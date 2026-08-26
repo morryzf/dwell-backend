@@ -911,6 +911,61 @@ def message_list(chat_id: str, limit: int = 400, before: int | None = None) -> l
     return [dict(r) for r in reversed(rows)]
 
 
+def find_everywhere(query: str, limit: int = 80) -> list[dict]:
+    """按最近更新时间翻聊天与 Dwell 里可见的文字。数据库很小，LIKE 足够稳。"""
+    query = query.strip()[:60]
+    if not query:
+        return []
+    like = f"%{query}%"
+
+    def stamp(value: int, fallback: str = "") -> str:
+        if fallback:
+            return fallback
+        return datetime.fromtimestamp(value, CN_TZ).strftime("%m月%d日")
+
+    def snippet(value: str) -> str:
+        text = " ".join((value or "").split())
+        at = text.lower().find(query.lower())
+        if at < 0:
+            return text[:180]
+        start = max(0, at - 42)
+        end = min(len(text), at + len(query) + 110)
+        return ("…" if start else "") + text[start:end] + ("…" if end < len(text) else "")
+
+    hits: list[dict] = []
+    with conn() as cx:
+        messages = cx.execute(
+            """SELECT m.content,m.made,c.name FROM messages m JOIN chats c ON c.id=m.chat_id
+               WHERE m.content LIKE ? ORDER BY m.made DESC LIMIT ?""", (like, limit)
+        ).fetchall()
+        diary = cx.execute(
+            """SELECT date,title,body,keywords,made FROM diary
+               WHERE title LIKE ? OR body LIKE ? OR keywords LIKE ?
+               ORDER BY date DESC,made DESC LIMIT ?""", (like, like, like, limit)
+        ).fetchall()
+        personal = cx.execute("SELECT text,at FROM her_diary WHERE text LIKE ? ORDER BY at DESC LIMIT ?", (like, limit)).fetchall()
+        quotes = cx.execute("SELECT date,quote,note,made FROM quotes WHERE quote LIKE ? OR note LIKE ? ORDER BY made DESC LIMIT ?", (like, like, limit)).fetchall()
+        whispers = cx.execute("SELECT who,text,at FROM whispers WHERE text LIKE ? ORDER BY at DESC LIMIT ?", (like, limit)).fetchall()
+        nights = cx.execute("SELECT date,hm,text,made FROM night WHERE text LIKE ? ORDER BY date DESC,hm DESC LIMIT ?", (like, limit)).fetchall()
+        events = cx.execute("SELECT date,time,text,made FROM cal_events WHERE text LIKE ? ORDER BY date DESC,time DESC LIMIT ?", (like, limit)).fetchall()
+
+    for row in messages:
+        hits.append({"kind": "聊天 · " + (row["name"] or "新对话"), "date": stamp(row["made"]), "snippet": snippet(row["content"]), "at": row["made"]})
+    for row in diary:
+        hits.append({"kind": "日记", "date": row["date"], "snippet": snippet(" ".join(filter(None, [row["title"], row["keywords"], row["body"]]))), "at": row["made"]})
+    for row in personal:
+        hits.append({"kind": "我的日记", "date": stamp(row["at"]), "snippet": snippet(row["text"]), "at": row["at"]})
+    for row in quotes:
+        hits.append({"kind": "收藏的话", "date": row["date"], "snippet": snippet(row["quote"] + " " + row["note"]), "at": row["made"]})
+    for row in whispers:
+        hits.append({"kind": "悄悄话 · " + ("你" if row["who"] == "her" else "Cloudy"), "date": stamp(row["at"]), "snippet": snippet(row["text"]), "at": row["at"]})
+    for row in nights:
+        hits.append({"kind": "夜记", "date": row["date"] + (" · " + row["hm"] if row["hm"] else ""), "snippet": snippet(row["text"]), "at": row["made"]})
+    for row in events:
+        hits.append({"kind": "日历", "date": row["date"] + (" · " + row["time"] if row["time"] else ""), "snippet": snippet(row["text"]), "at": row["made"]})
+    return sorted(hits, key=lambda item: item["at"], reverse=True)[:max(1, min(limit, 80))]
+
+
 # ---------------------------------------------------------------- 聊天长期上下文
 
 def chat_memory_get(chat_id: str) -> dict:
