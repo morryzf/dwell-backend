@@ -1782,6 +1782,22 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
       linear-gradient(color-mix(in srgb, var(--accent) 10%, transparent) 1px, transparent 1px);
     background-size: 14px 14px, 32px 32px, 32px 32px;
   }
+  /* Dark surfaces need more breathing room: the full plaid is kept for the
+     small lock track, while the page itself becomes a quiet dotted night sky. */
+  html[data-theme="dark"] body {
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(238, 209, 220, .18) 1px, transparent 1.25px),
+      radial-gradient(ellipse at 50% -18%, rgba(231, 167, 191, .09), transparent 58%);
+    background-size: 19px 19px, 100% 100%;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) body {
+      background-image:
+        radial-gradient(circle at 1px 1px, rgba(238, 209, 220, .18) 1px, transparent 1.25px),
+        radial-gradient(ellipse at 50% -18%, rgba(231, 167, 191, .09), transparent 58%);
+      background-size: 19px 19px, 100% 100%;
+    }
+  }
   header {
     background: linear-gradient(180deg, color-mix(in srgb, var(--card) 92%, transparent), color-mix(in srgb, var(--card) 73%, transparent));
     border-bottom: 1px dotted color-mix(in srgb, var(--accent) 56%, var(--line));
