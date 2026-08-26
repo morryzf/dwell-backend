@@ -634,6 +634,12 @@ async def diary_search(q: str, limit: int = 50):
     return {"items": db.diary_search(q.strip(), limit)}
 
 
+@app.get("/api/find", dependencies=authed)
+async def find_everywhere(q: str, limit: int = 80):
+    """顶部搜索：聊天、日记、收藏、悄悄话、夜记和日历共用一个入口。"""
+    return {"ok": True, "hits": db.find_everywhere(q, limit)}
+
+
 # 你的本子
 
 @app.get("/api/her-diary", dependencies=authed)
