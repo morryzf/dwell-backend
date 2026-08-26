@@ -1961,8 +1961,7 @@ async def health():
 async def manifest():
     """PWA 清单。之前 fallback 到 index.html，浏览器当 JSON 解析就报语法错。
 
-    theme_color 用小人自己的橘色 (#DE886D)——他既是右下角的 pet，
-    也是任务栏和启动屏的颜色。icon 直接用他站着的样子。
+    主题色和图标跟随粉灰兔子主题；PWA 使用 PNG，兼容 iOS 主屏幕。
     """
     return {
         "name": "dwell",
@@ -1971,15 +1970,21 @@ async def manifest():
         "start_url": "/",
         "scope": "/",
         "display": "standalone",
-        "background_color": "#ffffff",
-        "theme_color": "#DE886D",
+        "background_color": "#fcf9fa",
+        "theme_color": "#e3b2c2",
         "icons": [
             {
-                "src": "/pet/clawd-static-base.svg",
-                "sizes": "any",
-                "type": "image/svg+xml",
+                "src": "/icons/dwell-bunny-192.png",
+                "sizes": "192x192",
+                "type": "image/png",
                 "purpose": "any",
-            }
+            },
+            {
+                "src": "/icons/dwell-bunny-512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "any",
+            },
         ],
     }
 
