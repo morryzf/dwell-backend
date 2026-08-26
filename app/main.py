@@ -251,6 +251,7 @@ def _queue_long_context_refresh(chat_id: str, reset: bool = False, force: bool =
 
 
 import json
+import re
 
 
 async def _read_json(request: Request) -> dict:
@@ -1515,13 +1516,6 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         if item.get("content", "").strip()
     ]
     split_replies = db.chat_split_replies_get(chat_id)
-    if split_replies:
-        instructions.append({
-            "role": "system",
-            "content": "【输出方式】这是分条聊天。每当你想自然停顿、换一句继续时，"
-                       "在两条消息之间单独输出 <dwell-split>。不要把这个标记展示给用户；"
-                       "不要为了普通段落、列表或代码块而机械拆分。",
-        })
     long_context = db.chat_memory_get(chat_id)
     memory_message = []
     if long_context.get("enabled") and long_context.get("overview", "").strip():
@@ -1596,10 +1590,17 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     break
     buf = []
     split_marker = "<dwell-split>"
+    natural_split = re.compile(r"\n[ \t]*\n+")
     split_pending = ""
     current_message_id = msg_id
 
     def append_stream_text(text: str):
+        nonlocal buf
+        if not text:
+            return
+        if not buf:
+            # 分条边界后的换行属于分隔符，不应该成为下一条消息的空白开头。
+            text = text.lstrip()
         if not text:
             return
         buf.append(text)
@@ -1624,9 +1625,31 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         split_pending += chunk
         while True:
             marker_at = split_pending.find(split_marker)
+            boundary_at = -1
+            boundary_end = -1
             if marker_at >= 0:
-                append_stream_text(split_pending[:marker_at])
-                split_pending = split_pending[marker_at + len(split_marker):]
+                boundary_at = marker_at
+                boundary_end = marker_at + len(split_marker)
+
+            # 模型不输出特殊标记也没关系：自然空行就是可靠的分条边界。
+            # 围栏代码内部的空行仍属于同一个代码块，不能拆开。
+            for match in natural_split.finditer(split_pending):
+                before = "".join(buf) + split_pending[:match.start()]
+                if before.count("```") % 2:
+                    continue
+                if boundary_at < 0 or match.start() < boundary_at:
+                    boundary_at, boundary_end = match.start(), match.end()
+                break
+
+            if boundary_at >= 0:
+                after = split_pending[boundary_end:]
+                if not after.strip():
+                    if final:
+                        append_stream_text(split_pending[:boundary_at].rstrip())
+                        split_pending = ""
+                    break
+                append_stream_text(split_pending[:boundary_at].rstrip())
+                split_pending = after.lstrip()
                 split_stream_message()
                 continue
             safe_length = len(split_pending) if final else max(0, len(split_pending) - len(split_marker) + 1)
@@ -1721,6 +1744,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             raise RuntimeError("MCP 工具调用轮数超过上限")
         consume_stream_chunk("", final=True)
         full = "".join(buf).strip()
+        if full:
+            db.message_update(current_message_id, full)
         _emit(chat_id, {
             "type": "assistant",
             "message": {

@@ -7094,7 +7094,7 @@ async function loadChatInstructions() {
     ]);
     const items = d.items || [];
     body.innerHTML = `<div class="sh-head"><h1>当前聊天的指令</h1><div class="sub">勾选后，下一条消息开始会一起发给模型。</div></div>`
-      + `<div class="ap-section"><div class="ap-section-title">回复方式</div><label class="grow"><input type="checkbox" id="splitReplies" ${replyStyle.split_replies ? 'checked' : ''}> <span>分条回复</span><span class="val">像连续发消息一样</span></label></div>`
+      + `<div class="ap-section"><div class="ap-section-title">回复方式</div><label class="grow"><input type="checkbox" id="splitReplies" ${replyStyle.split_replies ? 'checked' : ''}> <span>分条回复</span><span class="val">按自然空行自动拆开</span></label></div>`
       + (items.length ? `<div class="group" id="chatInstructionList">${items.map(item => `<label class="grow"><input type="checkbox" value="${instructionEsc(item.id)}" ${item.selected ? 'checked' : ''}> <span>${instructionEsc(item.name)}</span><span class="val">${instructionEsc(item.content).slice(0, 28)}${item.content.length > 28 ? '…' : ''}</span></label>`).join('')}</div>` : '<div class="gnote">还没有可用指令。先去设置里写一条。</div>')
       + `<div class="ap-btns single"><button class="ap-b" id="openInstructionSettings">管理指令</button></div><div class="ap-msg" id="chatInstructionMsg"></div>`;
     const save = async () => {
