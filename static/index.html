@@ -25,6 +25,11 @@
   try {
     var t = localStorage.getItem('homeTheme') || 'auto';
     if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+    var bg = localStorage.getItem('dwellChatBackground');
+    if (bg && bg.indexOf('data:image/') === 0) {
+      document.documentElement.style.setProperty('--chat-bg-image', 'url("' + bg + '")');
+      document.documentElement.classList.add('has-chat-background');
+    }
   } catch (e) {}
 })();
 </script>
@@ -51,6 +56,7 @@
     --serif: SerifNum, "Songti SC", "Noto Serif SC", Georgia, serif;
     --glass: color-mix(in srgb, var(--card) 70%, transparent);  /* 悬浮层玻璃度（顶栏/菜单——内容条 8/3 改用 --panel 实色） */
     --pink: #E5A192;          
+    --chat-bg-image: none;
   }
   @media (prefers-color-scheme: dark) {
 html:not([data-theme="light"]) {
@@ -1782,6 +1788,14 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
       linear-gradient(color-mix(in srgb, var(--accent) 10%, transparent) 1px, transparent 1px);
     background-size: 14px 14px, 32px 32px, 32px 32px;
   }
+  html.has-chat-background body {
+    background-image:
+      linear-gradient(180deg, color-mix(in srgb, var(--bg) 44%, transparent), color-mix(in srgb, var(--bg) 64%, transparent)),
+      var(--chat-bg-image) !important;
+    background-size: cover !important;
+    background-position: center !important;
+    background-attachment: fixed !important;
+  }
   /* Dark surfaces need more breathing room: the full plaid is kept for the
      small lock track, while the page itself becomes a quiet dotted night sky. */
   html[data-theme="dark"] body {
@@ -2230,6 +2244,26 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     border-color: rgba(242,201,220,.12) !important;
     box-shadow: 0 7px 20px rgba(12,8,10,.14), inset 0 1px rgba(255,235,244,.08) !important;
   }
+  .background-preview {
+    height: 176px; margin: 14px 0 16px; border-radius: 17px;
+    background-color: color-mix(in srgb, var(--panel) 74%, var(--accent-soft));
+    background-image: linear-gradient(145deg, rgba(255,255,255,.18), rgba(238,196,215,.12));
+    background-size: cover; background-position: center;
+    border: 1px solid rgba(158,112,133,.15);
+    box-shadow: inset 0 1px rgba(255,255,255,.16), 0 7px 20px rgba(86,58,71,.06);
+    overflow: hidden; display: flex; align-items: flex-end;
+  }
+  .background-preview.has-image { background-image: linear-gradient(180deg, transparent 45%, rgba(58,38,48,.34)), var(--chat-bg-image); }
+  .background-preview .caption { width: 100%; padding: 13px 14px; color: #fff; font-size: 13px; text-shadow: 0 1px 7px rgba(0,0,0,.42); }
+  .background-preview:not(.has-image) .caption { color: var(--dim); text-shadow: none; }
+  html.has-chat-background body {
+    background-image:
+      linear-gradient(180deg, color-mix(in srgb, var(--bg) 44%, transparent), color-mix(in srgb, var(--bg) 64%, transparent)),
+      var(--chat-bg-image) !important;
+    background-size: cover !important;
+    background-position: center !important;
+    background-attachment: fixed !important;
+  }
 
   @media (prefers-reduced-motion: reduce) {
     header .iconbtn, #plusBtn, #instructionsBtn, #mcpChatBtn, .pill, #send { transition: background-color 150ms ease, border-color 150ms ease; }
@@ -2353,6 +2387,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
         <button class="grow" id="wakeTargetRow"><span class="ic" data-i="chat"></span>接收主动消息的窗口<span class="val" id="wakeTargetVal">…</span><span class="chev">›</span></button>
         <button class="grow" id="rewakeRow"><span class="ic" data-i="refresh"></span>叫他重新醒一次<span class="val" id="rewakeVal">他要是卡住了就按</span></button>
         <button class="grow" id="themeRow"><span class="ic" data-i="moon"></span>夜间模式<span class="sw wait" id="themeSw"></span></button>
+        <button class="grow" id="backgroundRow"><span class="ic" data-i="image"></span>聊天背景<span class="val" id="backgroundVal">默认</span><span class="chev">›</span></button>
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>模型供应商<span class="chev">›</span></button>
         <button class="grow" id="mcpRow"><span class="ic" data-i="tool"></span>MCP 工具<span class="chev">›</span></button>
         <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
@@ -2361,6 +2396,13 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
       </div>
     </div>
   </div>
+</div>
+
+<div class="sheetWrap" id="backgroundSheet">
+  <div class="shade" data-close="background"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="background"><span class="ic" data-i="x"></span></button><div class="ht">聊天背景</div><div class="hspace"></div>
+  </div><div class="body" id="backgroundBody"></div></div>
 </div>
 
 <div class="sheetWrap" id="apiSheet">
@@ -4207,6 +4249,14 @@ async function stopGu() {
   setBusy(false);
 }
 
+function deviceTimeContext() {
+  const now = new Date();
+  let timeZone = '';
+  try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+  let local = now.toLocaleString('zh-CN', {dateStyle: 'full', timeStyle: 'medium', hour12: false});
+  return { local, iso: now.toISOString(), time_zone: timeZone, offset_minutes: -now.getTimezoneOffset() };
+}
+
 function send() {
   if (guBusy && !((box.value || '').trim() || attachments.length)) return stopGu();
   const text = box.value.trim();
@@ -4216,7 +4266,7 @@ function send() {
   box.value = '';
   box.style.height = 'auto';
   setBusy(true);
-  const payload = { text };
+  const payload = { text, device_time: deviceTimeContext() };
   if (attachments.length) payload.attachments = attachments;
   attachments = [];
   renderStrip();
@@ -4439,6 +4489,7 @@ document.addEventListener('touchend', (e) => {
 }, { passive: true });
 const sheets = {
   api: document.getElementById('apiSheet'),
+  background: document.getElementById('backgroundSheet'),
   mcp: document.getElementById('mcpSheet'),
   chatMcp: document.getElementById('chatMcpSheet'),
   editMessage: document.getElementById('editMessageSheet'),
@@ -6806,6 +6857,72 @@ function wearTheme(t) {
 document.getElementById('themeRow').onclick = () =>
   wearTheme(themeNow() === 'dark' ? 'auto' : 'dark');
 wearTheme(themeNow());
+
+/* 聊天背景只存在这台设备的浏览器：既不上传，也不带进聊天或备份。 */
+const CHAT_BACKGROUND_KEY = 'dwellChatBackground';
+function chatBackground() {
+  try { return localStorage.getItem(CHAT_BACKGROUND_KEY) || ''; } catch (e) { return ''; }
+}
+function updateBackgroundRow() {
+  const label = document.getElementById('backgroundVal');
+  if (label) label.textContent = chatBackground() ? '已设置' : '默认';
+}
+function wearChatBackground(dataUrl) {
+  const has = typeof dataUrl === 'string' && dataUrl.startsWith('data:image/');
+  try {
+    if (has) localStorage.setItem(CHAT_BACKGROUND_KEY, dataUrl);
+    else localStorage.removeItem(CHAT_BACKGROUND_KEY);
+  } catch (e) { throw new Error('浏览器没有足够空间保存这张图'); }
+  if (has) document.documentElement.style.setProperty('--chat-bg-image', 'url("' + dataUrl + '")');
+  else document.documentElement.style.removeProperty('--chat-bg-image');
+  document.documentElement.classList.toggle('has-chat-background', has);
+  updateBackgroundRow();
+}
+function shrinkBackground(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith('image/')) { reject(new Error('请选择图片文件')); return; }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('图片没读出来'));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error('这张图片打不开'));
+      image.onload = () => {
+        const limit = 1440;
+        const ratio = Math.min(1, limit / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round((image.naturalWidth || image.width) * ratio));
+        canvas.height = Math.max(1, Math.round((image.naturalHeight || image.height) * ratio));
+        canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', .78));
+      };
+      image.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function renderChatBackgroundSettings() {
+  const body = document.getElementById('backgroundBody');
+  const has = !!chatBackground();
+  body.innerHTML = '<div class="sh-head"><h1>聊天背景</h1><div class="sub">图片只留在当前设备；上面的玻璃组件会自动保持可读。</div></div>'
+    + '<div class="background-preview' + (has ? ' has-image' : '') + '"><div class="caption">' + (has ? '正在使用这张背景图' : '默认的粉灰格纹背景') + '</div></div>'
+    + '<div class="ap-btns"><button class="ap-b go" id="backgroundChoose">从设备选择图片</button>'
+    + (has ? '<button class="ap-b" id="backgroundReset">恢复默认</button>' : '') + '</div>'
+    + '<div class="ap-note">图片会在设备上压缩后保存；不会上传到服务器，也不会发送给 Cloudy。</div><div class="ap-msg" id="backgroundMsg"></div>';
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*'; input.style.display = 'none'; body.appendChild(input);
+  const message = body.querySelector('#backgroundMsg');
+  body.querySelector('#backgroundChoose').onclick = () => input.click();
+  input.onchange = async () => {
+    const file = input.files && input.files[0]; if (!file) return;
+    message.textContent = '正在处理图片…'; message.className = 'ap-msg on';
+    try { wearChatBackground(await shrinkBackground(file)); renderChatBackgroundSettings(); }
+    catch (e) { message.textContent = '没设上：' + e.message; message.className = 'ap-msg on bad'; }
+  };
+  const reset = body.querySelector('#backgroundReset');
+  if (reset) reset.onclick = () => { wearChatBackground(''); renderChatBackgroundSettings(); };
+}
+document.getElementById('backgroundRow').onclick = () => { sheets.background.classList.add('open'); renderChatBackgroundSettings(); };
+updateBackgroundRow();
 
 document.getElementById('rewakeRow').onclick = async () => {
   const v = document.getElementById('rewakeVal');
