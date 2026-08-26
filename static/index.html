@@ -2099,42 +2099,61 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     backdrop-filter: blur(36px) saturate(1.45) brightness(1.04);
   }
   .lk-track {
-    background: linear-gradient(90deg, rgba(255,255,255,.25), rgba(230,190,207,.13)) !important;
-    background-image: none !important;
-    border-color: rgba(255,255,255,.48) !important;
+    background-color: rgba(244,222,232,.18) !important;
+    background-image:
+      linear-gradient(90deg, rgba(155,112,132,.075) 50%, transparent 50%),
+      linear-gradient(rgba(155,112,132,.055) 50%, transparent 50%) !important;
+    background-size: 12px 12px !important;
+    border-color: rgba(158,112,133,.18) !important;
     -webkit-backdrop-filter: blur(22px) saturate(1.35);
     backdrop-filter: blur(22px) saturate(1.35);
-    box-shadow: inset 0 1px rgba(255,255,255,.46), inset 0 -1px rgba(155,104,126,.08), 0 8px 20px rgba(93,65,78,.09) !important;
+    box-shadow: inset 0 1px rgba(255,255,255,.20), inset 0 -1px rgba(155,104,126,.06), 0 8px 20px rgba(93,65,78,.09) !important;
   }
   .lk-knob {
-    background: linear-gradient(145deg, rgba(255,255,255,.34), rgba(238,194,213,.18)) !important;
-    border-color: rgba(255,255,255,.46) !important;
+    background: linear-gradient(145deg, rgba(255,255,255,.28), rgba(238,194,213,.16)) !important;
+    border-color: rgba(158,112,133,.20) !important;
     -webkit-backdrop-filter: blur(18px) saturate(1.45) brightness(1.08);
     backdrop-filter: blur(18px) saturate(1.45) brightness(1.08);
-    box-shadow: 0 7px 18px rgba(75,51,63,.14), inset 0 1px rgba(255,255,255,.48), inset 0 -1px rgba(158,105,126,.08) !important;
+    box-shadow: 0 7px 18px rgba(75,51,63,.14), inset 0 1px rgba(255,255,255,.22), inset 0 -1px rgba(158,105,126,.06) !important;
   }
-  .lk-knob::before { background: linear-gradient(135deg, rgba(255,255,255,.20), transparent 48%); }
+  .lk-knob::before { background: linear-gradient(135deg, rgba(255,255,255,.12), transparent 48%); }
   #chatsSheet .sheet { background: linear-gradient(145deg, rgba(255,253,254,.38), rgba(239,215,226,.14)) !important; }
   .chatrow { gap: 10px; margin-bottom: 10px; }
   .chatrow .crow {
     background: linear-gradient(145deg, rgba(255,255,255,.34), rgba(240,211,224,.15)) !important;
-    border-color: rgba(255,255,255,.44) !important;
-    box-shadow: 0 6px 18px rgba(86,58,71,.075), inset 0 1px rgba(255,255,255,.52) !important;
+    border-color: rgba(158,112,133,.16) !important;
+    box-shadow: 0 6px 18px rgba(86,58,71,.075), inset 0 1px rgba(255,255,255,.20) !important;
   }
   .chatdel {
     width: 54px; color: color-mix(in srgb, var(--dim) 82%, var(--accent));
     background: linear-gradient(145deg, rgba(255,255,255,.24), rgba(240,211,224,.10)) !important;
-    border-color: rgba(255,255,255,.40) !important;
+    border-color: rgba(158,112,133,.15) !important;
     -webkit-backdrop-filter: blur(18px) saturate(1.25);
     backdrop-filter: blur(18px) saturate(1.25);
-    box-shadow: 0 5px 15px rgba(86,58,71,.06), inset 0 1px rgba(255,255,255,.44);
+    box-shadow: 0 5px 15px rgba(86,58,71,.06), inset 0 1px rgba(255,255,255,.18);
   }
   #newSession {
     background: linear-gradient(145deg, rgba(224,171,191,.70), rgba(194,135,160,.52));
-    border: 1px solid rgba(255,255,255,.38); color: #fff;
+    border: 1px solid rgba(148,94,119,.20); color: #fff;
     -webkit-backdrop-filter: blur(18px) saturate(1.3);
     backdrop-filter: blur(18px) saturate(1.3);
-    box-shadow: 0 8px 20px rgba(152,92,119,.20), inset 0 1px rgba(255,255,255,.34);
+    box-shadow: 0 8px 20px rgba(152,92,119,.20), inset 0 1px rgba(255,255,255,.18);
+  }
+
+  /* Quiet glass edges: translucent tint instead of stacked white outlines. */
+  .composer, #nkPop, .nk-say, .board-toggle, .menuCard, .crow, .songcard,
+  #drawer, .sheet, .group, .ap-section, .ap-in, .ap-b, .model-catalog-action,
+  .filecard, .ucard, .bn-card, #log .gu, #log .bubble {
+    border-color: rgba(158,112,133,.16) !important;
+    box-shadow: 0 8px 22px rgba(86,58,71,.07), inset 0 1px rgba(255,255,255,.18), inset 0 -1px rgba(158,105,126,.045) !important;
+  }
+  .sheet .group, .sheet .ap-section {
+    border-color: rgba(158,112,133,.12) !important;
+    box-shadow: 0 7px 20px rgba(86,58,71,.055), inset 0 1px rgba(255,255,255,.13) !important;
+  }
+  .sheet .ap-in, .sheet .ap-b, .sheet .model-catalog-action {
+    border-color: rgba(158,112,133,.15) !important;
+    box-shadow: 0 4px 13px rgba(86,58,71,.045), inset 0 1px rgba(255,255,255,.14) !important;
   }
   #settingsSheet .group-label { font-size: 13.5px; }
   #settingsSheet .group .grow { padding: 13px 16px; font-size: 15px; }
@@ -2143,7 +2162,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   html[data-theme="dark"] .sheetWrap.page .sheet, html[data-theme="dark"] #chatsSheet .sheet {
     background: linear-gradient(145deg, rgba(80,72,78,.56), rgba(55,49,55,.30)) !important;
   }
-  html[data-theme="dark"] .lk-track { background: linear-gradient(90deg, rgba(255,235,244,.12), rgba(210,153,178,.06)) !important; border-color: rgba(255,235,244,.16) !important; }
+  html[data-theme="dark"] .lk-track { background-color: rgba(210,153,178,.07) !important; background-image: linear-gradient(90deg, rgba(255,220,235,.075) 50%, transparent 50%), linear-gradient(rgba(255,220,235,.055) 50%, transparent 50%) !important; border-color: rgba(242,201,220,.13) !important; }
   html[data-theme="dark"] .lk-knob { background: linear-gradient(145deg, rgba(255,235,244,.22), rgba(196,134,159,.16)) !important; border-color: rgba(255,235,244,.22) !important; }
   html[data-theme="dark"] .chatrow .crow { background: linear-gradient(145deg, rgba(255,235,244,.12), rgba(255,180,209,.05)) !important; border-color: rgba(255,235,244,.16) !important; }
   html[data-theme="dark"] .chatdel { background: linear-gradient(145deg, rgba(255,235,244,.09), rgba(255,180,209,.035)) !important; border-color: rgba(255,235,244,.13) !important; }
@@ -2151,10 +2170,19 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     html:not([data-theme="light"]) .sheetWrap.page .sheet, html:not([data-theme="light"]) #chatsSheet .sheet {
       background: linear-gradient(145deg, rgba(80,72,78,.56), rgba(55,49,55,.30)) !important;
     }
-    html:not([data-theme="light"]) .lk-track { background: linear-gradient(90deg, rgba(255,235,244,.12), rgba(210,153,178,.06)) !important; border-color: rgba(255,235,244,.16) !important; }
+    html:not([data-theme="light"]) .lk-track { background-color: rgba(210,153,178,.07) !important; background-image: linear-gradient(90deg, rgba(255,220,235,.075) 50%, transparent 50%), linear-gradient(rgba(255,220,235,.055) 50%, transparent 50%) !important; border-color: rgba(242,201,220,.13) !important; }
     html:not([data-theme="light"]) .lk-knob { background: linear-gradient(145deg, rgba(255,235,244,.22), rgba(196,134,159,.16)) !important; border-color: rgba(255,235,244,.22) !important; }
     html:not([data-theme="light"]) .chatrow .crow { background: linear-gradient(145deg, rgba(255,235,244,.12), rgba(255,180,209,.05)) !important; border-color: rgba(255,235,244,.16) !important; }
     html:not([data-theme="light"]) .chatdel { background: linear-gradient(145deg, rgba(255,235,244,.09), rgba(255,180,209,.035)) !important; border-color: rgba(255,235,244,.13) !important; }
+  }
+
+  html[data-theme="dark"] .composer, html[data-theme="dark"] #nkPop, html[data-theme="dark"] .nk-say,
+  html[data-theme="dark"] .board-toggle, html[data-theme="dark"] .menuCard, html[data-theme="dark"] .crow,
+  html[data-theme="dark"] .songcard, html[data-theme="dark"] #drawer, html[data-theme="dark"] .sheet,
+  html[data-theme="dark"] .group, html[data-theme="dark"] .ap-section, html[data-theme="dark"] .ap-in,
+  html[data-theme="dark"] .ap-b, html[data-theme="dark"] .model-catalog-action {
+    border-color: rgba(242,201,220,.12) !important;
+    box-shadow: 0 8px 22px rgba(12,8,10,.14), inset 0 1px rgba(255,235,244,.09) !important;
   }
 
   @media (prefers-reduced-motion: reduce) {
