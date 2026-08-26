@@ -53,7 +53,7 @@ WEB_TOOLS = [
     }},
 ]
 
-HOME_TODO_TOOLS = [
+HOME_TOOLS = [
     {"type": "function", "function": {
         "name": "DwellTodoList", "description": "Read the shared Dwell todo lists. Use this to check what is pending or completed at home.",
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -74,16 +74,82 @@ HOME_TODO_TOOLS = [
             "id": {"type": "string", "description": "Todo id from DwellTodoList"},
         }, "required": ["list", "id"], "additionalProperties": False},
     }},
+    {"type": "function", "function": {
+        "name": "DwellDiaryList", "description": "Read recent entries from Dwell's diary area. Choose cloudy for Cloudy's shared timeline diary or user for the user's private notebook.",
+        "parameters": {"type": "object", "properties": {
+            "diary": {"type": "string", "enum": ["cloudy", "user"], "description": "Which diary to read"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Maximum entries to return"},
+        }, "required": ["diary"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "DwellDiaryGet", "description": "Read one full Cloudy timeline diary entry after DwellDiaryList or DwellDiarySearch returns its id.",
+        "parameters": {"type": "object", "properties": {
+            "id": {"type": "string", "description": "Diary entry id"},
+        }, "required": ["id"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "DwellDiarySearch", "description": "Search Cloudy's shared timeline diary by words found in its title, body, or keywords.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Words to search for"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 30},
+        }, "required": ["query"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "DwellDiaryAdd", "description": "Write a new entry in Dwell's diary area. Use cloudy for Cloudy's shared timeline diary or user for the user's notebook only when the user asks for it.",
+        "parameters": {"type": "object", "properties": {
+            "diary": {"type": "string", "enum": ["cloudy", "user"]},
+            "text": {"type": "string", "description": "Diary entry text"},
+            "date": {"type": "string", "description": "Optional YYYY-MM-DD date; only used for the cloudy diary"},
+        }, "required": ["diary", "text"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "DwellCalendarList", "description": "Read Dwell calendar events and day notes. Pass a YYYY-MM-DD date for one day, or omit it for the complete calendar.",
+        "parameters": {"type": "object", "properties": {
+            "date": {"type": "string", "description": "Optional YYYY-MM-DD date"},
+        }, "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "DwellCalendarAdd", "description": "Add an event to the Dwell calendar.",
+        "parameters": {"type": "object", "properties": {
+            "date": {"type": "string", "description": "YYYY-MM-DD date"},
+            "text": {"type": "string", "description": "Event text"},
+            "time": {"type": "string", "description": "Optional HH:MM time"},
+            "yearly": {"type": "boolean", "description": "Repeat every year"},
+            "special": {"type": "boolean", "description": "Mark as a special day"},
+        }, "required": ["date", "text"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "DwellCalendarDelete", "description": "Delete a Dwell calendar event after reading the calendar to get its id.",
+        "parameters": {"type": "object", "properties": {
+            "id": {"type": "string", "description": "Calendar event id"},
+        }, "required": ["id"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "DwellCalendarSetDay", "description": "Set the mood and/or note attached to a calendar day.",
+        "parameters": {"type": "object", "properties": {
+            "date": {"type": "string", "description": "YYYY-MM-DD date"},
+            "mood": {"type": "string", "description": "Short mood word; keep the existing mood by omitting this"},
+            "note": {"type": "string", "description": "Day note; keep the existing note by omitting this"},
+        }, "required": ["date"], "additionalProperties": False},
+    }},
 ]
 
 
-def home_todo_tool(name: str, arguments: dict) -> str:
-    """执行用户为这间聊天明确开启的 Dwell 待办工具。"""
+def _bounded_int(value, default: int, maximum: int) -> int:
+    try:
+        return max(1, min(int(value), maximum))
+    except (TypeError, ValueError):
+        return default
+
+
+def home_tool(name: str, arguments: dict) -> str:
+    """执行用户为这间聊天明确开启的 Dwell 家庭工具。"""
     if name == "DwellTodoList":
         return json.dumps({"ok": True, "todos": db.todos_all()}, ensure_ascii=False)
-    side = str(arguments.get("list") or "").strip()
-    if side not in {"hers", "mine"}:
-        raise ValueError("待办列表只能是 hers 或 mine")
+    if name in {"DwellTodoAdd", "DwellTodoToggle"}:
+        side = str(arguments.get("list") or "").strip()
+        if side not in {"hers", "mine"}:
+            raise ValueError("待办列表只能是 hers 或 mine")
     if name == "DwellTodoAdd":
         todo_text = str(arguments.get("text") or "").strip()
         if not todo_text:
@@ -100,6 +166,69 @@ def home_todo_tool(name: str, arguments: dict) -> str:
         if not db.todo_toggle(side, item_id):
             raise ValueError("没有找到这条待办")
         return json.dumps({"ok": True, "todos": db.todos_all()}, ensure_ascii=False)
+    if name == "DwellDiaryList":
+        diary = str(arguments.get("diary") or "").strip()
+        limit = _bounded_int(arguments.get("limit"), 20, 50)
+        if diary == "cloudy":
+            items = db.diary_list(lite=True, limit=limit)
+        elif diary == "user":
+            items = db.her_diary_list()[:limit]
+        else:
+            raise ValueError("日记只能是 cloudy 或 user")
+        return json.dumps({"ok": True, "diary": diary, "items": items}, ensure_ascii=False)
+    if name == "DwellDiaryGet":
+        item = db.diary_get(str(arguments.get("id") or "").strip())
+        if not item:
+            raise ValueError("没有找到这篇日记")
+        return json.dumps({"ok": True, "item": item}, ensure_ascii=False)
+    if name == "DwellDiarySearch":
+        query = str(arguments.get("query") or "").strip()
+        if not query:
+            raise ValueError("搜索词不能为空")
+        items = db.diary_search(query, _bounded_int(arguments.get("limit"), 15, 30))
+        return json.dumps({"ok": True, "items": items}, ensure_ascii=False)
+    if name == "DwellDiaryAdd":
+        diary = str(arguments.get("diary") or "").strip()
+        text = str(arguments.get("text") or "").strip()
+        if not text:
+            raise ValueError("日记内容不能为空")
+        if diary == "cloudy":
+            item = db.diary_add(str(arguments.get("date") or "").strip(), text)
+        elif diary == "user":
+            item = db.her_diary_add(text)
+        else:
+            raise ValueError("日记只能是 cloudy 或 user")
+        return json.dumps({"ok": True, "diary": diary, "item": item}, ensure_ascii=False)
+    if name == "DwellCalendarList":
+        date = str(arguments.get("date") or "").strip()
+        data = db.cal_all()
+        if date:
+            return json.dumps({
+                "ok": True, "date": date, "events": db.cal_events_on(date),
+                "day": data["days"].get(date, {"mood": "", "note": ""}),
+            }, ensure_ascii=False)
+        return json.dumps({"ok": True, **data}, ensure_ascii=False)
+    if name == "DwellCalendarAdd":
+        date = str(arguments.get("date") or "").strip()
+        text = str(arguments.get("text") or "").strip()
+        if not date or not text:
+            raise ValueError("日历事件需要日期和内容")
+        item = db.cal_add_event(date, text, str(arguments.get("time") or "").strip(),
+                                bool(arguments.get("yearly")), bool(arguments.get("special")))
+        return json.dumps({"ok": True, "event": item}, ensure_ascii=False)
+    if name == "DwellCalendarDelete":
+        if not db.cal_del_event(str(arguments.get("id") or "").strip()):
+            raise ValueError("没有找到这条日历事件")
+        return json.dumps({"ok": True}, ensure_ascii=False)
+    if name == "DwellCalendarSetDay":
+        date = str(arguments.get("date") or "").strip()
+        if not date:
+            raise ValueError("需要日期")
+        data = db.cal_all()["days"].get(date, {"mood": "", "note": ""})
+        mood = str(arguments.get("mood", data.get("mood") or ""))
+        note = str(arguments.get("note", data.get("note") or ""))
+        item = db.cal_set_mood(date, mood, note)
+        return json.dumps({"ok": True, "day": item}, ensure_ascii=False)
     raise ValueError("未知的家里工具")
 # 每个 chat 一条事件队列，poll 从这里拿事件推给前端。
 _event_queues: dict[str, asyncio.Queue] = {}
@@ -1668,8 +1797,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         tool_map["WebSearch"] = "builtin:search"
         tool_map["WebFetch"] = "builtin:fetch"
         if db.chat_home_todos_enabled(chat_id):
-            tools.extend(HOME_TODO_TOOLS)
-            for tool in HOME_TODO_TOOLS:
+            tools.extend(HOME_TOOLS)
+            for tool in HOME_TOOLS:
                 tool_map[tool["function"]["name"]] = "builtin:home"
         for server in db.chat_mcp_servers(chat_id):
             try:
@@ -1723,7 +1852,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                         result = await web_fetch(arguments.get("url", ""))
                         is_error = False
                     elif server == "builtin:home":
-                        result = home_todo_tool(name, arguments)
+                        result = home_tool(name, arguments)
                         is_error = False
                     elif not server:
                         raise ValueError("模型请求了未启用的 MCP 工具")
@@ -2074,4 +2203,5 @@ async def static_or_index(path: str):
     if f.exists():
         return FileResponse(f)
     raise HTTPException(404, "没有这个页面")
+
 
