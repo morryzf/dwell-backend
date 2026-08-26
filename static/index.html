@@ -1889,6 +1889,79 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   .lk-chime:nth-child(4) { left: 72%; }
   .lk-chime:nth-child(5) { left: 91%; }
 
+  /* iOS-like glass: translucent enough to carry the background through,
+     but with a frosted separation layer so navigation stays effortless to read. */
+  #drawer {
+    isolation: isolate;
+    background: linear-gradient(145deg, rgba(255, 253, 254, .74), rgba(239, 219, 227, .48)) !important;
+    border: 1px solid rgba(255, 255, 255, .72) !important;
+    border-left: 0 !important;
+    border-radius: 0 28px 28px 0;
+    outline: 0;
+    -webkit-backdrop-filter: blur(30px) saturate(1.45) brightness(1.05);
+    backdrop-filter: blur(30px) saturate(1.45) brightness(1.05);
+    box-shadow: 14px 0 36px rgba(72, 52, 62, .18), inset -1px 0 rgba(255,255,255,.62), inset 0 1px rgba(255,255,255,.62) !important;
+  }
+  #drawer::before {
+    content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(125deg, rgba(255,255,255,.42), transparent 35%, rgba(219,166,187,.08) 72%, transparent);
+  }
+  #drawer .brand { text-shadow: 0 1px rgba(255,255,255,.54); }
+  #drawer .nav .item, #drawer .nav .recent {
+    border: 1px solid transparent;
+    transition: transform 150ms var(--ease-out), background-color 150ms ease, border-color 150ms ease;
+  }
+  #drawer .nav .item.on {
+    background: rgba(255,255,255,.37);
+    border-color: rgba(255,255,255,.48);
+    box-shadow: inset 0 1px rgba(255,255,255,.46);
+  }
+  #drawer .nav .item:active, #drawer .nav .recent:active { transform: scale(.98); }
+  #drawer #avatarBtn {
+    background: rgba(255,255,255,.42); border-color: rgba(255,255,255,.66);
+    box-shadow: inset 0 1px rgba(255,255,255,.66), 0 3px 10px rgba(91,63,77,.1);
+  }
+  .lk-knob {
+    overflow: hidden;
+    background: linear-gradient(145deg, rgba(255,255,255,.83), rgba(222, 186, 200, .48)) !important;
+    border: 1px solid rgba(255,255,255,.8);
+    -webkit-backdrop-filter: blur(14px) saturate(1.35);
+    backdrop-filter: blur(14px) saturate(1.35);
+    box-shadow: 0 7px 18px rgba(73,52,62,.22), inset 0 1px rgba(255,255,255,.9), inset 0 -1px rgba(167,119,138,.18) !important;
+  }
+  .lk-knob::before {
+    content: ''; position: absolute; inset: 1px; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(135deg, rgba(255,255,255,.58), transparent 45%);
+  }
+  .lk-knob::after { position: relative; border-color: #625860; }
+  html[data-theme="dark"] #drawer {
+    background: linear-gradient(145deg, rgba(77,70,75,.78), rgba(58,52,57,.63)) !important;
+    border-color: rgba(255,235,244,.18) !important;
+    box-shadow: 14px 0 38px rgba(0,0,0,.3), inset -1px 0 rgba(255,237,245,.12), inset 0 1px rgba(255,237,245,.1) !important;
+  }
+  html[data-theme="dark"] #drawer .nav .item.on, html[data-theme="dark"] #drawer #avatarBtn {
+    background: rgba(255,235,244,.1); border-color: rgba(255,235,244,.13);
+  }
+  html[data-theme="dark"] .lk-knob {
+    background: linear-gradient(145deg, rgba(242,218,229,.82), rgba(184,125,148,.55)) !important;
+    border-color: rgba(255,246,250,.52);
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) #drawer {
+      background: linear-gradient(145deg, rgba(77,70,75,.78), rgba(58,52,57,.63)) !important;
+      border-color: rgba(255,235,244,.18) !important;
+      box-shadow: 14px 0 38px rgba(0,0,0,.3), inset -1px 0 rgba(255,237,245,.12), inset 0 1px rgba(255,237,245,.1) !important;
+    }
+    html:not([data-theme="light"]) #drawer .nav .item.on, html:not([data-theme="light"]) #drawer #avatarBtn {
+      background: rgba(255,235,244,.1); border-color: rgba(255,235,244,.13);
+    }
+    html:not([data-theme="light"]) .lk-knob {
+      background: linear-gradient(145deg, rgba(242,218,229,.82), rgba(184,125,148,.55)) !important;
+      border-color: rgba(255,246,250,.52);
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     header .iconbtn, #plusBtn, #instructionsBtn, #mcpChatBtn, .pill, #send { transition: background-color 150ms ease, border-color 150ms ease; }
   }
