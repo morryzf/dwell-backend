@@ -2037,6 +2037,61 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     }
   }
 
+  /* Refine the hierarchy: glass belongs to the surface, not to every row. */
+  .composer, #nkPop, .nk-say, .board-toggle, .menuCard, .songcard, .crow, .sheet,
+  .group, .ap-section, .ap-in, .ap-b, .model-catalog-action, .filecard, .ucard,
+  .bn-card, .fav-card, .dm-card, .brick-card, .hcard, .hl-card { outline: 0; }
+  #drawer .nav .item, #drawer .nav .recent {
+    background: transparent; border-color: transparent; box-shadow: none;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  #drawer .nav .item + .item, #drawer .nav .recent + .recent { margin-top: 0; }
+  #drawer .nav .item.on {
+    background: linear-gradient(145deg, rgba(255,255,255,.42), rgba(244,216,228,.22));
+    border-color: rgba(255,255,255,.48);
+    box-shadow: inset 0 1px rgba(255,255,255,.56), 0 4px 12px rgba(92,64,78,.07);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    backdrop-filter: blur(14px) saturate(1.2);
+  }
+  .lk-knob {
+    background: radial-gradient(circle at 31% 22%, rgba(255,255,255,.68), rgba(252,228,237,.36) 37%, rgba(211,158,179,.48) 100%) !important;
+    border-color: rgba(182,128,151,.30) !important;
+    box-shadow: 0 7px 18px rgba(73,52,62,.18), inset 0 1px rgba(255,255,255,.38), inset 0 -1px rgba(156,103,124,.12) !important;
+  }
+  .lk-knob::before { background: linear-gradient(135deg, rgba(255,255,255,.30), transparent 48%); }
+  .lk-knob::after { border-color: #6a5d64; }
+  .composer {
+    background: linear-gradient(145deg, rgba(255,253,254,.47), rgba(244,218,229,.20)) !important;
+    border-color: rgba(255,255,255,.54) !important;
+    -webkit-backdrop-filter: blur(34px) saturate(1.55) brightness(1.05);
+    backdrop-filter: blur(34px) saturate(1.55) brightness(1.05);
+    box-shadow: 0 12px 30px rgba(87,59,72,.14), inset 0 1px rgba(255,255,255,.64), inset 0 -1px rgba(177,119,142,.09) !important;
+  }
+  html[data-theme="dark"] #drawer .nav .item, html[data-theme="dark"] #drawer .nav .recent {
+    background: transparent; border-color: transparent; box-shadow: none;
+  }
+  html[data-theme="dark"] #drawer .nav .item.on {
+    background: linear-gradient(145deg, rgba(255,235,244,.16), rgba(255,184,210,.055));
+    border-color: rgba(255,235,244,.16); box-shadow: inset 0 1px rgba(255,238,246,.14), 0 4px 12px rgba(0,0,0,.12);
+  }
+  html[data-theme="dark"] .composer {
+    background: linear-gradient(145deg, rgba(92,82,89,.58), rgba(61,54,60,.34)) !important;
+    border-color: rgba(255,235,244,.20) !important;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) #drawer .nav .item, html:not([data-theme="light"]) #drawer .nav .recent {
+      background: transparent; border-color: transparent; box-shadow: none;
+    }
+    html:not([data-theme="light"]) #drawer .nav .item.on {
+      background: linear-gradient(145deg, rgba(255,235,244,.16), rgba(255,184,210,.055));
+      border-color: rgba(255,235,244,.16); box-shadow: inset 0 1px rgba(255,238,246,.14), 0 4px 12px rgba(0,0,0,.12);
+    }
+    html:not([data-theme="light"]) .composer {
+      background: linear-gradient(145deg, rgba(92,82,89,.58), rgba(61,54,60,.34)) !important;
+      border-color: rgba(255,235,244,.20) !important;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     header .iconbtn, #plusBtn, #instructionsBtn, #mcpChatBtn, .pill, #send { transition: background-color 150ms ease, border-color 150ms ease; }
   }
