@@ -8,9 +8,9 @@
 <meta name="theme-color" content="#262624" media="(prefers-color-scheme: dark)">
 <title>dwell</title>
 
-<link rel="icon" href="icons/favicon-64.png" sizes="64x64" type="image/png">
-<link rel="icon" href="icons/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/dwell-bunny-64.png" sizes="64x64" type="image/png">
+<link rel="icon" href="icons/dwell-bunny-512.png" sizes="512x512" type="image/png">
+<link rel="apple-touch-icon" href="icons/dwell-bunny-180.png">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1888,6 +1888,81 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   .lk-chime:nth-child(3) { left: 50%; }
   .lk-chime:nth-child(4) { left: 72%; }
   .lk-chime:nth-child(5) { left: 91%; }
+
+  /* One material system for the whole app.  Large surfaces frost the page;
+     rows and controls use a lighter layer, preserving hierarchy and contrast. */
+  .composer, #nkPop, .nk-say, .board-toggle, .menuCard, .songcard, .crow, .sheet,
+  .group, .ap-section, .ap-in, .ap-b, .model-catalog-action, .filecard, .ucard,
+  .bn-card, .fav-card, .dm-card, .brick-card, .hcard, .hl-card, #log .gu, #log .bubble {
+    background: linear-gradient(145deg, rgba(255,253,254,.67), rgba(238,218,226,.35)) !important;
+    border: 1px solid rgba(255,255,255,.65) !important;
+    -webkit-backdrop-filter: blur(22px) saturate(1.35) brightness(1.04);
+    backdrop-filter: blur(22px) saturate(1.35) brightness(1.04);
+    box-shadow: 0 8px 22px rgba(83,59,71,.10), inset 0 1px rgba(255,255,255,.68), inset 0 -1px rgba(187,134,153,.10) !important;
+  }
+  .sheet { outline: 0; }
+  .sheet::after { background: transparent; }
+  .sheet .group, .sheet .ap-section, .sheet .ucard, .sheet .bn-card, .sheet .fav-card,
+  .sheet .dm-card, .sheet .brick-card, .sheet .hcard, .sheet .hl-card {
+    background: linear-gradient(145deg, rgba(255,255,255,.40), rgba(232,205,217,.21)) !important;
+    box-shadow: inset 0 1px rgba(255,255,255,.54), 0 5px 15px rgba(83,59,71,.07) !important;
+  }
+  .ap-in, .ap-b, .model-catalog-action { box-shadow: inset 0 1px rgba(255,255,255,.72), 0 2px 8px rgba(83,59,71,.06) !important; }
+  #log .bubble { background: linear-gradient(145deg, rgba(247,220,230,.72), rgba(221,172,194,.37)) !important; }
+  #drawer .nav .item, #drawer .nav .recent {
+    background: rgba(255,255,255,.19); border-color: rgba(255,255,255,.30);
+    -webkit-backdrop-filter: blur(12px) saturate(1.2);
+    backdrop-filter: blur(12px) saturate(1.2);
+    box-shadow: inset 0 1px rgba(255,255,255,.34);
+  }
+  #drawer .nav .item + .item { margin-top: 5px; }
+  #drawer .nav .recent + .recent { margin-top: 4px; }
+  #drawer .nav .item.on { background: rgba(255,255,255,.43); }
+
+  html[data-theme="dark"] .composer, html[data-theme="dark"] #nkPop, html[data-theme="dark"] .nk-say,
+  html[data-theme="dark"] .board-toggle, html[data-theme="dark"] .menuCard, html[data-theme="dark"] .songcard,
+  html[data-theme="dark"] .crow, html[data-theme="dark"] .sheet, html[data-theme="dark"] .group,
+  html[data-theme="dark"] .ap-section, html[data-theme="dark"] .ap-in, html[data-theme="dark"] .ap-b,
+  html[data-theme="dark"] .model-catalog-action, html[data-theme="dark"] .filecard, html[data-theme="dark"] .ucard,
+  html[data-theme="dark"] .bn-card, html[data-theme="dark"] .fav-card, html[data-theme="dark"] .dm-card,
+  html[data-theme="dark"] .brick-card, html[data-theme="dark"] .hcard, html[data-theme="dark"] .hl-card,
+  html[data-theme="dark"] #log .gu, html[data-theme="dark"] #log .bubble {
+    background: linear-gradient(145deg, rgba(82,75,80,.73), rgba(59,53,58,.48)) !important;
+    border-color: rgba(255,235,244,.17) !important;
+    box-shadow: 0 9px 24px rgba(0,0,0,.19), inset 0 1px rgba(255,238,246,.13), inset 0 -1px rgba(0,0,0,.16) !important;
+  }
+  html[data-theme="dark"] .sheet .group, html[data-theme="dark"] .sheet .ap-section, html[data-theme="dark"] .sheet .ucard,
+  html[data-theme="dark"] .sheet .bn-card, html[data-theme="dark"] .sheet .fav-card, html[data-theme="dark"] .sheet .dm-card,
+  html[data-theme="dark"] .sheet .brick-card, html[data-theme="dark"] .sheet .hcard, html[data-theme="dark"] .sheet .hl-card {
+    background: linear-gradient(145deg, rgba(255,235,244,.10), rgba(255,188,212,.045)) !important;
+  }
+  html[data-theme="dark"] #log .bubble { background: linear-gradient(145deg, rgba(119,82,99,.72), rgba(87,62,75,.56)) !important; }
+  html[data-theme="dark"] #drawer .nav .item, html[data-theme="dark"] #drawer .nav .recent {
+    background: rgba(255,235,244,.065); border-color: rgba(255,235,244,.10); box-shadow: inset 0 1px rgba(255,238,246,.09);
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) .composer, html:not([data-theme="light"]) #nkPop, html:not([data-theme="light"]) .nk-say,
+    html:not([data-theme="light"]) .board-toggle, html:not([data-theme="light"]) .menuCard, html:not([data-theme="light"]) .songcard,
+    html:not([data-theme="light"]) .crow, html:not([data-theme="light"]) .sheet, html:not([data-theme="light"]) .group,
+    html:not([data-theme="light"]) .ap-section, html:not([data-theme="light"]) .ap-in, html:not([data-theme="light"]) .ap-b,
+    html:not([data-theme="light"]) .model-catalog-action, html:not([data-theme="light"]) .filecard, html:not([data-theme="light"]) .ucard,
+    html:not([data-theme="light"]) .bn-card, html:not([data-theme="light"]) .fav-card, html:not([data-theme="light"]) .dm-card,
+    html:not([data-theme="light"]) .brick-card, html:not([data-theme="light"]) .hcard, html:not([data-theme="light"]) .hl-card,
+    html:not([data-theme="light"]) #log .gu, html:not([data-theme="light"]) #log .bubble {
+      background: linear-gradient(145deg, rgba(82,75,80,.73), rgba(59,53,58,.48)) !important;
+      border-color: rgba(255,235,244,.17) !important;
+      box-shadow: 0 9px 24px rgba(0,0,0,.19), inset 0 1px rgba(255,238,246,.13), inset 0 -1px rgba(0,0,0,.16) !important;
+    }
+    html:not([data-theme="light"]) .sheet .group, html:not([data-theme="light"]) .sheet .ap-section, html:not([data-theme="light"]) .sheet .ucard,
+    html:not([data-theme="light"]) .sheet .bn-card, html:not([data-theme="light"]) .sheet .fav-card, html:not([data-theme="light"]) .sheet .dm-card,
+    html:not([data-theme="light"]) .sheet .brick-card, html:not([data-theme="light"]) .sheet .hcard, html:not([data-theme="light"]) .sheet .hl-card {
+      background: linear-gradient(145deg, rgba(255,235,244,.10), rgba(255,188,212,.045)) !important;
+    }
+    html:not([data-theme="light"]) #log .bubble { background: linear-gradient(145deg, rgba(119,82,99,.72), rgba(87,62,75,.56)) !important; }
+    html:not([data-theme="light"]) #drawer .nav .item, html:not([data-theme="light"]) #drawer .nav .recent {
+      background: rgba(255,235,244,.065); border-color: rgba(255,235,244,.10); box-shadow: inset 0 1px rgba(255,238,246,.09);
+    }
+  }
 
   /* iOS-like glass: translucent enough to carry the background through,
      but with a frosted separation layer so navigation stays effortless to read. */
