@@ -2204,4 +2204,3 @@ async def static_or_index(path: str):
         return FileResponse(f)
     raise HTTPException(404, "没有这个页面")
 
-
