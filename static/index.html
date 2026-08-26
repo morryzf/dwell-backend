@@ -2324,6 +2324,31 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     backdrop-filter: none;
   }
   header .iconbtn:active { background: color-mix(in srgb, var(--accent-soft) 54%, transparent) !important; }
+
+  /* Chat rows stay clean until a deliberate left swipe reveals their actions. */
+  .chatrow { position: relative; display: block; overflow: hidden; margin-bottom: 10px; border-radius: 15px; }
+  .chatrow .crow {
+    position: relative; z-index: 1; margin: 0; touch-action: pan-y;
+    transition: transform 180ms var(--ease-out);
+  }
+  .chatrow.dragging .crow { transition: none; }
+  .chat-actions {
+    position: absolute; z-index: 0; inset: 0 0 0 auto; display: flex;
+    align-items: stretch; overflow: hidden; border-radius: inherit;
+  }
+  .chat-action { width: 72px; color: #fff; font-size: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; }
+  .chat-action .ic { width: 18px; height: 18px; }
+  .chat-action.rename { background: #9c8a93; }
+  .chat-action.delete { background: #c06f87; }
+  .chat-action:active { filter: brightness(.91); }
+  .drawer-foot { gap: 10px; }
+  #settingsBtn {
+    margin-left: auto; min-height: 44px; padding: 0 13px; border-radius: 999px;
+    display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 14px;
+    background: rgba(255,255,255,.26); border: 1px solid rgba(255,255,255,.52);
+  }
+  #settingsBtn .ic { width: 17px; height: 17px; }
+  #settingsBtn:active { transform: scale(.97); }
 </style>
 </head>
 <body>
@@ -2364,10 +2389,9 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
 
 <div class="menuCard" id="dotsMenu">
   <button class="mi" data-act="find"><span class="ic" data-i="search"></span>搜索</button>
+  <button class="mi" data-act="longContext"><span class="ic" data-i="bookOpen"></span>对话长期上下文</button>
   <button class="mi" data-act="ctx"><span class="ic" data-i="gauge"></span>容量</button>
-  <button class="mi" data-act="rename"><span class="ic" data-i="tag"></span>备注</button>
   <button class="mi danger" data-act="archive"><span class="ic" data-i="box"></span>收纳</button>
-  <button class="mi" data-act="settings"><span class="ic" data-i="sliders"></span>设置</button>
 </div>
 
 <!-- 留言板：冰箱门 -->
@@ -2417,6 +2441,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     </div>
     <div class="drawer-foot">
       <button id="avatarBtn" title="我的主页">Me</button>
+      <button id="settingsBtn" title="设置"><span class="ic" data-i="sliders"></span>设置</button>
     </div>
   </div>
 </div>
@@ -2448,7 +2473,6 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
         <button class="grow" id="mcpRow"><span class="ic" data-i="tool"></span>MCP 工具<span class="chev">›</span></button>
         <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
         <button class="grow" id="kelivoImportRow"><span class="ic" data-i="plus"></span>导入 Kelivo 聊天记录<span class="chev">›</span></button>
-        <button class="grow" id="longContextRow"><span class="ic" data-i="bookOpen"></span>对话长期上下文<span class="chev">›</span></button>
       </div>
     </div>
   </div>
@@ -4722,7 +4746,7 @@ function openFind() {
   findBody.appendChild(bar);
   const out = document.createElement('div');
   findBody.appendChild(out);
-  out.innerHTML = '<div class="fd-hint">翻的是全部的东西：日记、聊天记录、简报、这里说过的话。<br>想不起来哪天的事，就打一个词进去。</div>';
+  out.innerHTML = '<div class="fd-hint">翻的是聊天、日记、收藏的话、悄悄话、夜记和日历。<br>想不起来哪天的事，就打一个词进去。</div>';
   const run = async () => {
     const q = inp.value.trim();
     if (q.length < 1) { out.innerHTML = '<div class="fd-hint">写点什么，我去翻</div>'; return; }
@@ -6409,6 +6433,7 @@ Object.entries(sheets).forEach(([k, wrap]) => {
 });
 
 document.getElementById('avatarBtn').onclick = () => { closeDrawer(); sheets.settings.classList.add('open'); };
+document.getElementById('settingsBtn').onclick = () => { closeDrawer(); sheets.settings.classList.add('open'); };
 document.getElementById('usageRow').onclick = () => { sheets.usage.classList.add('open'); loadUsage(); };
 document.getElementById('apiRow').onclick = () => note('（这是备用通道的占位——真到要用的那天，把 API key 给我，我把自己接回来）');
 function setArmed(on) {
@@ -6452,22 +6477,9 @@ dotsMenu.querySelectorAll('.mi').forEach(b => b.onclick = async () => {
   dotsMenu.classList.remove('open');
   const act = b.dataset.act;
   if (act === 'scroll-bottom') scroll(true);
-  if (act === 'settings') sheets.settings.classList.add('open');
+  if (act === 'find') openFind();
+  if (act === 'longContext') { sheets.longContext.classList.add('open'); loadLongContext(); }
   if (act === 'ctx') { sheets.ctx.classList.add('open'); loadContext(); }
-  if (act === 'rename') {
-    const cur = document.querySelector('header .title h1').textContent;
-    const name = prompt('这一窗叫什么好', cur);
-    if (name && name.trim()) {
-      try {
-        const d = await (await fetch('api/chats', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'rename', id: 'CURRENT', name: name.trim() })
-        })).json();
-        setTitle(name.trim());
-        note('（改好了）');
-      } catch { note('（没改成）', 'err'); }
-    }
-  }
   if (act === 'archive') {
     if (!confirm('把这一窗收起来？收起来就发不了消息了，在窗口列表右上角切到「已收纳」能找回来')) return;
     try {
@@ -6478,7 +6490,6 @@ dotsMenu.querySelectorAll('.mi').forEach(b => b.onclick = async () => {
       location.reload();
     } catch { note('（没收成）', 'err'); }
   }
-  if (act === 'find') openFind();
   if (act === 'notes') { sheets.notes.classList.add('open'); loadNotes(true); }
   if (act === 'status') {
     try {
@@ -7242,7 +7253,6 @@ async function loadLongContext() {
     if (working) longContextPoll = setTimeout(loadLongContext, 1800);
   } catch (e) { body.innerHTML = '<div class="gnote">长期上下文没拿到：' + instructionEsc(e.message) + '</div>'; }
 }
-document.getElementById('longContextRow').onclick = () => { sheets.longContext.classList.add('open'); loadLongContext(); };
 document.querySelector('[data-close="longContext"]').addEventListener('click', stopLongContextPoll);
 
 
@@ -7336,6 +7346,17 @@ async function loadChats() {
     d.items.forEach(it => {
       const row = document.createElement('div');
       row.className = 'chatrow';
+      const actions = document.createElement('div');
+      actions.className = 'chat-actions';
+      const rename = document.createElement('button');
+      rename.className = 'chat-action rename'; rename.title = '重命名';
+      rename.append(icEl('tag', 18), document.createTextNode('重命名'));
+      rename.onclick = () => renameChat(it);
+      const del = document.createElement('button');
+      del.className = 'chat-action delete'; del.title = '删除这个对话';
+      del.append(icEl('trash', 18), document.createTextNode('删除'));
+      del.onclick = (e) => deleteChat(it, e);
+      actions.append(rename, del);
       const b = document.createElement('button');
       b.className = 'crow' + (it.current ? ' on' : '');
       const mid = document.createElement('span');
@@ -7351,12 +7372,13 @@ async function loadChats() {
       t.className = 'ct';
       t.textContent = it.current ? '在这儿' : ago(it.last || it.created);
       b.append(mid, t);
-      b.onclick = () => switchChat(it);
-      const del = document.createElement('button');
-      del.className = 'chatdel'; del.title = '删除这个对话';
-      del.appendChild(icEl('trash', 17));
-      del.onclick = (e) => deleteChat(it, e);
-      row.append(b, del);
+      b.onclick = () => {
+        if (b.dataset.swipeIgnore === '1') return;
+        if (b.dataset.swipeOpen === '1') { closeChatRow(b); return; }
+        switchChat(it);
+      };
+      row.append(actions, b);
+      bindChatRowSwipe(row, b);
       body.appendChild(row);
     });
   } catch { body.innerHTML = '<div class="gnote">拿不到窗口清单，等会儿再试</div>'; }
@@ -7406,6 +7428,62 @@ async function deleteChat(it, event) {
     }
     loadChats();
   } catch { note('（没删掉，再试一次）', 'err'); }
+}
+
+function closeChatRow(card) {
+  card.dataset.swipeOpen = '';
+  card.style.transform = '';
+}
+function bindChatRowSwipe(row, card) {
+  const actionWidth = 144;
+  let pointerId = null, startX = 0, startY = 0, base = 0, offset = 0, dragging = false;
+  const paint = (value, direct = false) => {
+    card.style.transition = direct ? 'none' : '';
+    card.style.transform = value ? 'translateX(' + value + 'px)' : '';
+  };
+  card.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    pointerId = event.pointerId; startX = event.clientX; startY = event.clientY;
+    base = card.dataset.swipeOpen === '1' ? -actionWidth : 0;
+    offset = base; dragging = false;
+    card.setPointerCapture?.(pointerId);
+  });
+  card.addEventListener('pointermove', (event) => {
+    if (event.pointerId !== pointerId) return;
+    const dx = event.clientX - startX, dy = event.clientY - startY;
+    if (!dragging && Math.abs(dy) > Math.abs(dx)) return;
+    if (!dragging && Math.abs(dx) < 6) return;
+    dragging = true; row.classList.add('dragging');
+    offset = Math.max(-actionWidth, Math.min(0, base + dx));
+    paint(offset, true);
+  });
+  const finish = (event) => {
+    if (event.pointerId !== pointerId) return;
+    pointerId = null;
+    if (!dragging) return;
+    dragging = false; row.classList.remove('dragging');
+    const open = offset < -actionWidth * .38;
+    card.dataset.swipeOpen = open ? '1' : '';
+    card.dataset.swipeIgnore = '1';
+    paint(open ? -actionWidth : 0);
+    setTimeout(() => { card.dataset.swipeIgnore = ''; }, 240);
+  };
+  card.addEventListener('pointerup', finish);
+  card.addEventListener('pointercancel', finish);
+}
+async function renameChat(it) {
+  const name = prompt('这一窗叫什么好', it.name || '');
+  if (!name || !name.trim()) return;
+  try {
+    const r = await fetch('api/chats', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'rename', id: it.id, name: name.trim() })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error('没有改成');
+    if (it.current) setTitle(name.trim());
+    loadChats();
+  } catch { note('（没改成，再试一次）', 'err'); }
 }
 
 document.getElementById('chatsMenu').onclick = () => {
