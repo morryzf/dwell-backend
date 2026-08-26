@@ -4344,9 +4344,19 @@ box.addEventListener('input', () => {
 
 const footerEl = document.querySelector('footer');
 let kbShift = 0, kbGap = 0;
+function sheetIsOpen() { return !!document.querySelector('.sheetWrap.open'); }
+function resetChatKeyboardAdjustment() {
+  kbShift = 0; kbGap = 0;
+  footerEl.style.paddingBottom = '';
+  footerEl.style.transform = '';
+  log.style.paddingBottom = (footerEl.offsetHeight + 48) + 'px';
+}
 function fitKeyboard() {
   const vv = window.visualViewport;
   if (!vv) return;
+  // 设置等弹层打开时，聊天页虽然被隐藏，但 visualViewport 事件仍会触发。
+  // 不能再让它改动背后的消息列表，否则会和弹层的避让相互抢位置。
+  if (sheetIsOpen()) { resetChatKeyboardAdjustment(); return; }
   /* 8/4 诊断实测：加了 interactive-widget=resizes-content 之后，浏览器自己就把
      布局视口缩到了键盘上沿（innerH 800→383），同时把页面滚上去 331。
      旧公式 innerH−vvH−vvTop 把那 331 一减，算出 kbGap=0 → 误判"键盘没开"，
@@ -4388,9 +4398,30 @@ if (window.visualViewport) {
   visualViewport.addEventListener('scroll', fitKeyboard);
 }
 
-/* 底部弹层已经由 interactive-widget=resizes-content 跟着键盘缩短。
-   这里只滚动内部内容；再改变弹层高度或位移会造成双重避让。 */
+/* 弹层和聊天页分别处理键盘：弹层只上移到键盘上沿，绝不改变自身高度。 */
 let sheetFieldTimer = null;
+function clearSheetKeyboardOffset(wrap) {
+  const sheet = wrap && wrap.querySelector('.sheet');
+  if (!sheet || !sheet.dataset.keyboardShift) return;
+  delete sheet.dataset.keyboardShift;
+  sheet.style.transform = '';
+}
+function fitOpenSheetsToKeyboard() {
+  const vv = window.visualViewport;
+  const keyboardOn = vv && (vv.offsetTop > 1 || window.innerHeight - vv.height > 20);
+  for (const sheet of document.querySelectorAll('.sheetWrap.open:not(.page) .sheet')) {
+    if (!keyboardOn) { clearSheetKeyboardOffset(sheet.closest('.sheetWrap')); continue; }
+    const previous = Number(sheet.dataset.keyboardShift || 0);
+    const rect = sheet.getBoundingClientRect();
+    const naturalBottom = rect.bottom - previous;
+    const seenBottom = vv.offsetTop + vv.height;
+    const shift = Math.min(0, Math.round(seenBottom - naturalBottom));
+    if (shift === previous) continue;
+    if (shift) sheet.dataset.keyboardShift = String(shift);
+    else delete sheet.dataset.keyboardShift;
+    sheet.style.transform = shift ? 'translateY(' + shift + 'px)' : '';
+  }
+}
 function revealSheetField(field = document.activeElement) {
   if (!(field instanceof HTMLElement) || !field.matches('input:not([type="hidden"]), textarea, select, [contenteditable="true"]')) return;
   const wrap = field.closest('.sheetWrap.open');
@@ -4411,14 +4442,17 @@ function revealSheetField(field = document.activeElement) {
 }
 function scheduleSheetFieldReveal() {
   clearTimeout(sheetFieldTimer);
-  requestAnimationFrame(() => revealSheetField());
+  requestAnimationFrame(() => { fitOpenSheetsToKeyboard(); revealSheetField(); });
   // iOS 的键盘是动画弹出的；在动画结束后再校准一次。
-  sheetFieldTimer = setTimeout(revealSheetField, 380);
+  sheetFieldTimer = setTimeout(() => { fitOpenSheetsToKeyboard(); revealSheetField(); }, 380);
 }
 document.addEventListener('focusin', (event) => {
   if (event.target instanceof HTMLElement && event.target.closest('.sheetWrap.open')) scheduleSheetFieldReveal();
 });
-if (window.visualViewport) visualViewport.addEventListener('resize', scheduleSheetFieldReveal);
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', scheduleSheetFieldReveal);
+  visualViewport.addEventListener('scroll', scheduleSheetFieldReveal);
+}
 
 if (location.search.includes('kb=1')) {
   const dbg = document.createElement('div');
@@ -6331,6 +6365,7 @@ document.querySelectorAll('[data-close]').forEach(el => {
     if (k === 'drawer') return closeDrawer();
     if (k === 'tool') { sheetStack = []; }
     const wrap = sheets[k];
+    clearSheetKeyboardOffset(wrap);
     wrap.classList.remove('open');
     if (wrap.classList.contains('page')) openDrawer();
   };
@@ -6342,6 +6377,7 @@ Object.entries(sheets).forEach(([k, wrap]) => {
   let startY = 0, curY = 0, dragging = false;
   const doClose = () => {
     if (k === 'tool') sheetStack = [];
+    clearSheetKeyboardOffset(wrap);
     wrap.classList.remove('open');
     if (wrap.classList.contains('page')) openDrawer();
   };
