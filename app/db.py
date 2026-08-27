@@ -351,9 +351,12 @@ def parse_segment(seg: str) -> dict:
     return out
 
 
-def diary_add(date: str, body: str) -> dict:
+def diary_add(date: str, body: str, keywords: str = "") -> dict:
     """写一段日记。标记从正文里解析，不用单独传。"""
     fields = parse_segment(body)
+    # diary.keywords is NOT NULL. A tool caller can name keywords explicitly;
+    # otherwise store parsed keywords or an empty string, never NULL.
+    fields["keywords"] = str(keywords or fields.get("keywords") or "").strip()[:300]
     row = {
         "id": new_id(),
         "date": date or today_str(),
@@ -361,6 +364,8 @@ def diary_add(date: str, body: str) -> dict:
         "made": int(time.time()),
         **fields,
     }
+    for key in ("title", "keywords", "her_mood", "my_mood"):
+        row[key] = str(row.get(key) or "")
     with conn() as cx:
         cx.execute(
             """INSERT INTO diary
@@ -368,8 +373,7 @@ def diary_add(date: str, body: str) -> dict:
                 strength,valence,arousal,made)
                VALUES (:id,:date,:title,:body,:keywords,:her_mood,:my_mood,
                        :strength,:valence,:arousal,:made)""",
-            {k: (v if v is not None else ("" if isinstance(v, str) else None))
-             for k, v in row.items()},
+            row,
         )
     return row
 
@@ -935,7 +939,7 @@ def find_everywhere(query: str, limit: int = 80) -> list[dict]:
     hits: list[dict] = []
     with conn() as cx:
         messages = cx.execute(
-            """SELECT m.content,m.made,c.name FROM messages m JOIN chats c ON c.id=m.chat_id
+            """SELECT m.id AS message_id,m.chat_id,m.content,m.made,c.name FROM messages m JOIN chats c ON c.id=m.chat_id
                WHERE m.content LIKE ? ORDER BY m.made DESC LIMIT ?""", (like, limit)
         ).fetchall()
         diary = cx.execute(
@@ -950,7 +954,7 @@ def find_everywhere(query: str, limit: int = 80) -> list[dict]:
         events = cx.execute("SELECT date,time,text,made FROM cal_events WHERE text LIKE ? ORDER BY date DESC,time DESC LIMIT ?", (like, limit)).fetchall()
 
     for row in messages:
-        hits.append({"kind": "聊天 · " + (row["name"] or "新对话"), "date": stamp(row["made"]), "snippet": snippet(row["content"]), "at": row["made"]})
+        hits.append({"kind": "聊天 · " + (row["name"] or "新对话"), "date": stamp(row["made"]), "snippet": snippet(row["content"]), "at": row["made"], "chat_id": row["chat_id"], "chat_name": row["name"] or "新对话", "message_id": row["message_id"]})
     for row in diary:
         hits.append({"kind": "日记", "date": row["date"], "snippet": snippet(" ".join(filter(None, [row["title"], row["keywords"], row["body"]]))), "at": row["made"]})
     for row in personal:

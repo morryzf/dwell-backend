@@ -100,6 +100,7 @@ HOME_TOOLS = [
             "diary": {"type": "string", "enum": ["cloudy", "user"]},
             "text": {"type": "string", "description": "Diary entry text"},
             "date": {"type": "string", "description": "Optional YYYY-MM-DD date; only used for the cloudy diary"},
+            "keywords": {"type": "string", "description": "Optional short keywords for the cloudy diary"},
         }, "required": ["diary", "text"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
@@ -193,7 +194,7 @@ def home_tool(name: str, arguments: dict) -> str:
         if not text:
             raise ValueError("日记内容不能为空")
         if diary == "cloudy":
-            item = db.diary_add(str(arguments.get("date") or "").strip(), text)
+            item = db.diary_add(str(arguments.get("date") or "").strip(), text, str(arguments.get("keywords") or ""))
         elif diary == "user":
             item = db.her_diary_add(text)
         else:
@@ -624,7 +625,7 @@ async def diary_add(payload: dict = Body(...)):
     body = str(payload.get("body", "")).strip()
     if not body:
         raise HTTPException(400, "正文不能是空的")
-    return db.diary_add(str(payload.get("date", "")), body)
+    return db.diary_add(str(payload.get("date", "")), body, str(payload.get("keywords", "")))
 
 
 @app.get("/api/diary-search", dependencies=authed)
@@ -1437,9 +1438,14 @@ async def chats_del(chat_id: str):
 
 
 @app.get("/api/messages", dependencies=authed)
-async def messages_get(chat_id: str = "", limit: int = 400, before: int | None = None):
+async def messages_get(chat_id: str = "", limit: int = 400, before: int | None = None, focus: str = ""):
     if not chat_id:
         chat_id = _get_or_create_current_chat()
+    if focus:
+        target = db.message_get(focus)
+        if target and target.get("chat_id") == chat_id:
+            # Put the matched message in the returned window so the browser can center it.
+            before = int(target["rowid"]) + 1
     data = db.message_ui_list(chat_id, limit, before)
     return {"ok": True, **data}
 
