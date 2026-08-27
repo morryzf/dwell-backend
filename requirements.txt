@@ -3,7 +3,8 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 itsdangerous==2.2.0
 httpx
-cryptography>=46,<47
+cryptography>=47,<51
+pywebpush>=2,<3
 mcp>=1.26,<2
 sse-starlette>=2,<3
 
