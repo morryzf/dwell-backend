@@ -1695,8 +1695,31 @@ def _device_time_context(raw: object) -> dict | None:
     return {"local": local, "iso": iso, "time_zone": timezone}
 
 
+def _inline_image_attachments(raw: object) -> list[str]:
+    """Validate small browser image attachments and turn them into data URLs.
+
+    They are used for only this model request, rather than being stored in the
+    chat database or added to later text-only context.
+    """
+    if not isinstance(raw, list):
+        return []
+    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    images: list[str] = []
+    for item in raw[:2]:
+        if not isinstance(item, dict) or item.get("kind") != "image":
+            continue
+        media_type = str(item.get("media_type") or "").lower().strip()
+        data = str(item.get("data") or "").strip()
+        if (media_type not in allowed_types or not data or len(data) > 1_500_000
+                or not re.fullmatch(r"[A-Za-z0-9+/=]+", data)):
+            continue
+        images.append(f"data:{media_type};base64,{data}")
+    return images
+
+
 async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None,
-                        proactive_watch: bool = False, device_time: dict | None = None):
+                        proactive_watch: bool = False, device_time: dict | None = None,
+                        attachments: list[str] | None = None):
     """调用当前聊天所选供应商，边收边发事件给前端。"""
     history = db.message_list(chat_id, limit=100)
     instructions = [
@@ -1777,6 +1800,19 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     )
                     messages[index] = {**messages[index], "content": content}
                     break
+    # 普通聊天的图片也只在这一轮请求里出现，不写进历史文本或长期上下文。
+    if attachments:
+        for index in range(len(messages) - 1, -1, -1):
+            if messages[index]["role"] != "user":
+                continue
+            existing = messages[index].get("content", "")
+            content = list(existing) if isinstance(existing, list) else [{"type": "text", "text": str(existing)}]
+            content.extend(
+                {"type": "image_url", "image_url": {"url": image, "detail": "low"}}
+                for image in attachments
+            )
+            messages[index] = {**messages[index], "content": content}
+            break
     buf = []
     split_marker = "<dwell-split>"
     natural_split = re.compile(r"\n[ \t]*\n+")
@@ -1970,18 +2006,22 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
 async def send(request: Request):
     payload = await _read_json(request)
     text = str(payload.get("text", "")).strip()
+    attachments = _inline_image_attachments(payload.get("attachments"))
     device_time = _device_time_context(payload.get("device_time"))
-    if not text:
-        raise HTTPException(400, "消息不能是空的")
+    if not text and not attachments:
+        raise HTTPException(400, "消息和图片不能同时为空")
+    saved_text = text or "（发来了一张图片）"
 
     chat_id = _get_or_create_current_chat()
 
-    db.message_add(chat_id, "user", text)
-    _emit(chat_id, {"type": "echo", "text": text})
+    db.message_add(chat_id, "user", saved_text)
+    _emit(chat_id, {"type": "echo", "text": saved_text})
 
     placeholder = db.message_add(chat_id, "assistant", "")
 
-    task = asyncio.create_task(_run_ai_reply(chat_id, placeholder["id"], device_time=device_time))
+    task = asyncio.create_task(_run_ai_reply(
+        chat_id, placeholder["id"], device_time=device_time, attachments=attachments
+    ))
     _running_tasks[chat_id] = task
 
     return {"ok": True}

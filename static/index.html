@@ -3757,8 +3757,9 @@ function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+let replayingHistory = false;
 function addToolUse(part) {
-  petSet('typing');
+  if (!replayingHistory) petSet('typing');
   closeThink();
   toolInfo[part.id] = { name: part.name, input: part.input || {}, result: null, isError: false, done: false };
   if (!curGroup) {
@@ -3891,7 +3892,9 @@ toolBack.onclick = () => {
 };
 
 function renderSaid(msgs) {
-  for (const m of msgs) {
+  const wasReplayingHistory = replayingHistory;
+  replayingHistory = true;
+  try { for (const m of msgs) {
     if (m.kind === 'me') { endThink(); addMe(m.text, m); }
     else if (m.kind === 'gu') {
       for (const tool of (m.tools || [])) {
@@ -3924,6 +3927,9 @@ function renderSaid(msgs) {
     }
   }
   closeGroup(); endThink();
+  } finally {
+    replayingHistory = wasReplayingHistory;
+  }
 }
 
 let historyLoadVersion = 0;
@@ -3948,6 +3954,15 @@ async function loadSaid(focusMessageId = '') {
     scroll(true);
     return d.upto || 0;
   } catch (e) { return 0; }
+}
+
+let resultSyncTimer = null;
+function reconcileAfterReply() {
+  if (resultSyncTimer) clearTimeout(resultSyncTimer);
+  resultSyncTimer = setTimeout(async () => {
+    const upto = await loadSaid();
+    if (upto) cursor = Math.max(cursor, upto);
+  }, 120);
 }
 
 let earliestSeq = null;      // 已经摆出来的最早一条 seq
@@ -4195,6 +4210,7 @@ function handle(d) {
     renderAllRich();
     if (d.is_error) note('（出错了：' + (d.result || '不知道为什么') + '）', 'err');
     scroll();
+    reconcileAfterReply();
     return;
   }
 
@@ -4420,30 +4436,35 @@ function deviceTimeContext() {
   return { local, iso: now.toISOString(), time_zone: timeZone, offset_minutes: -now.getTimezoneOffset() };
 }
 
-function send() {
+async function send() {
   if (guBusy && !((box.value || '').trim() || attachments.length)) return stopGu();
   const text = box.value.trim();
   if (!text && !attachments.length) return;
   const wasBusy = guBusy;
   if (wasBusy) { try { fetch('api/stop', { method: 'POST' }); } catch (e) {} }
+  const outgoingAttachments = attachments;
   box.value = '';
   box.style.height = 'auto';
   setBusy(true);
   const payload = { text, device_time: deviceTimeContext() };
-  if (attachments.length) payload.attachments = attachments;
+  if (outgoingAttachments.length) payload.attachments = outgoingAttachments;
   attachments = [];
   renderStrip();
-  fetch('api/send', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  }).catch(() => { setBusy(false); note('（没送出去，再试一次）', 'err'); });
+  try {
+    const response = await fetch('api/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.detail || '没有送出去');
+  } catch (e) {
+    attachments = outgoingAttachments.concat(attachments);
+    box.value = text; box.dispatchEvent(new Event('input'));
+    renderStrip(); setBusy(false);
+    note('（没送出去：' + (e.message || '请再试一次') + '）', 'err');
+  }
 }
 sendBtn.onclick = send;
 box.addEventListener('input', refreshSend);
-box.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
-});
 box.addEventListener('input', () => {
   box.style.height = 'auto';
   box.style.height = Math.min(box.scrollHeight, 160) + 'px';
