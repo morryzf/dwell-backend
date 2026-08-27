@@ -165,6 +165,18 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS ix_messages_chat ON messages(chat_id, made ASC);
 
+-- 聊天图片只保存前端压缩后的缩略图。原图仍只用于当次模型请求，避免数据库膨胀。
+CREATE TABLE IF NOT EXISTS message_attachments (
+    id         TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'image',
+    data_url   TEXT NOT NULL,
+    made       INTEGER NOT NULL,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_message_attachments_message
+ON message_attachments(message_id, made ASC);
+
 -- 聊天的长期上下文。原始 messages 永远是唯一原始记录；这里仅存可重新生成的
 -- 派生摘要，以及它已覆盖到的消息位置。
 CREATE TABLE IF NOT EXISTS chat_memory_state (
@@ -683,6 +695,21 @@ def whisper_recent(n: int = 5, mark_seen: bool = False) -> list:
     return [dict(r) for r in rows]
 
 
+def whisper_unseen(n: int = 5, mark_seen: bool = False) -> list:
+    """按写下的顺序取尚未带进聊天上下文的用户悄悄话。"""
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT * FROM whispers WHERE who='her' AND seen=0 ORDER BY at ASC LIMIT ?",
+            (n,),
+        ).fetchall()
+        if mark_seen and rows:
+            cx.executemany(
+                "UPDATE whispers SET seen=1 WHERE id=?",
+                [(row["id"],) for row in rows],
+            )
+    return [dict(row) for row in rows]
+
+
 # ---------------------------------------------------------------- 聊天窗口
 
 def chat_add(name: str = "") -> dict:
@@ -804,6 +831,15 @@ def chat_branch_from_message(source_chat_id: str, message_id: str) -> dict | Non
             cx.executemany("""INSERT INTO tool_calls (id,chat_id,assistant_message_id,name,arguments,result,is_error,made)
                               VALUES (?,?,?,?,?,?,?,?)""",
                            [(new_id(), branch["id"], fresh, item["name"], item["arguments"], item["result"], item["is_error"], item["made"]) for item in calls])
+            images = cx.execute(
+                "SELECT kind,data_url,made FROM message_attachments WHERE message_id=? ORDER BY rowid ASC",
+                (old_id,),
+            ).fetchall()
+            cx.executemany(
+                """INSERT INTO message_attachments (id,message_id,kind,data_url,made)
+                   VALUES (?,?,?,?,?)""",
+                [(new_id(), fresh, item["kind"], item["data_url"], item["made"]) for item in images],
+            )
         cx.execute("INSERT INTO chat_mcp_servers (chat_id,server_id) SELECT ?,server_id FROM chat_mcp_servers WHERE chat_id=?",
                    (branch["id"], source_chat_id))
         cx.execute("INSERT INTO chat_instruction_presets (chat_id,instruction_id) SELECT ?,instruction_id FROM chat_instruction_presets WHERE chat_id=?",
@@ -890,6 +926,43 @@ def message_add(chat_id: str, role: str, content: str, made: int | None = None) 
             row,
         )
     return row
+
+
+def message_attachment_add(message_id: str, data_url: str) -> dict:
+    """给消息保存一张经过前端压缩的图片缩略图。"""
+    if not data_url.startswith("data:image/") or len(data_url) > 700_000:
+        raise ValueError("图片缩略图无效或过大")
+    row = {
+        "id": new_id(),
+        "message_id": message_id,
+        "kind": "image",
+        "data_url": data_url,
+        "made": int(time.time()),
+    }
+    with conn() as cx:
+        cx.execute(
+            """INSERT INTO message_attachments (id,message_id,kind,data_url,made)
+               VALUES (:id,:message_id,:kind,:data_url,:made)""",
+            row,
+        )
+    return row
+
+
+def message_attachments(message_ids: list[str]) -> dict[str, list[str]]:
+    ids = list(dict.fromkeys(message_ids))
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    with conn() as cx:
+        rows = cx.execute(
+            f"""SELECT message_id,data_url FROM message_attachments
+                WHERE message_id IN ({marks}) ORDER BY made ASC, rowid ASC""",
+            ids,
+        ).fetchall()
+    result: dict[str, list[str]] = {}
+    for row in rows:
+        result.setdefault(row["message_id"], []).append(row["data_url"])
+    return result
 
 
 def message_get(message_id: str) -> dict | None:
@@ -1099,6 +1172,7 @@ def chat_memory_source_messages(chat_id: str, after_rowid: int, before_rowid: in
 def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -> dict:
     rows = message_list(chat_id, limit, before)
     assistant_ids = [row["id"] for row in rows if row["role"] == "assistant"]
+    images_by_message = message_attachments([row["id"] for row in rows])
     tools_by_message: dict[str, list[dict]] = {}
     if assistant_ids:
         placeholders = ",".join("?" for _ in assistant_ids)
@@ -1122,6 +1196,7 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
             "content": r["content"],
             "at": r["made"],
             "tools": tools_by_message.get(r["id"], []) if role == "assistant" else [],
+            "images": images_by_message.get(r["id"], []),
         })
     more = False
     if msgs:
