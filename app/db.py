@@ -988,6 +988,22 @@ def message_list(chat_id: str, limit: int = 400, before: int | None = None) -> l
     return [dict(r) for r in reversed(rows)]
 
 
+def message_last_made(chat_id: str, role: str = "") -> int:
+    """Return the last persisted message timestamp for heartbeat scheduling."""
+    with conn() as cx:
+        if role:
+            row = cx.execute(
+                "SELECT COALESCE(MAX(made),0) AS made FROM messages WHERE chat_id=? AND role=?",
+                (chat_id, role),
+            ).fetchone()
+        else:
+            row = cx.execute(
+                "SELECT COALESCE(MAX(made),0) AS made FROM messages WHERE chat_id=?",
+                (chat_id,),
+            ).fetchone()
+    return int(row["made"] if row else 0)
+
+
 def find_everywhere(query: str, limit: int = 80) -> list[dict]:
     """按最近更新时间翻聊天与 Dwell 里可见的文字。数据库很小，LIKE 足够稳。"""
     query = query.strip()[:60]

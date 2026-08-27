@@ -12,6 +12,7 @@ import os
 import tempfile
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -19,7 +20,7 @@ import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from . import auth, db, provider_secrets
+from . import auth, db, provider_secrets, push_service
 from app.pet_assets import ensure_pet_assets
 from app.llm_client import stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
@@ -37,6 +38,8 @@ _watch_notes: dict[tuple[str, str], dict] = {}
 _kelivo_uploads: dict[str, tuple[str, float]] = {}
 # 长期上下文的后台整理任务。它和正常回复分开，不能占用聊天的流式状态。
 _memory_tasks: dict[str, asyncio.Task] = {}
+_heartbeat_task: asyncio.Task | None = None
+_heartbeat_lock = asyncio.Lock()
 
 MEMORY_TAIL_MESSAGES = 60
 MEMORY_UPDATE_MIN_MESSAGES = 30
@@ -440,6 +443,235 @@ import json
 import re
 
 
+HEARTBEAT_DEFAULTS = {
+    "day_minutes": 120,
+    "night_minutes": 300,
+    "day_start": 9,
+    "day_end": 24,
+    "daily_limit": 4,
+}
+
+
+def _setting_int(key: str, default: int, low: int, high: int) -> int:
+    try:
+        return max(low, min(int(db.setting_get(key, str(default))), high))
+    except (TypeError, ValueError):
+        return default
+
+
+def _heartbeat_config() -> dict:
+    return {
+        "day_minutes": _setting_int("heartbeat_day_minutes", HEARTBEAT_DEFAULTS["day_minutes"], 15, 1440),
+        "night_minutes": _setting_int("heartbeat_night_minutes", HEARTBEAT_DEFAULTS["night_minutes"], 15, 1440),
+        "day_start": _setting_int("heartbeat_day_start", HEARTBEAT_DEFAULTS["day_start"], 0, 23),
+        "day_end": _setting_int("heartbeat_day_end", HEARTBEAT_DEFAULTS["day_end"], 1, 24),
+        "daily_limit": _setting_int("heartbeat_daily_limit", HEARTBEAT_DEFAULTS["daily_limit"], 1, 24),
+    }
+
+
+def _heartbeat_now() -> datetime:
+    # Dwell 的日期和日记已经统一使用北京时间；沿用同一个固定时区，
+    # 避免精简版 Windows / 容器缺少 IANA tzdata 时心跳线程启动失败。
+    return datetime.now(db.CN_TZ)
+
+
+def _heartbeat_is_day(hour: int, start: int, end: int) -> bool:
+    if start == end:
+        return True
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end
+
+
+def _heartbeat_daily_count(now: datetime) -> int:
+    today = now.strftime("%Y-%m-%d")
+    if db.setting_get("heartbeat_count_date", "") != today:
+        db.setting_set("heartbeat_count_date", today)
+        db.setting_set("wake_count_today", "0")
+        return 0
+    return _setting_int("wake_count_today", 0, 0, 999)
+
+
+def _heartbeat_context(chat_id: str, now: datetime, interval: int) -> list[dict]:
+    config_prompt = (
+        "【Dwell 后台心跳】这不是用户发来的新消息。用户此刻没有输入，系统只是按计划让你醒来看看。\n"
+        f"当前时间：{now.strftime('%Y-%m-%d %H:%M')}；本次心跳间隔：{interval} 分钟。\n"
+        "请根据下面这间聊天的真实上下文，决定此刻是否像真人发微信那样主动联系她。"
+        "只有确实自然、有话想说、有关心或承接上下文的理由时才发送；不要为了完成任务而寒暄，"
+        "不要提及心跳、后台、定时器、系统提示或自己刚刚醒来。\n"
+        "可用工具只允许读取记忆或上下文，不得创建、修改或删除任何外部数据。\n"
+        "如果不适合联系，只输出 [NO_ACTION]。如果适合，只输出准备直接发给她的消息正文，"
+        "不要标题、标签、解释或引号。消息应自然、简短，并与最近对话保持连续。"
+    )
+    instructions = [
+        {"role": "system", "content": item["content"]}
+        for item in db.chat_instructions(chat_id)
+        if item.get("content", "").strip()
+    ]
+    memory = db.chat_memory_get(chat_id)
+    memory_messages = []
+    if memory.get("enabled") and str(memory.get("overview") or "").strip():
+        memory_messages.append({
+            "role": "system",
+            "content": "【这间聊天的长期上下文，只作回忆参考】\n" + str(memory["overview"]),
+        })
+    history = [
+        {"role": item["role"], "content": item["content"]}
+        for item in db.message_list(chat_id, limit=80)
+        if item.get("content") and item.get("role") in {"user", "assistant", "system"}
+    ]
+    return [{"role": "system", "content": config_prompt}] + instructions + memory_messages + history
+
+
+def _heartbeat_read_tool(tool: dict) -> bool:
+    """Keep background heartbeats incapable of selecting mutating MCP tools."""
+    function = tool.get("function") or {}
+    haystack = f"{function.get('name', '')} {function.get('description', '')}".lower()
+    mutating_words = (
+        "create", "write", "update", "delete", "remove", "save", "insert",
+        "append", "upsert", "edit", "modify", "set_", "add_", "创建", "写入",
+        "更新", "删除", "保存", "添加", "修改",
+    )
+    return not any(word in haystack for word in mutating_words)
+
+
+async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
+    selection = db.chat_model_get(chat_id)
+    provider = db.provider_get(selection.get("provider_id") or "")
+    if not provider or not provider.get("enabled") or not selection.get("model_id"):
+        raise RuntimeError("主动接收消息的聊天还没有可用模型")
+
+    messages = _heartbeat_context(chat_id, now, interval)
+    tools: list[dict] = []
+    tool_servers: dict[str, dict] = {}
+    for server in db.chat_mcp_servers(chat_id):
+        try:
+            for tool in await mcp_list_tools(server):
+                if not _heartbeat_read_tool(tool):
+                    continue
+                tools.append(tool)
+                tool_servers[tool["function"]["name"]] = server
+        except McpConnectionError:
+            continue
+
+    for round_no in range(4):
+        parts: list[str] = []
+        calls: list[dict] = []
+        async for event in stream_chat(provider, selection["model_id"], messages, tools or None):
+            if event.get("type") == "text":
+                parts.append(str(event.get("text") or ""))
+            elif event.get("type") == "tool_calls":
+                calls.extend(event.get("calls") or [])
+        if not calls:
+            return "".join(parts).strip()
+
+        assistant_calls = []
+        for index, call in enumerate(calls):
+            assistant_calls.append({
+                "id": call.get("id") or f"heartbeat-{round_no}-{index}",
+                "type": "function",
+                "function": {
+                    "name": str(call.get("name") or ""),
+                    "arguments": str(call.get("arguments") or "{}"),
+                },
+            })
+        messages.append({"role": "assistant", "content": "", "tool_calls": assistant_calls})
+        for call in assistant_calls:
+            name = call["function"]["name"]
+            server = tool_servers.get(name)
+            try:
+                arguments = json.loads(call["function"]["arguments"])
+                if not isinstance(arguments, dict) or not server:
+                    raise ValueError("心跳只能使用当前聊天已启用的 MCP 工具")
+                result = await mcp_call_tool(server, name.split("__", 2)[-1], arguments)
+            except Exception as exc:
+                result = json.dumps({"is_error": True, "content": [{"type": "text", "text": str(exc)}]}, ensure_ascii=False)
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+    raise RuntimeError("心跳读取上下文的工具调用轮数过多")
+
+
+async def _heartbeat_once(force: bool = False) -> dict:
+    if _heartbeat_lock.locked():
+        return {"ok": False, "status": "busy"}
+    async with _heartbeat_lock:
+        if not force and db.setting_get("wake_on", "1") == "0":
+            db.setting_set("heartbeat_last_status", "off")
+            return {"ok": True, "status": "off"}
+        chat_id = db.setting_get("wake_target_chat_id", "").strip()
+        chat = db.chat_get(chat_id) if chat_id else None
+        if not chat:
+            db.setting_set("heartbeat_last_status", "no_target")
+            return {"ok": False, "status": "no_target"}
+        running = _running_tasks.get(chat_id)
+        if running and not running.done():
+            db.setting_set("heartbeat_last_status", "chat_busy")
+            return {"ok": True, "status": "chat_busy"}
+
+        now = _heartbeat_now()
+        config = _heartbeat_config()
+        is_day = _heartbeat_is_day(now.hour, config["day_start"], config["day_end"])
+        interval = config["day_minutes"] if is_day else config["night_minutes"]
+        count = _heartbeat_daily_count(now)
+        if not force and count >= config["daily_limit"]:
+            db.setting_set("heartbeat_last_status", "daily_limit")
+            return {"ok": True, "status": "daily_limit", "count": count}
+
+        last_user = db.message_last_made(chat_id, "user")
+        if not last_user:
+            db.setting_set("heartbeat_last_status", "no_user_message")
+            return {"ok": True, "status": "no_user_message"}
+        last_check = _setting_int("heartbeat_last_check", 0, 0, 4_000_000_000)
+        due_from = max(last_user, last_check)
+        if not force and int(time.time()) - due_from < interval * 60:
+            db.setting_set("heartbeat_last_status", "waiting")
+            return {"ok": True, "status": "waiting"}
+
+        # 先落检查水位，避免重启或多个并发请求造成双发。
+        db.setting_set("heartbeat_last_check", str(int(time.time())))
+        db.setting_set("heartbeat_last_status", "thinking")
+        try:
+            text = (await _heartbeat_decide(chat_id, now, interval)).strip()
+            if not text or text.startswith("[NO_ACTION]"):
+                db.setting_set("heartbeat_last_status", "quiet")
+                return {"ok": True, "status": "quiet"}
+            if text.startswith("[配置错误]") or text.startswith("[供应商错误") or text.startswith("[网络错误]"):
+                raise RuntimeError(text[:300])
+
+            text = text[:3000]
+            message = db.message_add(chat_id, "assistant", text)
+            _emit(chat_id, {
+                "type": "assistant",
+                "message": {"id": message["id"], "content": [{"type": "text", "text": text}]},
+            })
+            count += 1
+            db.setting_set("wake_count_today", str(count))
+            db.setting_set("heartbeat_last_status", "sent")
+            db.setting_set("heartbeat_last_sent", str(int(time.time())))
+            push_result = await push_service.send_push(
+                "Cloudy 发来一条消息",
+                text,
+                f"/?chat={chat_id}&from=push",
+            )
+            return {"ok": True, "status": "sent", "chat_id": chat_id, "id": message["id"], "push": push_result}
+        except Exception as exc:
+            db.setting_set("heartbeat_last_status", "error")
+            db.setting_set("heartbeat_last_error", str(exc)[:500])
+            return {"ok": False, "status": "error", "detail": str(exc)[:500]}
+
+
+async def _heartbeat_loop() -> None:
+    await asyncio.sleep(20)
+    while True:
+        try:
+            await _heartbeat_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            db.setting_set("heartbeat_last_status", "error")
+            db.setting_set("heartbeat_last_error", str(exc)[:500])
+        await asyncio.sleep(60)
+
+
 async def _read_json(request: Request) -> dict:
     """读 body 当 JSON。前端有时不带 Content-Type，Body(...) 不吃。
 
@@ -458,11 +690,26 @@ async def _read_json(request: Request) -> dict:
 
 
 @app.on_event("startup")
-def _startup():
+async def _startup():
+    global _heartbeat_task
     db.init_db()
     db.setting_set("started_at", str(int(time.time())))
     ensure_frontend()
-    ensure_pet_assets(str(STATIC_DIR)) 
+    ensure_pet_assets(str(STATIC_DIR))
+    push_service.ensure_vapid_keys()
+    _heartbeat_task = asyncio.create_task(_heartbeat_loop())
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    global _heartbeat_task
+    if _heartbeat_task and not _heartbeat_task.done():
+        _heartbeat_task.cancel()
+        try:
+            await _heartbeat_task
+        except asyncio.CancelledError:
+            pass
+    _heartbeat_task = None
 
 
 FRONTEND_URL = ("https://raw.githubusercontent.com/xinwithyu/"
@@ -1372,11 +1619,13 @@ async def model_set(request: Request):
 
 @app.get("/api/wake", dependencies=authed)
 async def wake_get():
+    config = _heartbeat_config()
     return {
         "ok": True,
         "on": db.setting_get("wake_on", "1") != "0",
         "count": int(db.setting_get("wake_count_today", "0") or "0"),
         "room": "",
+        "config": config,
     }
 
 
@@ -1386,6 +1635,62 @@ async def wake_set(request: Request):
     on = bool(payload.get("on"))
     db.setting_set("wake_on", "1" if on else "0")
     return {"ok": True, "on": on, "count": int(db.setting_get("wake_count_today", "0") or "0"), "room": ""}
+
+
+def _heartbeat_status_payload() -> dict:
+    chat_id = db.setting_get("wake_target_chat_id", "").strip()
+    chat = db.chat_get(chat_id) if chat_id else None
+    return {
+        "ok": True,
+        "on": db.setting_get("wake_on", "1") != "0",
+        "config": _heartbeat_config(),
+        "target": {"chat_id": chat_id, "name": chat["name"] if chat else ""},
+        "count": _heartbeat_daily_count(_heartbeat_now()),
+        "last_check": _setting_int("heartbeat_last_check", 0, 0, 4_000_000_000),
+        "last_sent": _setting_int("heartbeat_last_sent", 0, 0, 4_000_000_000),
+        "last_status": db.setting_get("heartbeat_last_status", "idle"),
+        "last_error": db.setting_get("heartbeat_last_error", ""),
+        "push_subscriptions": push_service.subscription_count(),
+    }
+
+
+@app.get("/api/heartbeat", dependencies=authed)
+async def heartbeat_get():
+    return _heartbeat_status_payload()
+
+
+@app.post("/api/heartbeat", dependencies=authed)
+async def heartbeat_set(request: Request):
+    payload = await _read_json(request)
+    if "on" in payload:
+        db.setting_set("wake_on", "1" if bool(payload["on"]) else "0")
+    fields = {
+        "day_minutes": ("heartbeat_day_minutes", 15, 1440),
+        "night_minutes": ("heartbeat_night_minutes", 15, 1440),
+        "day_start": ("heartbeat_day_start", 0, 23),
+        "day_end": ("heartbeat_day_end", 1, 24),
+        "daily_limit": ("heartbeat_daily_limit", 1, 24),
+    }
+    for name, (key, low, high) in fields.items():
+        if name not in payload:
+            continue
+        try:
+            value = int(payload[name])
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"{name} 必须是整数")
+        if not low <= value <= high:
+            raise HTTPException(400, f"{name} 必须在 {low} 到 {high} 之间")
+        db.setting_set(key, str(value))
+    return _heartbeat_status_payload()
+
+
+@app.post("/api/heartbeat/run", dependencies=authed)
+async def heartbeat_run():
+    if _heartbeat_lock.locked():
+        raise HTTPException(409, "Cloudy 正在进行上一轮心跳")
+    db.setting_set("heartbeat_last_status", "queued")
+    asyncio.create_task(_heartbeat_once(force=True))
+    return {"ok": True, "status": "queued"}
 
 
 @app.get("/api/context", dependencies=authed)
@@ -1430,17 +1735,43 @@ async def watch_get():
 
 @app.get("/api/pushkey", dependencies=authed)
 async def pushkey_get():
-    key = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
-    if not key:
-        raise HTTPException(503, "还没配置 VAPID_PUBLIC_KEY")
-    return {"ok": True, "key": key}
+    return {"ok": True, "key": push_service.public_key()}
 
 
 @app.post("/api/subscribe", dependencies=authed)
 async def subscribe(request: Request):
     payload = await _read_json(request)
-    db.setting_set("push_subscription", json.dumps(payload, ensure_ascii=False))
-    return {"ok": True}
+    try:
+        count = push_service.save_subscription(payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    result = await push_service.send_push(
+        "Dwell 的门铃通了",
+        "以后 Cloudy 主动发消息时，会在这里告诉你。",
+        "/?from=push",
+    )
+    return {"ok": True, "subscriptions": count, "push": result}
+
+
+@app.post("/api/unsubscribe", dependencies=authed)
+async def unsubscribe(request: Request):
+    payload = await _read_json(request)
+    endpoint = str(payload.get("endpoint") or "").strip()
+    if not endpoint:
+        raise HTTPException(400, "缺少推送订阅地址")
+    return {"ok": True, "subscriptions": push_service.remove_subscription(endpoint)}
+
+
+@app.post("/api/push-test", dependencies=authed)
+async def push_test():
+    result = await push_service.send_push(
+        "Cloudy 轻轻敲了下门",
+        "这是一条 Dwell 原生手机通知测试。",
+        "/?from=push",
+    )
+    if not result["subscriptions"]:
+        raise HTTPException(409, "还没有手机订阅通知")
+    return {"ok": bool(result["sent"]), **result}
 
 
 @app.post("/api/rewake", dependencies=authed)
@@ -2290,7 +2621,12 @@ async def wake_say(request: Request):
         "type": "assistant",
         "message": {"content": [{"type": "text", "text": text}]},
     })
-    return {"ok": True, "chat_id": chat_id, "id": message["id"]}
+    push_result = await push_service.send_push(
+        "Cloudy 发来一条消息",
+        text,
+        f"/?chat={chat_id}&from=push",
+    )
+    return {"ok": True, "chat_id": chat_id, "id": message["id"], "push": push_result}
 
 
 # ---------------------------------------------------------------- 健康检查
