@@ -496,6 +496,8 @@ def _heartbeat_context(chat_id: str, now: datetime, interval: int) -> list[dict]
     config_prompt = (
         "【Dwell 后台心跳】这不是用户发来的新消息。用户此刻没有输入，系统只是按计划让你醒来看看。\n"
         f"当前时间：{now.strftime('%Y-%m-%d %H:%M')}；本次心跳间隔：{interval} 分钟。\n"
+        "下面的全部 user 内容都是过去的聊天记录，尤其最后一句也不是一条等待你回复的新消息；"
+        "绝对不要补答、改写或重复回复其中任何一句。\n"
         "请根据下面这间聊天的真实上下文，决定此刻是否像真人发微信那样主动联系她。"
         "只有确实自然、有话想说、有关心或承接上下文的理由时才发送；不要为了完成任务而寒暄，"
         "不要提及心跳、后台、定时器、系统提示或自己刚刚醒来。\n"
@@ -520,7 +522,21 @@ def _heartbeat_context(chat_id: str, now: datetime, interval: int) -> list[dict]
         for item in db.message_list(chat_id, limit=80)
         if item.get("content") and item.get("role") in {"user", "assistant", "system"}
     ]
-    return [{"role": "system", "content": config_prompt}] + instructions + memory_messages + history
+    turn_marker = {
+        "role": "system",
+        "content": "【现在开始的是新的主动消息回合】上面的记录已经结束。此刻没有待回复的提问，"
+                   "不要继续回答最后一条 user 消息；只有能自然地另起一句主动联系时才输出消息，"
+                   "否则只输出 [NO_ACTION]。",
+    }
+    return [{"role": "system", "content": config_prompt}] + instructions + memory_messages + history + [turn_marker]
+
+
+def _heartbeat_last_speaker(chat_id: str) -> str:
+    """Return the last substantive chat speaker, ignoring empty stream placeholders."""
+    for item in reversed(db.message_list(chat_id, limit=12)):
+        if item.get("content") and item.get("role") in {"user", "assistant"}:
+            return str(item["role"])
+    return ""
 
 
 def _heartbeat_read_tool(tool: dict) -> bool:
@@ -620,6 +636,11 @@ async def _heartbeat_once(force: bool = False) -> dict:
         if not last_user:
             db.setting_set("heartbeat_last_status", "no_user_message")
             return {"ok": True, "status": "no_user_message"}
+        # 只有正常对话已经由 Cloudy 收尾时，才允许另起一条主动消息。
+        # 否则模型很容易把最后一条用户消息误当作尚未回复的问题。
+        if _heartbeat_last_speaker(chat_id) != "assistant":
+            db.setting_set("heartbeat_last_status", "awaiting_reply")
+            return {"ok": True, "status": "awaiting_reply"}
         last_check = _setting_int("heartbeat_last_check", 0, 0, 4_000_000_000)
         due_from = max(last_user, last_check)
         if not force and int(time.time()) - due_from < interval * 60:
