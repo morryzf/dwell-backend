@@ -235,7 +235,8 @@ html[data-theme="dark"] .glass,
   
   #log {
     flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
-    padding: calc(76px + env(safe-area-inset-top)) 18px 150px;
+    /* Header is deliberately translucent, but the first message must never begin beneath it. */
+    padding: calc(116px + env(safe-area-inset-top)) 18px 150px;
     display: flex; flex-direction: column; gap: 18px;
   }
   /* 顶上那颗「看更早的」——老账都在，按一下捞 400 行 */
@@ -771,7 +772,8 @@ html[data-theme="dark"] .composer {
     margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px;
     padding: 14px; font-size: 13px; line-height: 1.6; overflow-x: auto;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    white-space: pre; color: var(--text);
+    /* Tool responses are read vertically on a phone; never force a one-line horizontal pan. */
+    white-space: pre-wrap; overflow-x: hidden; overflow-wrap: anywhere; word-break: break-word; color: var(--text);
   }
   .diff { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--card); }
   .diff .dl {
@@ -836,7 +838,8 @@ html[data-theme="dark"] .composer {
   .fd-bar .ic { width: 17px; height: 17px; color: var(--dim); flex: none; }
   .fd-bar input { flex: 1; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 15.5px; }
   .fd-hint { font-size: 13px; color: var(--dim); padding: 12px 4px; line-height: 1.8; }
-  .fd-hit { padding: 12px 4px; border-bottom: 1px solid var(--line); }
+  .fd-hit { display: block; width: 100%; padding: 12px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+  button.fd-hit:active { opacity: .72; }
   .fd-hit .fh { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); margin-bottom: 4px; }
   .fd-hit .fk { background: var(--panel); border-radius: 999px; padding: 1px 9px; }
   .fd-hit .fs { font-size: 14.5px; line-height: 1.7; word-break: break-word; }
@@ -2335,6 +2338,11 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   .chat-actions {
     position: absolute; z-index: 0; inset: 0 0 0 auto; display: flex;
     align-items: stretch; overflow: hidden; border-radius: inherit;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transition: opacity 120ms ease-out, visibility 0s linear 120ms;
+  }
+  .chatrow.actions-peek .chat-actions, .chatrow.actions-open .chat-actions {
+    opacity: 1; visibility: visible; pointer-events: auto; transition-delay: 0s;
   }
   .chat-action { width: 72px; color: #fff; font-size: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; }
   .chat-action .ic { width: 18px; height: 18px; }
@@ -3845,12 +3853,13 @@ function renderSaid(msgs) {
 }
 
 let historyLoadVersion = 0;
-async function loadSaid() {
+async function loadSaid(focusMessageId = '') {
   // 这条接口返回的是完整历史，不是增量。页面从后台回来时可能连续触发两次；
   // 只收最后一次，并用它替换当前画面，绝不能往旧消息后面再追加。
   const version = ++historyLoadVersion;
   try {
-    const r = await fetch('api/messages?limit=400', { cache: 'no-store' });
+    const focus = focusMessageId ? '&focus=' + encodeURIComponent(focusMessageId) : '';
+    const r = await fetch('api/messages?limit=400' + focus, { cache: 'no-store' });
     if (!r.ok) return 0;
     const d = await r.json();
     if (version !== historyLoadVersion) return 0;
@@ -4763,7 +4772,7 @@ function openFind() {
       head.textContent = '翻到 ' + d.hits.length + ' 处';
       out.appendChild(head);
       d.hits.forEach(h => {
-        const el = document.createElement('div');
+        const el = document.createElement(h.chat_id ? 'button' : 'div');
         el.className = 'fd-hit';
         const fh = document.createElement('div');
         fh.className = 'fh';
@@ -4781,6 +4790,11 @@ function openFind() {
           fs.append(h.snippet.slice(idx + q.length));
         } else fs.textContent = h.snippet;
         el.append(fh, fs);
+        if (h.chat_id && h.message_id) {
+          el.type = 'button';
+          el.title = '打开这条消息';
+          el.onclick = () => openSearchChatHit(h);
+        }
         out.appendChild(el);
       });
     } catch {
@@ -4791,6 +4805,31 @@ function openFind() {
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { clearTimeout(findTimer); run(); } });
   sheets.find.classList.add('open');
   setTimeout(() => inp.focus(), 250);
+}
+
+async function openSearchChatHit(hit) {
+  try {
+    const response = await fetch('api/chats', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'switch', id: hit.chat_id })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error('切换失败');
+    const chat = (data.items || []).find(item => item.id === hit.chat_id) || { id: hit.chat_id, name: hit.chat_name || 'Cloudy' };
+    sheets.find.classList.remove('open');
+    pollGeneration += 1;
+    if (pollAbort) pollAbort.abort();
+    polling = false; cursor = Number.MAX_SAFE_INTEGER;
+    log.innerHTML = '';
+    guEl = null; turnThink = null; curGroup = null;
+    earliestSeq = null; olderBtn = null;
+    setTitle(chat.name);
+    refreshInstructionButton(); refreshMcpChatButton();
+    await loadSaid(hit.message_id);
+    document.querySelector('#log .row[data-message-id="' + CSS.escape(hit.message_id) + '"]')
+      ?.scrollIntoView({ block: 'center' });
+    poll();
+  } catch { note('（没能打开这句话，再试一次）', 'err'); }
 }
 
 const calBody = document.getElementById('calBody');
@@ -7374,7 +7413,7 @@ async function loadChats() {
       b.append(mid, t);
       b.onclick = () => {
         if (b.dataset.swipeIgnore === '1') return;
-        if (b.dataset.swipeOpen === '1') { closeChatRow(b); return; }
+        if (b.dataset.swipeOpen === '1') { closeChatRow(row, b); return; }
         switchChat(it);
       };
       row.append(actions, b);
@@ -7430,8 +7469,9 @@ async function deleteChat(it, event) {
   } catch { note('（没删掉，再试一次）', 'err'); }
 }
 
-function closeChatRow(card) {
+function closeChatRow(row, card) {
   card.dataset.swipeOpen = '';
+  row.classList.remove('actions-open', 'actions-peek');
   card.style.transform = '';
 }
 function bindChatRowSwipe(row, card) {
@@ -7453,7 +7493,7 @@ function bindChatRowSwipe(row, card) {
     const dx = event.clientX - startX, dy = event.clientY - startY;
     if (!dragging && Math.abs(dy) > Math.abs(dx)) return;
     if (!dragging && Math.abs(dx) < 6) return;
-    dragging = true; row.classList.add('dragging');
+    dragging = true; row.classList.add('dragging', 'actions-peek');
     offset = Math.max(-actionWidth, Math.min(0, base + dx));
     paint(offset, true);
   });
@@ -7461,9 +7501,10 @@ function bindChatRowSwipe(row, card) {
     if (event.pointerId !== pointerId) return;
     pointerId = null;
     if (!dragging) return;
-    dragging = false; row.classList.remove('dragging');
+    dragging = false; row.classList.remove('dragging', 'actions-peek');
     const open = offset < -actionWidth * .38;
     card.dataset.swipeOpen = open ? '1' : '';
+    row.classList.toggle('actions-open', open);
     card.dataset.swipeIgnore = '1';
     paint(open ? -actionWidth : 0);
     setTimeout(() => { card.dataset.swipeIgnore = ''; }, 240);
