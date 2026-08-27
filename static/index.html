@@ -2510,7 +2510,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
       <button class="item on"><span class="ic" data-i="chat"></span>聊天</button>
       <button class="item" id="navTodo"><span class="ic" data-i="checkSquare"></span>待办</button>
       <button class="item" id="navCal"><span class="ic" data-i="calendar"></span>日历</button>
-      <button class="item" id="navWall"><span class="ic" data-i="pen"></span>日记</button>
+      <button class="item" id="navWall"><span class="ic" data-i="pen"></span>心事簿</button>
       <button class="item" id="navNook"><span class="ic" data-i="bookOpen"></span>共读</button>
       <button class="item" id="navRepo"><span class="ic" data-i="box"></span>仓库</button>
       <div class="sect">Recents</div>
@@ -3074,6 +3074,18 @@ function row(cls) {
   log.appendChild(d);
   return d;
 }
+function appendMessageImages(el, images) {
+  (images || []).forEach(src => {
+    if (!String(src).startsWith('data:image/')) return;
+    const img = new Image();
+    img.className = 'chatimg';
+    img.src = src;
+    img.alt = '发送的图片';
+    img.loading = 'lazy';
+    el.appendChild(img);
+  });
+}
+
 function addMe(text, message) {
   const r = row('me');
   const b = document.createElement('div');
@@ -3081,6 +3093,7 @@ function addMe(text, message) {
   b.textContent = text;
   r.appendChild(b);
   renderRich(b);
+  appendMessageImages(b, message && message.images);
   if (message) attachMessageActions(b, message);
   scroll(true);
   guEl = null; endThink(); closeGroup();
@@ -3253,6 +3266,22 @@ function attachMessageActions(el, message) {
   const moreMenu = document.createElement('div'); moreMenu.className = 'msg-more';
   const addMore = (label, handler) => { const button = document.createElement('button'); button.textContent = label; button.onclick = async (event) => { event.stopPropagation(); await handler(); }; moreMenu.appendChild(button); };
   addMore('选择消息', () => { close(); setMessageSelectionMode(true); toggleMessageSelection(message.id); });
+  addMore('摘进最喜欢的话', async () => {
+    close();
+    const quote = String(message.text || '').trim();
+    if (!quote) { note('（这条没有可以摘录的文字）', 'err'); return; }
+    const dt = new Date((Number(message.at) || Date.now() / 1000) * 1000);
+    const date = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+    try {
+      const r = await fetch('api/quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quote, date, note: message.role === 'assistant' ? 'Cloudy 说' : '我说' }),
+      });
+      if (!r.ok) throw new Error('没有保存');
+      note('（摘进“最喜欢的话”了）');
+    } catch (e) { note('（没摘上：' + e.message + '）', 'err'); }
+  });
   if (message.role === 'assistant') addMore('查看版本', () => { close(); openMessageVersions(message); });
   addMore('创建分支', async () => {
     close();
@@ -3916,6 +3945,7 @@ function renderSaid(msgs) {
       el.textContent = m.text;
       trimOrphanTail(el);            // 库里的半截消息拖着「课」这种孤尾——历史这条路也要摘
       renderRich(el);
+      appendMessageImages(el, m.images);
       attachMessageActions(el, m);
       guEl = null;                   // 每条各归各位，别粘成一坨
     } else if (m.kind === 'think') {
@@ -4092,7 +4122,12 @@ setInterval(calDayWatch, 120000);
 
 function handle(d) {
   lastEventAt = Date.now();
-  if (d.type === 'echo') { if (armedFresh) setArmed(false); addMe(d.text); petSet('thinking'); return; }
+  if (d.type === 'echo') {
+    if (armedFresh) setArmed(false);
+    addMe(d.text, { id: d.message_id, role: 'user', text: d.text, at: d.at, images: d.images || [] });
+    petSet('thinking');
+    return;
+  }
   if (d.type === 'system' && d.subtype === 'newchat') { setArmed(false); log.innerHTML = ''; guEl = null; earliestSeq = null; olderBtn = null; note(d.text); return; }
   if (d.type === 'system' && d.subtype === 'switched') { setArmed(false); log.innerHTML = ''; guEl = null; earliestSeq = null; olderBtn = null; note(d.text); return; }
   if (d.type === 'system' && d.subtype === 'regenerating') {
@@ -4857,7 +4892,7 @@ function openFind() {
   findBody.appendChild(bar);
   const out = document.createElement('div');
   findBody.appendChild(out);
-  out.innerHTML = '<div class="fd-hint">翻的是聊天、日记、收藏的话、悄悄话、夜记和日历。<br>想不起来哪天的事，就打一个词进去。</div>';
+  out.innerHTML = '<div class="fd-hint">翻的是聊天、心事簿、收藏的话、悄悄话、夜记和日历。<br>想不起来哪天的事，就打一个词进去。</div>';
   const run = async () => {
     const q = inp.value.trim();
     if (q.length < 1) { out.innerHTML = '<div class="fd-hint">写点什么，我去翻</div>'; return; }
@@ -5179,7 +5214,7 @@ function diaryHead(mode) {
     return b;
   };
   if (mode !== 'bento') nav.appendChild(mk('主页', 'bento', renderBento));
-  const h1 = document.createElement('h1'); h1.textContent = '日记';
+  const h1 = document.createElement('h1'); h1.textContent = '心事簿';
   const sub = document.createElement('div'); sub.className = 'sub';
   const _days = Math.floor((Date.now() - new Date('2026-04-17T00:00:00+08:00')) / 86400e3) + 1;
   sub.textContent = '在一起 ' + _days + ' 天';
@@ -5254,9 +5289,9 @@ function renderBento() {
     if (onClick) c.onclick = onClick;
     return c;
   };
-  const latestDate = boardDates[boardDates.length - 1];
-  const latest = wallBricks.filter(b => b.date === latestDate);
-  const md = (ds) => parseInt(ds.slice(5, 7), 10) + '月' + parseInt(ds.slice(8), 10) + '日';
+  const latestDate = boardDates[boardDates.length - 1] || '';
+  const latest = latestDate ? wallBricks.filter(b => b.date === latestDate) : [];
+  const md = (ds) => ds ? (parseInt(ds.slice(5, 7), 10) + '月' + parseInt(ds.slice(8), 10) + '日') : '还没有第一篇';
   const rot = (c, deg) => { c.style.setProperty('--rot', deg); return c; };
   grid.appendChild(rot(card('hero wide', 'special moment', md(latestDate),
     latest.length + ' 段 · ' + (latest[0] ? latest[0].title : ''), 'spark',
@@ -5293,93 +5328,110 @@ async function renderHerDiary() {
   const go = document.createElement('button');
   go.className = 'go'; go.textContent = '记上';
   go.onclick = async () => {
-    const v = ta.value.trim();
-    if (!v) return;
-    ta.value = '';
-    await fetch('api/herdiary', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'add', text: v }) }).catch(() => {});
-    renderHerDiary();
+    const value = ta.value.trim();
+    if (!value) return;
+    go.disabled = true;
+    try {
+      const response = await fetch('api/her-diary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: value }),
+      });
+      if (!response.ok) throw new Error('没有保存');
+      ta.value = '';
+      await renderHerDiary();
+    } catch (e) {
+      note('（日记没存上：' + e.message + '）', 'err');
+      go.disabled = false;
+    }
   };
   row.appendChild(go);
   write.append(ta, row);
   wallBody.appendChild(write);
   try {
-    const d = await (await fetch('api/herdiary', { cache: 'no-store' })).json();
-    (d.items || []).forEach(it => {
-      const c = document.createElement('div');
-      c.className = 'hd-item';
-      const dt = new Date(it.at * 1000 + (8 * 60 + new Date().getTimezoneOffset()) * 60000);
-      const dd = document.createElement('div');
-      dd.className = 'hdd';
-      dd.textContent = (dt.getMonth() + 1) + ' 月 ' + dt.getDate() + ' 日 · '
+    const response = await fetch('api/her-diary', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '没有读取到');
+    (data.items || []).forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'hd-item';
+      const dt = new Date(item.at * 1000);
+      const date = document.createElement('div');
+      date.className = 'hdd';
+      date.textContent = (dt.getMonth() + 1) + ' 月 ' + dt.getDate() + ' 日 · '
         + String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
-      const tx = document.createElement('div');
-      tx.className = 'hdt'; tx.textContent = it.text;
+      const text = document.createElement('div');
+      text.className = 'hdt'; text.textContent = item.text;
       const del = document.createElement('button');
       del.className = 'hdx';
       del.appendChild(icEl('x', 13));
       del.onclick = async () => {
-        await fetch('api/herdiary', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'del', id: it.id }) }).catch(() => {});
+        const response = await fetch('api/her-diary/' + encodeURIComponent(item.id), { method: 'DELETE' });
+        if (!response.ok) { note('（这页没删掉）', 'err'); return; }
         renderHerDiary();
       };
-      c.append(dd, tx, del);
-      wallBody.appendChild(c);
+      card.append(date, text, del);
+      wallBody.appendChild(card);
     });
-    if (!(d.items || []).length) {
-      const e = document.createElement('div');
-      e.className = 'pp-empty';
-      e.textContent = '本子还空着，第一页等你';
-      wallBody.appendChild(e);
+    if (!(data.items || []).length) {
+      const empty = document.createElement('div');
+      empty.className = 'pp-empty';
+      empty.textContent = '本子还空着，第一页等你';
+      wallBody.appendChild(empty);
     }
-  } catch (e) {}
+  } catch (e) {
+    const empty = document.createElement('div');
+    empty.className = 'pp-empty';
+    empty.textContent = '本子暂时没打开，再试一次';
+    wallBody.appendChild(empty);
+  }
 }
 
 async function renderFav() {
   wallBody.innerHTML = '';
   wallBody.appendChild(diaryHead('fav'));
-  let text = '';
   try {
-    const d = await (await fetch('api/favlines', { cache: 'no-store' })).json();
-    text = d.text || '';
-  } catch (e) {}
-  const blocks = text.split(/\n-{3,}\n/).slice(1);
-  let shown = 0;
-  blocks.forEach(bl => {
-    const dm = bl.match(/\*\*(\d{4}-\d{2}-\d{2})\*\*/);
-    const quotes = bl.split('\n').filter(l => l.trim().startsWith('>'))
-      .map(l => l.replace(/^\s*>\s?/, '')).join('\n').trim();
-    if (!quotes) return;
-    const note = bl.split('\n').filter(l => {
-      const t = l.trim();
-      return t && !t.startsWith('>') && !t.startsWith('**');
-    }).join('\n').trim();
-    const c = document.createElement('div');
-    c.className = 'fav-card';
-    const q = document.createElement('span');
-    q.className = 'fq'; q.innerHTML = SKETCH.quote;
-    c.appendChild(q);
-    if (dm) {
-      const fd = document.createElement('div');
-      fd.className = 'fd'; fd.textContent = dm[1].replace(/-/g, ' · ');
-      c.appendChild(fd);
+    const response = await fetch('api/quotes', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '没有读取到');
+    (data.items || []).forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'fav-card';
+      const icon = document.createElement('span');
+      icon.className = 'fq'; icon.innerHTML = SKETCH.quote;
+      const date = document.createElement('div');
+      date.className = 'fd'; date.textContent = String(item.date || '').replace(/-/g, ' · ');
+      const quote = document.createElement('div');
+      quote.className = 'fx'; quote.textContent = String(item.quote || '').replace(/^[“"]|[”"]$/g, '');
+      card.append(icon, date, quote);
+      if (item.note) {
+        const memo = document.createElement('div');
+        memo.className = 'fn'; memo.textContent = item.note;
+        card.appendChild(memo);
+      }
+      const del = document.createElement('button');
+      del.className = 'hdx';
+      del.setAttribute('aria-label', '删除摘录');
+      del.appendChild(icEl('x', 13));
+      del.onclick = async () => {
+        const response = await fetch('api/quotes/' + encodeURIComponent(item.id), { method: 'DELETE' });
+        if (!response.ok) { note('（这句没删掉）', 'err'); return; }
+        renderFav();
+      };
+      card.appendChild(del);
+      wallBody.appendChild(card);
+    });
+    if (!(data.items || []).length) {
+      const empty = document.createElement('div');
+      empty.className = 'pp-empty';
+      empty.textContent = '还没摘下来的话';
+      wallBody.appendChild(empty);
     }
-    const fx = document.createElement('div');
-    fx.className = 'fx'; fx.textContent = quotes.replace(/^[\u201c"]|[\u201d"]$/g, '');
-    c.appendChild(fx);
-    if (note) {
-      const fn = document.createElement('div');
-      fn.className = 'fn'; fn.textContent = note;
-      c.appendChild(fn);
-    }
-    wallBody.appendChild(c);
-    shown++;
-  });
-  if (!shown) {
-    const e = document.createElement('div');
-    e.className = 'pp-empty';
-    e.textContent = '还没摘下来的话';
-    wallBody.appendChild(e);
+  } catch (e) {
+    const empty = document.createElement('div');
+    empty.className = 'pp-empty';
+    empty.textContent = '摘录暂时没拿到，再试一次';
+    wallBody.appendChild(empty);
   }
 }
 
@@ -5595,17 +5647,20 @@ async function loadWall() {
   try {
     if (!wallBricks) {
       const d = await (await fetch('api/wall?lite=1', { cache: 'no-store' })).json();
-      if (!d.ok || !d.bricks.length) throw 0;
-      wallBricks = d.bricks;
-      boardDates = [...new Set(d.bricks.map(b => b.date))].sort();
-      boardIdx = boardDates.length - 1;   // 打开先看最近的一天
+      if (!d.ok) throw 0;
+      wallBricks = d.bricks || [];
+      boardDates = [...new Set(wallBricks.map(b => b.date))].sort();
+      boardIdx = Math.max(0, boardDates.length - 1);   // 打开先看最近的一天
     }
     if (wallMode === 'bento') renderBento();
     else if (wallMode === 'timeline') renderTimeline();
     else if (wallMode === 'board') renderBoard();
     else if (wallMode === 'her') renderHerDiary();
     else if (wallMode === 'fav') renderFav();
-    else renderWall(wallBricks);
+    else if (wallMode === 'whisper') renderWhisper();
+    else if (wallMode === 'dream') renderDream();
+    else if (wallBricks.length) renderWall(wallBricks);
+    else renderBento();
   } catch {
     wallBody.innerHTML = '<div class="wall-intro"><div class="sub">便签没搬过来，再开一次试试</div></div>';
   }
@@ -8268,7 +8323,17 @@ function shrinkImage(file) {
       cv.getContext('2d').drawImage(img, 0, 0, w, h);
       URL.revokeObjectURL(url);
       const dataUrl = cv.toDataURL('image/jpeg', 0.85);
-      resolve({ kind: 'image', media_type: 'image/jpeg', data: dataUrl.split(',')[1], name: file.name });
+      const thumbMax = 640;
+      let tw = w, th = h;
+      if (Math.max(tw, th) > thumbMax) {
+        const scale = thumbMax / Math.max(tw, th);
+        tw = Math.round(tw * scale); th = Math.round(th * scale);
+      }
+      const thumb = document.createElement('canvas');
+      thumb.width = tw; thumb.height = th;
+      thumb.getContext('2d').drawImage(cv, 0, 0, tw, th);
+      const preview = thumb.toDataURL('image/jpeg', 0.72).split(',')[1];
+      resolve({ kind: 'image', media_type: 'image/jpeg', data: dataUrl.split(',')[1], preview, name: file.name });
     };
     img.src = url;
   });
