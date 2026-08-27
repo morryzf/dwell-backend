@@ -297,6 +297,27 @@ async def _memory_completion(provider: dict, model_id: str, system: str, user: s
     return text
 
 
+def _long_context_model(chat_id: str) -> tuple[dict, dict | None, bool]:
+    """Return the explicit compression model, with the chat model as a safe legacy fallback."""
+    fallback = db.chat_model_get(chat_id)
+    selected = dict(fallback)
+    explicit = False
+    raw = db.setting_get("long_context_model", "")
+    if raw:
+        try:
+            saved = json.loads(raw)
+            provider_id = str(saved.get("provider_id") or "").strip()
+            model_id = str(saved.get("model_id") or "").strip()
+            if provider_id and model_id:
+                selected["provider_id"] = provider_id
+                selected["model_id"] = model_id
+                explicit = True
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    provider = db.provider_get(selected.get("provider_id") or "")
+    return selected, provider, explicit
+
+
 async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
     """把远离近期窗口的消息按段压缩，并更新一份供下一轮注入的总览。"""
     try:
@@ -305,8 +326,7 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
         if reset:
             db.chat_memory_reset(chat_id)
         state = db.chat_memory_get(chat_id)
-        selection = db.chat_model_get(chat_id)
-        provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
+        selection, provider, _explicit = _long_context_model(chat_id)
         if not provider or not provider.get("enabled") or not selection["model_id"]:
             raise RuntimeError("生成长期上下文前，请先为这个聊天选择可用的供应商和模型")
 
@@ -1015,6 +1035,34 @@ async def model_catalog_get(provider_id: str = ""):
     items = [_model_catalog_item(item, provider_map) for item in db.provider_model_list(provider_id)]
     return {"ok": True, "providers": providers, "items": items,
             "favorites": [item for item in items if item["favorite"]]}
+
+
+@app.get("/api/long-context-model", dependencies=authed)
+async def long_context_model_get():
+    """The one model used for background memory compression across chats."""
+    current = _get_or_create_current_chat()
+    selection, provider, explicit = _long_context_model(current)
+    providers = [item for item in db.provider_list() if item["enabled"]]
+    provider_map = {item["id"]: item for item in providers}
+    items = [_model_catalog_item(item, provider_map) for item in db.provider_model_list()
+             if item["provider_id"] in provider_map]
+    return {"ok": True, "provider_id": selection.get("provider_id") or "",
+            "model_id": selection.get("model_id") or "", "explicit": explicit,
+            "provider_name": (provider or {}).get("name", ""), "providers": providers, "items": items}
+
+
+@app.post("/api/long-context-model", dependencies=authed)
+async def long_context_model_set(request: Request):
+    payload = await _read_json(request)
+    provider_id = str(payload.get("provider_id") or "").strip()
+    model_id = str(payload.get("model_id") or "").strip()[:200]
+    provider = db.provider_get(provider_id)
+    if not provider or not provider.get("enabled"):
+        raise HTTPException(400, "请选择一个已启用的供应商")
+    if not model_id or not any(item["model_id"] == model_id for item in db.provider_model_list(provider_id)):
+        raise HTTPException(400, "请选择这个供应商已保存的模型")
+    db.setting_set("long_context_model", json.dumps({"provider_id": provider_id, "model_id": model_id}, ensure_ascii=False))
+    return {"ok": True, "provider_id": provider_id, "model_id": model_id, "provider_name": provider["name"]}
 
 
 @app.post("/api/model-catalog", dependencies=authed)
