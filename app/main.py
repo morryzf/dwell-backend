@@ -13,6 +13,7 @@ import tempfile
 import time
 import uuid
 from datetime import datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -493,6 +494,9 @@ def _heartbeat_daily_count(now: datetime) -> int:
 
 
 def _heartbeat_context(chat_id: str, now: datetime, interval: int) -> list[dict]:
+    now_ts = int(now.timestamp())
+    last_user = db.message_last_made(chat_id, "user")
+    last_assistant = db.message_last_made(chat_id, "assistant")
     config_prompt = (
         "【Dwell 后台心跳】这不是用户发来的新消息。用户此刻没有输入，系统只是按计划让你醒来看看。\n"
         f"当前时间：{now.strftime('%Y-%m-%d %H:%M')}；本次心跳间隔：{interval} 分钟。\n"
@@ -523,12 +527,32 @@ def _heartbeat_context(chat_id: str, now: datetime, interval: int) -> list[dict]
         if item.get("content") and item.get("role") in {"user", "assistant", "system"}
     ]
     turn_marker = {
-        "role": "system",
-        "content": "【现在开始的是新的主动消息回合】上面的记录已经结束。此刻没有待回复的提问，"
-                   "不要继续回答最后一条 user 消息；只有能自然地另起一句主动联系时才输出消息，"
-                   "否则只输出 [NO_ACTION]。",
+        # OpenAI-compatible providers generally decide the next turn from the final
+        # user message.  Put the heartbeat event there explicitly, rather than
+        # leaving a historical user message as the model's apparent prompt.
+        "role": "user",
+        "content": "【Dwell 心跳事件：这不是用户刚刚发来的话】\n"
+                   f"用户上次联系你距今 {_heartbeat_elapsed(now_ts - last_user)}；"
+                   f"你上次联系用户距今 {_heartbeat_elapsed(now_ts - last_assistant)}。\n"
+                   "现在轮到你决定是否主动发起一条新的消息。上面的聊天已经结束，"
+                   "不是任何一句历史消息的续答，也不要复述或改写你刚才已经说过的话。"
+                   "先想一想：隔了这段时间，你有没有自然、具体、只属于此刻的内容想告诉她？"
+                   "如果没有，就只输出 [NO_ACTION]；如果有，就只输出那条像真人微信一样的新消息正文。",
     }
     return [{"role": "system", "content": config_prompt}] + instructions + memory_messages + history + [turn_marker]
+
+
+def _heartbeat_elapsed(seconds: int) -> str:
+    minutes = max(0, int(seconds) // 60)
+    if minutes < 2:
+        return "不到 2 分钟"
+    if minutes < 60:
+        return f"{minutes} 分钟"
+    hours, remainder = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours} 小时" + (f" {remainder} 分钟" if remainder else "")
+    days, hours = divmod(hours, 24)
+    return f"{days} 天" + (f" {hours} 小时" if hours else "")
 
 
 def _heartbeat_last_speaker(chat_id: str) -> str:
@@ -537,6 +561,26 @@ def _heartbeat_last_speaker(chat_id: str) -> str:
         if item.get("content") and item.get("role") in {"user", "assistant"}:
             return str(item["role"])
     return ""
+
+
+def _heartbeat_is_repeat(chat_id: str, text: str) -> bool:
+    """Suppress an accidental repeat of Cloudy's own recent reply."""
+    candidate = re.sub(r"[^\w\u4e00-\u9fff]+", "", text).lower()
+    if not candidate:
+        return False
+    for item in reversed(db.message_list(chat_id, limit=12)):
+        if item.get("role") != "assistant" or not item.get("content"):
+            continue
+        previous = re.sub(r"[^\w\u4e00-\u9fff]+", "", str(item["content"])).lower()
+        if candidate == previous:
+            return True
+        if len(candidate) < 12 or len(previous) < 12:
+            continue
+        if candidate in previous or previous in candidate:
+            return True
+        if SequenceMatcher(None, candidate, previous).ratio() >= 0.94:
+            return True
+    return False
 
 
 def _heartbeat_read_tool(tool: dict) -> bool:
@@ -659,6 +703,9 @@ async def _heartbeat_once(force: bool = False) -> dict:
                 raise RuntimeError(text[:300])
 
             text = text[:3000]
+            if _heartbeat_is_repeat(chat_id, text):
+                db.setting_set("heartbeat_last_status", "duplicate")
+                return {"ok": True, "status": "duplicate"}
             message = db.message_add(chat_id, "assistant", text)
             _emit(chat_id, {
                 "type": "assistant",
