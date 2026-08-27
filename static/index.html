@@ -2357,6 +2357,81 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   }
   #settingsBtn .ic { width: 17px; height: 17px; }
   #settingsBtn:active { transform: scale(.97); }
+
+  /* User-tunable message glass. Keep this last so it wins over theme presets. */
+  #log .gu {
+    color: var(--msg-cloudy-text, #514a4f) !important;
+    background: var(--msg-cloudy-bg, rgba(248,242,245,.46)) !important;
+    border: var(--msg-cloudy-border-width, 1px) solid var(--msg-cloudy-border, rgba(255,255,255,.42)) !important;
+    border-radius: var(--msg-cloudy-radius, 18px) !important;
+    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 6px 20px rgba(72,54,64,.08) !important;
+  }
+  #log .bubble {
+    color: var(--msg-me-text, #51454b) !important;
+    background: var(--msg-me-bg, rgba(242,201,217,.48)) !important;
+    border: var(--msg-me-border-width, 1px) solid var(--msg-me-border, rgba(255,239,246,.44)) !important;
+    border-radius: var(--msg-me-radius, 18px) !important;
+    -webkit-backdrop-filter: blur(var(--msg-me-blur, 16px)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-me-blur, 16px)) saturate(1.45);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 6px 20px rgba(72,54,64,.07) !important;
+  }
+  #log .row:not(.me) > .toolline {
+    width: 100%; padding: 8px 12px; box-sizing: border-box;
+    color: var(--msg-cloudy-text, #514a4f);
+    background: var(--msg-cloudy-bg, rgba(248,242,245,.46));
+    border: var(--msg-cloudy-border-width, 1px) solid var(--msg-cloudy-border, rgba(255,255,255,.42));
+    border-radius: var(--msg-cloudy-radius, 18px);
+    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 5px 16px rgba(72,54,64,.06);
+  }
+  #log .row:not(.me) > .toolline .lbl,
+  #log .row:not(.me) > .toolline .lbl b,
+  #log .row:not(.me) > .toolline .chev { color: inherit; }
+
+  .msg-style-preview {
+    min-height: 230px; padding: 18px; border-radius: 24px; overflow: hidden;
+    display: flex; flex-direction: column; gap: 12px; justify-content: center;
+    background-color: color-mix(in srgb, var(--panel) 45%, transparent);
+    background-image: var(--chat-bg-image), linear-gradient(145deg, #eee8eb, #d8cbd1);
+    background-size: cover; background-position: center;
+    border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  }
+  .msg-preview-cloudy, .msg-preview-me, .msg-preview-think {
+    max-width: 82%; padding: 9px 13px; box-sizing: border-box;
+  }
+  .msg-preview-cloudy, .msg-preview-think {
+    align-self: flex-start; color: var(--msg-cloudy-text);
+    background: var(--msg-cloudy-bg); border: var(--msg-cloudy-border-width) solid var(--msg-cloudy-border);
+    border-radius: var(--msg-cloudy-radius);
+    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-cloudy-blur)) saturate(1.45);
+  }
+  .msg-preview-me {
+    align-self: flex-end; color: var(--msg-me-text);
+    background: var(--msg-me-bg); border: var(--msg-me-border-width) solid var(--msg-me-border);
+    border-radius: var(--msg-me-radius);
+    -webkit-backdrop-filter: blur(var(--msg-me-blur)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-me-blur)) saturate(1.45);
+  }
+  .msg-preview-think { width: 100%; max-width: 100%; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .msg-preview-think .arr { margin-left: auto; opacity: .62; }
+  .msg-style-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 14px 0; padding: 4px; border-radius: 16px; background: color-mix(in srgb, var(--panel) 58%, transparent); }
+  .msg-style-tab { min-height: 42px; border-radius: 12px; color: var(--dim); font-size: 14px; }
+  .msg-style-tab.on { color: var(--text); background: color-mix(in srgb, var(--card) 72%, transparent); box-shadow: 0 2px 10px rgba(70,54,63,.08); font-weight: 650; }
+  .msg-style-control { padding: 14px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+  .msg-style-control:last-child { border-bottom: 0; }
+  .msg-style-control-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .msg-style-control-head label { flex: 1; color: var(--text); font-size: 15px; }
+  .msg-style-value { min-width: 48px; text-align: right; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .msg-style-control input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
+  .msg-style-color { width: 38px; height: 38px; padding: 3px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--line) 72%, transparent); background: color-mix(in srgb, var(--card) 66%, transparent); }
+  .msg-style-color::-webkit-color-swatch-wrapper { padding: 0; }
+  .msg-style-color::-webkit-color-swatch { border: 0; border-radius: 50%; }
+  .msg-style-color::-moz-color-swatch { border: 0; border-radius: 50%; }
+  .msg-style-note { margin: 12px 2px 2px; color: var(--dim); font-size: 12px; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -2475,6 +2550,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
         <button class="grow" id="rewakeRow"><span class="ic" data-i="refresh"></span>叫他重新醒一次<span class="val" id="rewakeVal">他要是卡住了就按</span></button>
         <button class="grow" id="themeRow"><span class="ic" data-i="moon"></span>夜间模式<span class="sw wait" id="themeSw"></span></button>
         <button class="grow" id="backgroundRow"><span class="ic" data-i="image"></span>聊天背景<span class="val" id="backgroundVal">默认</span><span class="chev">›</span></button>
+        <button class="grow" id="messageStyleRow"><span class="ic" data-i="chat"></span>消息样式<span class="val">Cloudy / 我的</span><span class="chev">›</span></button>
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>模型供应商<span class="chev">›</span></button>
         <button class="grow" id="mcpRow"><span class="ic" data-i="tool"></span>MCP 工具<span class="chev">›</span></button>
         <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
@@ -2489,6 +2565,15 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   <div class="sheet"><div class="grabber"></div><div class="head">
     <button class="hbtn" data-close="background"><span class="ic" data-i="x"></span></button><div class="ht">聊天背景</div><div class="hspace"></div>
   </div><div class="body" id="backgroundBody"></div></div>
+</div>
+
+<div class="sheetWrap" id="messageStyleSheet">
+  <div class="shade" data-close="messageStyle"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="messageStyle"><span class="ic" data-i="x"></span></button>
+    <div class="ht">消息样式</div>
+    <button class="hbtn" id="messageStyleReset" title="恢复当前样式默认值"><span class="ic" data-i="refresh"></span></button>
+  </div><div class="body" id="messageStyleBody"></div></div>
 </div>
 
 <div class="sheetWrap" id="apiSheet">
@@ -4593,6 +4678,7 @@ document.addEventListener('touchend', (e) => {
 const sheets = {
   api: document.getElementById('apiSheet'),
   background: document.getElementById('backgroundSheet'),
+  messageStyle: document.getElementById('messageStyleSheet'),
   mcp: document.getElementById('mcpSheet'),
   chatMcp: document.getElementById('chatMcpSheet'),
   editMessage: document.getElementById('editMessageSheet'),
@@ -7044,6 +7130,129 @@ function renderChatBackgroundSettings() {
 }
 document.getElementById('backgroundRow').onclick = () => { sheets.background.classList.add('open'); renderChatBackgroundSettings(); };
 updateBackgroundRow();
+
+/* 两套消息玻璃样式只保存在当前设备：Cloudy 同时包含思考和工具提示条。 */
+const MESSAGE_STYLE_KEY = 'dwellMessageStyle';
+const MESSAGE_STYLE_DEFAULTS = {
+  cloudy: { blur: 16, background: '#f8f2f5', backgroundOpacity: 46, border: '#ffffff', borderOpacity: 42, borderWidth: 1, text: '#514a4f', radius: 18 },
+  me: { blur: 16, background: '#f2c9d9', backgroundOpacity: 48, border: '#ffeff6', borderOpacity: 44, borderWidth: 1, text: '#51454b', radius: 18 }
+};
+const MESSAGE_STYLE_LIMITS = {
+  blur: [0, 30], backgroundOpacity: [0, 100], borderOpacity: [0, 100], borderWidth: [0, 3], radius: [4, 32]
+};
+let messageStyleTab = 'cloudy';
+
+function clampMessageStyleNumber(key, value, fallback) {
+  const limits = MESSAGE_STYLE_LIMITS[key];
+  const n = Number(value);
+  if (!limits || !Number.isFinite(n)) return fallback;
+  return Math.min(limits[1], Math.max(limits[0], n));
+}
+function safeMessageColor(value, fallback) {
+  return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : fallback;
+}
+function readMessageStyles() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(MESSAGE_STYLE_KEY) || '{}') || {}; } catch (e) {}
+  const out = {};
+  ['cloudy', 'me'].forEach(kind => {
+    const base = MESSAGE_STYLE_DEFAULTS[kind];
+    const raw = saved[kind] || {};
+    out[kind] = {
+      blur: clampMessageStyleNumber('blur', raw.blur, base.blur),
+      background: safeMessageColor(raw.background, base.background),
+      backgroundOpacity: clampMessageStyleNumber('backgroundOpacity', raw.backgroundOpacity, base.backgroundOpacity),
+      border: safeMessageColor(raw.border, base.border),
+      borderOpacity: clampMessageStyleNumber('borderOpacity', raw.borderOpacity, base.borderOpacity),
+      borderWidth: clampMessageStyleNumber('borderWidth', raw.borderWidth, base.borderWidth),
+      text: safeMessageColor(raw.text, base.text),
+      radius: clampMessageStyleNumber('radius', raw.radius, base.radius)
+    };
+  });
+  return out;
+}
+let messageStyleState = readMessageStyles();
+function rgbaFromHex(hex, opacity) {
+  const clean = safeMessageColor(hex, '#ffffff').slice(1);
+  const n = parseInt(clean, 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + (opacity / 100) + ')';
+}
+function applyMessageStyles() {
+  const root = document.documentElement.style;
+  ['cloudy', 'me'].forEach(kind => {
+    const s = messageStyleState[kind];
+    root.setProperty('--msg-' + kind + '-blur', s.blur + 'px');
+    root.setProperty('--msg-' + kind + '-bg', rgbaFromHex(s.background, s.backgroundOpacity));
+    root.setProperty('--msg-' + kind + '-border', rgbaFromHex(s.border, s.borderOpacity));
+    root.setProperty('--msg-' + kind + '-border-width', s.borderWidth + 'px');
+    root.setProperty('--msg-' + kind + '-text', s.text);
+    root.setProperty('--msg-' + kind + '-radius', s.radius + 'px');
+  });
+}
+function saveMessageStyles() {
+  try { localStorage.setItem(MESSAGE_STYLE_KEY, JSON.stringify(messageStyleState)); } catch (e) {}
+}
+function messageStyleValue(key, value) {
+  if (key === 'blur' || key === 'radius') return value + ' px';
+  if (key === 'borderWidth') return Number(value).toFixed(1) + ' px';
+  return value + '%';
+}
+const MESSAGE_STYLE_CONTROLS = [
+  { key: 'blur', label: '模糊强度', type: 'range', min: 0, max: 30, step: 1 },
+  { key: 'background', label: '背景颜色', type: 'color' },
+  { key: 'backgroundOpacity', label: '背景不透明度', type: 'range', min: 0, max: 100, step: 1 },
+  { key: 'border', label: '边框颜色', type: 'color' },
+  { key: 'borderOpacity', label: '边框不透明度', type: 'range', min: 0, max: 100, step: 1 },
+  { key: 'borderWidth', label: '边框宽度', type: 'range', min: 0, max: 3, step: .5 },
+  { key: 'text', label: '文字颜色', type: 'color' },
+  { key: 'radius', label: '圆角半径', type: 'range', min: 4, max: 32, step: 1 }
+];
+function renderMessageStyleSettings() {
+  const body = document.getElementById('messageStyleBody');
+  body.innerHTML = '<div class="msg-style-preview">'
+    + '<div class="msg-preview-me">这是我的消息。</div>'
+    + '<div class="msg-preview-think"><span>💡</span><b>思考中</b><span class="arr">›</span></div>'
+    + '<div class="msg-preview-cloudy">这是 Cloudy 的回复。</div></div>'
+    + '<div class="msg-style-tabs"><button class="msg-style-tab' + (messageStyleTab === 'cloudy' ? ' on' : '') + '" data-style-tab="cloudy">Cloudy（思考）</button>'
+    + '<button class="msg-style-tab' + (messageStyleTab === 'me' ? ' on' : '') + '" data-style-tab="me">我的</button></div>'
+    + '<div class="ap-section" id="messageStyleControls"></div>'
+    + '<div class="msg-style-note">设置会即时显示并保存在这台设备。Cloudy 样式也会用于思考过程与工具调用提示。</div>';
+  body.querySelectorAll('[data-style-tab]').forEach(btn => btn.onclick = () => {
+    messageStyleTab = btn.dataset.styleTab;
+    renderMessageStyleSettings();
+  });
+  const controls = body.querySelector('#messageStyleControls');
+  const current = messageStyleState[messageStyleTab];
+  MESSAGE_STYLE_CONTROLS.forEach(spec => {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-style-control';
+    const head = document.createElement('div'); head.className = 'msg-style-control-head';
+    const label = document.createElement('label'); label.textContent = spec.label; head.appendChild(label);
+    const input = document.createElement('input'); input.type = spec.type; input.value = current[spec.key];
+    if (spec.type === 'color') {
+      input.className = 'msg-style-color'; head.appendChild(input); wrap.appendChild(head);
+    } else {
+      const value = document.createElement('span'); value.className = 'msg-style-value'; value.textContent = messageStyleValue(spec.key, current[spec.key]); head.appendChild(value);
+      input.min = spec.min; input.max = spec.max; input.step = spec.step;
+      wrap.appendChild(head); wrap.appendChild(input);
+      input.addEventListener('input', () => { value.textContent = messageStyleValue(spec.key, input.value); });
+    }
+    input.addEventListener('input', () => {
+      current[spec.key] = spec.type === 'color' ? input.value : Number(input.value);
+      applyMessageStyles(); saveMessageStyles();
+    });
+    controls.appendChild(wrap);
+  });
+  document.getElementById('messageStyleReset').onclick = () => {
+    messageStyleState[messageStyleTab] = { ...MESSAGE_STYLE_DEFAULTS[messageStyleTab] };
+    applyMessageStyles(); saveMessageStyles(); renderMessageStyleSettings();
+  };
+}
+document.getElementById('messageStyleRow').onclick = () => {
+  sheets.messageStyle.classList.add('open');
+  renderMessageStyleSettings();
+};
+applyMessageStyles();
 
 document.getElementById('rewakeRow').onclick = async () => {
   const v = document.getElementById('rewakeVal');
