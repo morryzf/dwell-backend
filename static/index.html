@@ -237,7 +237,7 @@ html[data-theme="dark"] .glass,
     flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
     /* Header is deliberately translucent, but the first message must never begin beneath it. */
     padding: calc(116px + env(safe-area-inset-top)) 18px 150px;
-    display: flex; flex-direction: column; gap: 18px;
+    display: flex; flex-direction: column; gap: 10px;
   }
   /* 顶上那颗「看更早的」——老账都在，按一下捞 400 行 */
   #olderBtn {
@@ -248,14 +248,14 @@ html[data-theme="dark"] .glass,
   .row { width: 100%; max-width: 720px; margin: 0 auto; }
   .row.me { display: flex; justify-content: flex-end; }
   .bubble {
-    background: var(--user-bubble); border-radius: 18px; padding: 10px 16px;
-    max-width: 85%; white-space: pre-wrap; word-break: break-word;
+    background: var(--user-bubble); border-radius: 18px; padding: 8px 14px;
+    max-width: 85%; white-space: pre-wrap; word-break: break-word; line-height: 1.52;
   }
   #log .gu {
-    display: inline-block; max-width: 85%; padding: 10px 15px;
+    display: inline-block; max-width: 85%; padding: 8px 14px;
     background: var(--panel); border: 1px solid var(--line);
     border-radius: 18px 18px 18px 6px;
-    white-space: pre-wrap; word-break: break-word;
+    white-space: pre-wrap; word-break: break-word; line-height: 1.52;
   }
   #log .gu img.chatimg, .bubble img.chatimg {
     max-width: min(240px, 70%); border-radius: 14px; display: block; margin: 6px 0;
@@ -2440,8 +2440,6 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
       <button class="item" id="navCal"><span class="ic" data-i="calendar"></span>日历</button>
       <button class="item" id="navWall"><span class="ic" data-i="pen"></span>日记</button>
       <button class="item" id="navNook"><span class="ic" data-i="bookOpen"></span>共读</button>
-      <button class="item" id="navNews"><span class="ic" data-i="fileText"></span>日报</button>
-      <button class="item" id="navHealth"><span class="ic" data-i="heartIc"></span>健康</button>
       <button class="item" id="navRepo"><span class="ic" data-i="box"></span>仓库</button>
       <div class="sect">Recents</div>
       <button class="recent" id="recGu">Cloudy</button>
@@ -5636,7 +5634,6 @@ const SECTION_NAMES = {
   '中国娱乐八卦': '花边版',
   '娱乐八卦（中国）': '花边版',
 };
-document.getElementById('navNews').onclick = () => { closeDrawer(); sheets.news.classList.add('open'); loadNews(); };
 
 let repoTab = 'log', repoDir = '', repoOpenH = null;
 let repoRows = [], repoSkip = 0, repoTotal = 0;
@@ -7257,13 +7254,19 @@ async function loadLongContext() {
   try {
     const chat = await currentChatForMemory();
     if (!chat) { body.innerHTML = '<div class="gnote">先打开一间聊天，再回来设置它的长期上下文。</div>'; return; }
-    const response = await fetch('api/chats/' + encodeURIComponent(chat.id) + '/long-context', {cache:'no-store'});
+    const [response, modelResponse] = await Promise.all([
+      fetch('api/chats/' + encodeURIComponent(chat.id) + '/long-context', {cache:'no-store'}),
+      fetch('api/long-context-model', {cache:'no-store'})
+    ]);
     const state = await response.json(); if (!response.ok || !state.ok) throw new Error(state.detail || '没有读取到');
+    const modelState = await modelResponse.json(); if (!modelResponse.ok || !modelState.ok) throw new Error(modelState.detail || '压缩模型没拿到');
     const working = state.status === 'queued' || state.status === 'running';
     const generated = state.generated_at ? new Date(state.generated_at * 1000).toLocaleString('zh-CN') : '尚未生成';
     const status = working ? '正在整理。可以离开这里，完成后会自动用于后续消息。' : state.status === 'error' ? ('没有生成成功：' + instructionEsc(state.error || '未知错误')) : (state.enabled ? '已启用；后续每约 30 条离开近期窗口的消息会在后台更新。' : '尚未启用；模型目前只会看到最近消息。');
+    const modelOptions = (modelState.items || []).map(item => `<option value="${instructionEsc(item.provider_id)}::${instructionEsc(item.model_id)}" ${(item.provider_id === modelState.provider_id && item.model_id === modelState.model_id) ? 'selected' : ''}>${instructionEsc(item.provider_name || '供应商')} · ${instructionEsc(item.model_id)}</option>`).join('');
     body.innerHTML = `<div class="sh-head"><h1>${instructionEsc(chat.name || '新对话')}</h1><div class="sub">原聊天记录不会改动或删除。长期上下文只是一份可从原文重新生成的压缩记录。</div></div>`
       + `<div class="ap-section"><div class="ap-section-title">状态</div><div class="gnote">${status}</div><div class="gnote">原消息 ${state.message_count} 条；已压缩 ${state.segment_count} 段；最近 ${state.tail_messages} 条仍保持原文。</div><div class="gnote">最近生成：${generated}</div></div>`
+      + `<div class="ap-section"><div class="ap-section-title">压缩模型</div><div class="gnote">这台模型专门整理长期上下文，不会跟着聊天页临时切换。</div>${modelOptions ? `<select class="ap-in" id="longContextModel" style="width:100%;margin-top:10px">${modelOptions}</select><div class="ap-msg" id="longContextModelMsg"></div>` : '<div class="gnote">还没有可选模型。先在设置里为供应商添加模型。</div>'}</div>`
       + `<div class="ap-btns"><button class="ap-b go" id="longContextGenerate">${state.enabled ? '现在更新' : '生成长期上下文'}</button>${state.enabled ? '<button class="ap-b" id="longContextRebuild">从原文重建</button>' : ''}</div><div class="ap-msg" id="longContextMsg"></div>`
       + (state.overview ? `<div class="ap-section"><div class="ap-section-title">Cloudy 的长期记忆</div><div class="gnote">这是模型整理的初稿。你可以删掉冗余、补充遗漏或直接改写；保存后会成为后续更新的基础。</div><textarea id="longContextOverview" maxlength="12000" style="width:100%;min-height:260px;margin-top:12px;box-sizing:border-box;resize:vertical">${instructionEsc(state.overview)}</textarea><div class="ap-btns"><button class="ap-b go" id="longContextSave">保存修改</button></div></div>` : '');
     const start = async (reset) => {
@@ -7278,6 +7281,17 @@ async function loadLongContext() {
     };
     document.getElementById('longContextGenerate').onclick = () => start(false);
     const rebuild = document.getElementById('longContextRebuild'); if (rebuild) rebuild.onclick = () => start(true);
+    const modelSelect = document.getElementById('longContextModel');
+    if (modelSelect) modelSelect.onchange = async () => {
+      const msg = document.getElementById('longContextModelMsg');
+      const [provider_id, model_id] = modelSelect.value.split('::');
+      msg.textContent = '正在保存…'; msg.className = 'ap-msg on';
+      try {
+        const r = await fetch('api/long-context-model', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id, model_id})});
+        const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
+        msg.textContent = '之后会用这台模型整理。'; msg.className = 'ap-msg on';
+      } catch (e) { msg.textContent = '没有保存：' + e.message; msg.className = 'ap-msg on bad'; }
+    };
     const save = document.getElementById('longContextSave');
     if (save) save.onclick = async () => {
       const msg = document.getElementById('longContextMsg');
@@ -7321,9 +7335,6 @@ document.querySelector('[data-close="longContext"]').addEventListener('click', s
    "标题即结论，用数据故事替代时间序列标签"。
    原来写的是"这两天的热度"，那是标签，它什么都没说。 */
 
-document.getElementById('navHealth').onclick = () => {
-  closeDrawer(); sheets.health.classList.add('open'); loadHealth();
-};
 document.getElementById('healthKey').onclick = async () => {
   try {
     const d = await (await fetch('api/watchkey', { cache: 'no-store' })).json();
