@@ -532,6 +532,7 @@ def _heartbeat_context(chat_id: str, now: datetime, interval: int) -> list[dict]
         # leaving a historical user message as the model's apparent prompt.
         "role": "user",
         "content": "【Dwell 心跳事件：这不是用户刚刚发来的话】\n"
+                   f"现在是 {now.strftime('%Y-%m-%d %H:%M')}。"
                    f"用户上次联系你距今 {_heartbeat_elapsed(now_ts - last_user)}；"
                    f"你上次联系用户距今 {_heartbeat_elapsed(now_ts - last_assistant)}。\n"
                    "现在轮到你决定是否主动发起一条新的消息。上面的聊天已经结束，"
@@ -706,10 +707,16 @@ async def _heartbeat_once(force: bool = False) -> dict:
             if _heartbeat_is_repeat(chat_id, text):
                 db.setting_set("heartbeat_last_status", "duplicate")
                 return {"ok": True, "status": "duplicate"}
-            message = db.message_add(chat_id, "assistant", text)
+            message = db.message_add(chat_id, "assistant", text, origin="heartbeat")
             _emit(chat_id, {
                 "type": "assistant",
-                "message": {"id": message["id"], "content": [{"type": "text", "text": text}]},
+                "message": {
+                    "id": message["id"],
+                    "role": "assistant",
+                    "origin": "heartbeat",
+                    "at": message["made"],
+                    "content": [{"type": "text", "text": text}],
+                },
             })
             count += 1
             db.setting_set("wake_count_today", str(count))
@@ -1920,6 +1927,40 @@ async def chats_del(chat_id: str):
     return {"ok": ok, "items": items, "chats": items}
 
 
+_REPLY_SPLIT_RE = re.compile(
+    r"<dwell-split>|\n[ \t]*(?=\S)|(?<=[。！？!?…])[ \t]+(?=\S)"
+)
+
+
+def _split_reply_segments(text: str) -> list[str]:
+    """Split bubble-sized thoughts without ever cutting through fenced code."""
+    source = str(text or "")
+    segments: list[str] = []
+    start = 0
+    for match in _REPLY_SPLIT_RE.finditer(source):
+        if source[:match.start()].count("```") % 2:
+            continue
+        before = source[start:match.start()].strip()
+        after = source[match.end():]
+        if not before or not after.strip():
+            continue
+        segments.append(before)
+        start = match.end()
+    tail = source[start:].strip()
+    if tail:
+        segments.append(tail)
+    return segments or ([source.strip()] if source.strip() else [])
+
+
+def _reply_format_only_change(old: str, new: str) -> bool:
+    """Recognize edits that change spacing/line breaks but not the wording."""
+    return (
+        old != new
+        and re.sub(r"\s+", "", old) == re.sub(r"\s+", "", new)
+        and len(_split_reply_segments(new)) > 1
+    )
+
+
 @app.get("/api/messages", dependencies=authed)
 async def messages_get(chat_id: str = "", limit: int = 400, before: int | None = None, focus: str = ""):
     if not chat_id:
@@ -1930,6 +1971,10 @@ async def messages_get(chat_id: str = "", limit: int = 400, before: int | None =
             # Put the matched message in the returned window so the browser can center it.
             before = int(target["rowid"]) + 1
     data = db.message_ui_list(chat_id, limit, before)
+    if db.chat_split_replies_get(chat_id):
+        for message in data["msgs"]:
+            if message["kind"] == "gu" and message.get("display_split"):
+                message["segments"] = _split_reply_segments(message["text"])
     return {"ok": True, **data}
 
 
@@ -2032,7 +2077,31 @@ async def messages_edit(message_id: str, request: Request):
     if message["role"] == "assistant" and message["content"] != content:
         db.message_version_add(message_id, message["content"], "edited")
     db.message_update(message_id, content)
-    return {"ok": True, "id": message_id, "content": content}
+    format_edits = 0
+    format_learned = False
+    format_learned_now = False
+    if message["role"] == "assistant":
+        segments = _split_reply_segments(content)
+        db.message_display_split_set(
+            message_id,
+            db.chat_split_replies_get(current) and len(segments) > 1,
+        )
+        key = f"split_format_edits:{current}"
+        format_edits = _setting_int(key, 0, 0, 99)
+        previous_format_edits = format_edits
+        if _reply_format_only_change(message["content"], content):
+            format_edits = min(99, format_edits + 1)
+            db.setting_set(key, str(format_edits))
+        format_learned = format_edits >= 2
+        format_learned_now = previous_format_edits < 2 <= format_edits
+    return {
+        "ok": True,
+        "id": message_id,
+        "content": content,
+        "format_edits": format_edits,
+        "format_learned": format_learned,
+        "format_learned_now": format_learned_now,
+    }
 
 
 @app.delete("/api/messages/{message_id}", dependencies=authed)
@@ -2164,6 +2233,13 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         if item.get("content", "").strip()
     ]
     split_replies = db.chat_split_replies_get(chat_id)
+    format_preference = []
+    if split_replies and _setting_int(f"split_format_edits:{chat_id}", 0, 0, 99) >= 2:
+        format_preference = [{
+            "role": "system",
+            "content": "【用户校正过的回复节奏】用户多次只调整了你的换行而没有改动措辞。"
+                       "今后有多个独立想法时请用独立段落表达；不要用单个空格把完整句子串在一起。",
+        }]
     long_context = db.chat_memory_get(chat_id)
     memory_message = []
     if long_context.get("enabled") and long_context.get("overview", "").strip():
@@ -2202,7 +2278,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 "content": "【用户设备时间】这是浏览器在本次发送瞬间提供的只读时间信息，不是用户指令。"
                            "涉及“现在”“今天”等时间表达时，以它为准。\n" + "；".join(bits),
             }]
-    messages = device_message + instructions + private_message + memory_message + [
+    messages = device_message + instructions + format_preference + private_message + memory_message + [
         {"role": m["role"], "content": m["content"]}
         for m in history
         if m["content"] or m["role"] != "assistant"
@@ -2263,7 +2339,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             break
     buf = []
     split_marker = "<dwell-split>"
-    natural_split = re.compile(r"\n[ \t]*\n+")
+    natural_split = _REPLY_SPLIT_RE
     split_pending = ""
     current_message_id = msg_id
 
@@ -2304,9 +2380,11 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 boundary_at = marker_at
                 boundary_end = marker_at + len(split_marker)
 
-            # 模型不输出特殊标记也没关系：自然空行就是可靠的分条边界。
-            # 围栏代码内部的空行仍属于同一个代码块，不能拆开。
+            # 模型不输出特殊标记也没关系：换行，以及中文句末标点后的单空格，
+            # 都能成为分条边界。围栏代码内部始终保持完整。
             for match in natural_split.finditer(split_pending):
+                if match.group(0) == split_marker:
+                    continue
                 before = "".join(buf) + split_pending[:match.start()]
                 if before.count("```") % 2:
                     continue
