@@ -161,6 +161,8 @@ CREATE TABLE IF NOT EXISTS messages (
     role    TEXT NOT NULL CHECK (role IN ('user','assistant','system')),
     content TEXT NOT NULL,
     made    INTEGER NOT NULL,
+    origin  TEXT NOT NULL DEFAULT 'chat',
+    display_split INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS ix_messages_chat ON messages(chat_id, made ASC);
@@ -320,6 +322,11 @@ def init_db():
             cx.execute("ALTER TABLE chats ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''")
         if "split_replies" not in cols:
             cx.execute("ALTER TABLE chats ADD COLUMN split_replies INTEGER NOT NULL DEFAULT 0")
+        message_cols = {r["name"] for r in cx.execute("PRAGMA table_info(messages)").fetchall()}
+        if "origin" not in message_cols:
+            cx.execute("ALTER TABLE messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'chat'")
+        if "display_split" not in message_cols:
+            cx.execute("ALTER TABLE messages ADD COLUMN display_split INTEGER NOT NULL DEFAULT 0")
 
 
 # ---------------------------------------------------------------- 日记
@@ -820,8 +827,12 @@ def chat_branch_from_message(source_chat_id: str, message_id: str) -> dict | Non
         id_map: dict[str, str] = {}
         for row in rows:
             fresh = new_id(); id_map[row["id"]] = fresh
-            cx.execute("INSERT INTO messages (id,chat_id,role,content,made) VALUES (?,?,?,?,?)",
-                       (fresh, branch["id"], row["role"], row["content"], row["made"]))
+            cx.execute(
+                """INSERT INTO messages (id,chat_id,role,content,made,origin,display_split)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (fresh, branch["id"], row["role"], row["content"], row["made"],
+                 row["origin"], row["display_split"]),
+            )
         for old_id, fresh in id_map.items():
             versions = cx.execute("SELECT content,reason,made FROM message_versions WHERE message_id=? ORDER BY rowid ASC", (old_id,)).fetchall()
             cx.executemany("INSERT INTO message_versions (id,message_id,content,reason,made) VALUES (?,?,?,?,?)",
@@ -911,18 +922,21 @@ def chat_del(chat_id: str) -> bool:
 
 # ---------------------------------------------------------------- 消息
 
-def message_add(chat_id: str, role: str, content: str, made: int | None = None) -> dict:
+def message_add(chat_id: str, role: str, content: str, made: int | None = None,
+                origin: str = "chat") -> dict:
     row = {
         "id": new_id(),
         "chat_id": chat_id,
         "role": role,
         "content": content,
         "made": int(made if made is not None else time.time()),
+        "origin": origin if origin in {"chat", "heartbeat"} else "chat",
+        "display_split": 0,
     }
     with conn() as cx:
         cx.execute(
-            """INSERT INTO messages (id,chat_id,role,content,made)
-               VALUES (:id,:chat_id,:role,:content,:made)""",
+            """INSERT INTO messages (id,chat_id,role,content,made,origin,display_split)
+               VALUES (:id,:chat_id,:role,:content,:made,:origin,:display_split)""",
             row,
         )
     return row
@@ -1211,6 +1225,8 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
             "text": r["content"],
             "content": r["content"],
             "at": r["made"],
+            "origin": r["origin"],
+            "display_split": bool(r["display_split"]),
             "tools": tools_by_message.get(r["id"], []) if role == "assistant" else [],
             "images": images_by_message.get(r["id"], []),
         })
@@ -1507,6 +1523,15 @@ def message_since(chat_id: str, since: int, limit: int = 200) -> list:
 def message_update(msg_id: str, content: str) -> bool:
     with conn() as cx:
         cur = cx.execute("UPDATE messages SET content=? WHERE id=?", (content, msg_id))
+    return cur.rowcount > 0
+
+
+def message_display_split_set(msg_id: str, enabled: bool) -> bool:
+    with conn() as cx:
+        cur = cx.execute(
+            "UPDATE messages SET display_split=? WHERE id=?",
+            (1 if enabled else 0, msg_id),
+        )
     return cur.rowcount > 0
 
 
