@@ -12,6 +12,9 @@
 <link rel="icon" href="icons/dwell-bunny-512.png" sizes="512x512" type="image/png">
 <link rel="apple-touch-icon" href="icons/dwell-bunny-180.png">
 <link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&amp;family=Zen+Antique&amp;display=swap" rel="stylesheet">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Claude">
@@ -243,7 +246,7 @@ html[data-theme="dark"] .glass,
     flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
     /* Header is deliberately translucent, but the first message must never begin beneath it. */
     padding: calc(116px + env(safe-area-inset-top)) 18px 150px;
-    display: flex; flex-direction: column; gap: 10px;
+    display: flex; flex-direction: column; gap: 14px;
   }
   /* 顶上那颗「看更早的」——老账都在，按一下捞 400 行 */
   #olderBtn {
@@ -266,13 +269,15 @@ html[data-theme="dark"] .glass,
   }
   .bubble {
     background: var(--user-bubble); border-radius: 18px; padding: 8px 14px;
-    max-width: 85%; white-space: pre-wrap; word-break: break-word; line-height: 1.52;
+    max-width: 85%; white-space: pre-wrap; word-break: break-word; line-height: 1.55;
+    font-family: "Noto Serif SC", "Songti SC", serif; font-size: 15.5px;
   }
   #log .gu {
     display: inline-block; max-width: 85%; padding: 8px 14px;
     background: var(--panel); border: 1px solid var(--line);
     border-radius: 18px 18px 18px 6px;
-    white-space: pre-wrap; word-break: break-word; line-height: 1.52;
+    white-space: pre-wrap; word-break: break-word; line-height: 1.55;
+    font-family: "Noto Serif SC", "Songti SC", serif; font-size: 15.5px;
   }
   #log .gu img.chatimg, .bubble img.chatimg {
     max-width: min(240px, 70%); border-radius: 14px; display: block; margin: 6px 0;
@@ -588,8 +593,8 @@ html[data-theme="dark"] .composer {
   .nav .recent:active { background: var(--panel); }
   .drawer-foot { flex: none; display: flex; align-items: center; padding: 10px 20px 0; }
   #avatarBtn {
-    width: 44px; height: 44px; border-radius: 50%; background: var(--card);
-    border: 1px solid var(--line); font-size: 16px; font-weight: 600;
+    min-width: 58px; height: 44px; padding: 0 14px; border-radius: 999px; background: var(--card);
+    border: 1px solid var(--line); font-size: 14px; font-weight: 600;
     display: flex; align-items: center; justify-content: center;
   }
   .freshtip { text-align: center; font-size: 13px; color: var(--dim); padding: 34px 30px; line-height: 1.8; }
@@ -2246,15 +2251,18 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--card) 72%, transparent);
   }
   .lk-time {
+    position: relative;
     width: max-content;
     margin-inline: auto;
     padding: 0;
     font-size: clamp(52px, 14vw, 62px);
-    font-weight: 700;
-    letter-spacing: -.035em;
-    color: rgba(72,62,69,.62);
-    -webkit-text-stroke: .7px rgba(255,255,255,.24);
-    text-shadow: 0 1px 0 rgba(255,255,255,.38), 0 9px 28px rgba(76,50,63,.13);
+    font-family: "Zen Antique", "Times New Roman", serif;
+    font-weight: 400;
+    letter-spacing: -.025em;
+    color: rgba(67,55,63,.30);
+    -webkit-text-fill-color: rgba(67,55,63,.30);
+    -webkit-text-stroke: .72px rgba(83,63,73,.38);
+    text-shadow: 0 1px 0 rgba(255,255,255,.72), 0 8px 24px rgba(76,50,63,.12);
     background: none !important;
     border: 0;
     border-radius: 0;
@@ -2262,15 +2270,22 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     backdrop-filter: none;
     box-shadow: none !important;
   }
+  .lk-time::after {
+    content: attr(data-time); position: absolute; inset: 0; pointer-events: none;
+    color: rgba(255,255,255,.26); -webkit-text-fill-color: rgba(255,255,255,.26);
+    -webkit-text-stroke: .35px rgba(255,255,255,.46);
+    text-shadow: 0 1px rgba(255,255,255,.52);
+    clip-path: inset(0 0 54% 0);
+  }
   html[data-theme="dark"] header .iconbtn {
     background: linear-gradient(145deg, rgba(255,235,244,.12), rgba(205,145,171,.055)) !important;
     border-color: rgba(242,201,220,.12) !important;
     box-shadow: 0 7px 20px rgba(12,8,10,.14), inset 0 1px rgba(255,235,244,.08) !important;
   }
   html[data-theme="dark"] .lk-time {
-    color: rgba(255,235,244,.60);
-    -webkit-text-stroke-color: rgba(255,255,255,.12);
-    text-shadow: 0 1px rgba(255,255,255,.08), 0 9px 28px rgba(0,0,0,.24);
+    color: rgba(255,235,244,.34); -webkit-text-fill-color: rgba(255,235,244,.34);
+    -webkit-text-stroke-color: rgba(255,246,250,.30);
+    text-shadow: 0 1px rgba(255,255,255,.13), 0 9px 28px rgba(0,0,0,.24);
   }
   .background-preview {
     height: 176px; margin: 14px 0 16px; border-radius: 17px;
@@ -2311,8 +2326,8 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   }
   @media (prefers-color-scheme: dark) {
     html:not([data-theme="light"]) .lk-time {
-      color: rgba(255,235,244,.60);
-      -webkit-text-stroke-color: rgba(255,255,255,.12);
+      color: rgba(255,235,244,.34); -webkit-text-fill-color: rgba(255,235,244,.34);
+      -webkit-text-stroke-color: rgba(255,246,250,.30);
       text-shadow: 0 1px rgba(255,255,255,.08), 0 9px 28px rgba(0,0,0,.24);
     }
     html:not([data-theme="light"]) .hrow, html:not([data-theme="light"]) .hadd {
@@ -2367,13 +2382,6 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   .chat-action.delete { background: #c06f87; }
   .chat-action:active { filter: brightness(.91); }
   .drawer-foot { gap: 10px; }
-  #settingsBtn {
-    margin-left: auto; min-height: 44px; padding: 0 13px; border-radius: 999px;
-    display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 14px;
-    background: rgba(255,255,255,.26); border: 1px solid rgba(255,255,255,.52);
-  }
-  #settingsBtn .ic { width: 17px; height: 17px; }
-  #settingsBtn:active { transform: scale(.97); }
 
   /* User-tunable message glass. One shared style per light/dark appearance. */
   #log .gu, #log .bubble {
@@ -2449,6 +2457,11 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     position: absolute; right: 13px; bottom: 11px; color: var(--dim); font-size: 12px; pointer-events: none;
   }
   .hb-inline { width: min(100%, 190px); }
+  .hb-settings .ap-btns { display: flex; justify-content: flex-end; gap: 8px; }
+  .hb-settings .ap-b {
+    flex: 0 0 auto; min-height: 36px; padding: 7px 12px;
+    border-radius: 10px; font-size: 13px; font-weight: 600;
+  }
   #heartbeatStatus { margin-bottom: calc(14px + env(safe-area-inset-bottom)); }
   @media (max-width: 390px) {
     .hb-grid { grid-template-columns: 1fr; }
@@ -2543,8 +2556,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
       <button class="recent" id="recGong">另一位</button>
     </div>
     <div class="drawer-foot">
-      <button id="avatarBtn" title="我的主页">Me</button>
-      <button id="settingsBtn" title="设置"><span class="ic" data-i="sliders"></span>设置</button>
+      <button id="avatarBtn" title="设置">设置</button>
     </div>
   </div>
 </div>
@@ -6712,7 +6724,6 @@ Object.entries(sheets).forEach(([k, wrap]) => {
 });
 
 document.getElementById('avatarBtn').onclick = () => { closeDrawer(); sheets.settings.classList.add('open'); };
-document.getElementById('settingsBtn').onclick = () => { closeDrawer(); sheets.settings.classList.add('open'); };
 document.getElementById('usageRow').onclick = () => { sheets.usage.classList.add('open'); loadUsage(); };
 document.getElementById('apiRow').onclick = () => note('（这是备用通道的占位——真到要用的那天，把 API key 给我，我把自己接回来）');
 function setArmed(on) {
@@ -8639,9 +8650,13 @@ document.addEventListener('touchend', (e) => {
     const n = cnNow();
     const hh = String(n.getHours()).padStart(2, '0');
     const mm = String(n.getMinutes()).padStart(2, '0');
-    document.getElementById('lkTime').textContent = hh + ':' + mm;
-    document.getElementById('lkDate').textContent =
-      (n.getMonth() + 1) + '月' + n.getDate() + '日 周' + '日一二三四五六'[n.getDay()];
+    const timeText = hh + ':' + mm;
+    const timeEl = document.getElementById('lkTime');
+    timeEl.textContent = timeText;
+    timeEl.dataset.time = timeText;
+    document.getElementById('lkDate').textContent = new Intl.DateTimeFormat('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric'
+    }).format(n);
     const nowH = n.getHours();
     const hit = LOCK_WHEN.find(([a, b]) => nowH >= a && nowH < b);
     document.getElementById('lkWord').textContent = hit ? hit[2] : LOCK_WORD;
