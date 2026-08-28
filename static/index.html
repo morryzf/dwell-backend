@@ -50,16 +50,16 @@
     --line: #e8e5dc;
     --text: #2b2a27;
     --dim: #8a867c;
-    --accent: #c96442;        
-    --accent-soft: #d97757;
+    --accent: #d9a7b7;
+    --accent-soft: #e9c6d0;
     --user-bubble: #f0eee6;
     --sage: #96B08F;          
     --sage-track: #E7EDE2;
     --pink-track: #F8E5DE;
     --green: #2e7d43;
     --red: #c0392b;
-    --amber: #e3a13a;         
-    --amber-track: #f5e6c8;
+    --amber: #bd8aa3;
+    --amber-track: #f5e4ec;
     --red-track: #f6d8d4;
     --overlay: rgba(40, 38, 34, .4);
     --serif: SerifNum, "Songti SC", "Noto Serif SC", Georgia, serif;
@@ -73,7 +73,7 @@ html:not([data-theme="light"]) {
       --text: #f5f4ef; --dim: #a3a099; --user-bubble: #35353260;
       --sage: #A8C0A0; --sage-track: #3A423A; --pink-track: #4A3B34;
       --green: #6fbf85; --red: #e07a6a;
-      --amber: #e8b45c; --amber-track: #4a4232; --red-track: #4d3a36;
+      --amber: #d69cb7; --amber-track: #4c3944; --red-track: #4d3a36;
       --overlay: rgba(0, 0, 0, .55);
     }
 }
@@ -82,7 +82,7 @@ html[data-theme="dark"] {
       --text: #f5f4ef; --dim: #a3a099; --user-bubble: #35353260;
       --sage: #A8C0A0; --sage-track: #3A423A; --pink-track: #4A3B34;
       --green: #6fbf85; --red: #e07a6a;
-      --amber: #e8b45c; --amber-track: #4a4232; --red-track: #4d3a36;
+      --amber: #d69cb7; --amber-track: #4c3944; --red-track: #4d3a36;
       --overlay: rgba(0, 0, 0, .55);
     }
   
@@ -369,6 +369,7 @@ html[data-theme="dark"] .glass,
     -webkit-user-select: none; user-select: none; touch-action: none;
   }
   #pet:active { cursor: grabbing; }
+  #pet.is-hidden { display: none; }
   #pet img { width: 100%; height: 100%; display: block; pointer-events: none; }
 
   /* ============ 输入区 ============ */
@@ -593,10 +594,11 @@ html[data-theme="dark"] .composer {
   .nav .recent:active { background: var(--panel); }
   .drawer-foot { flex: none; display: flex; align-items: center; padding: 10px 20px 0; }
   #avatarBtn {
-    min-width: 58px; height: 44px; padding: 0 14px; border-radius: 999px; background: var(--card);
+    width: 44px; min-width: 44px; height: 44px; padding: 0; border-radius: 50%; background: var(--card);
     border: 1px solid var(--line); font-size: 14px; font-weight: 600;
     display: flex; align-items: center; justify-content: center;
   }
+  #avatarBtn .ic { width: 18px; height: 18px; }
   .freshtip { text-align: center; font-size: 13px; color: var(--dim); padding: 34px 30px; line-height: 1.8; }
   
   #gongSheet .sheet { height: 100dvh; max-height: 100dvh; border-radius: 0; }
@@ -1780,8 +1782,8 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     --pink-track: #f7e1e8;
     --green: #7f9a84;
     --red: #bd7187;
-    --amber: #c99a65;
-    --amber-track: #f5e7d7;
+    --amber: #bd8aa3;
+    --amber-track: #f5e4ec;
     --red-track: #f6dfe5;
     --overlay: rgba(69, 62, 68, .34);
     --glass: color-mix(in srgb, var(--card) 84%, transparent);
@@ -2244,6 +2246,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     border-color: rgba(176,105,137,.30) !important;
     box-shadow: 0 5px 15px rgba(122,72,95,.10), inset 0 1px rgba(255,255,255,.20) !important;
   }
+  #backgroundOverlay { accent-color: var(--accent); }
   #instructionsBtn.on::after, #mcpChatBtn.on::after {
     content: '';
     position: absolute; right: 2px; top: 2px; width: 6px; height: 6px;
@@ -2252,6 +2255,9 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   }
   .lk-time {
     position: relative;
+    --clock-glass-top: rgba(244,221,231,.84);
+    --clock-glass-mid: rgba(201,158,175,.76);
+    --clock-glass-bottom: rgba(168,124,145,.78);
     width: max-content;
     margin-inline: auto;
     padding: 0;
@@ -2259,23 +2265,18 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     font-family: "Zen Antique", "Times New Roman", serif;
     font-weight: 400;
     letter-spacing: -.025em;
-    color: rgba(67,55,63,.30);
-    -webkit-text-fill-color: rgba(67,55,63,.30);
-    -webkit-text-stroke: .72px rgba(83,63,73,.38);
-    text-shadow: 0 1px 0 rgba(255,255,255,.72), 0 8px 24px rgba(76,50,63,.12);
-    background: none !important;
+    color: rgba(168,124,145,.74);
+    background: linear-gradient(180deg, var(--clock-glass-top) 0%, var(--clock-glass-mid) 46%, var(--clock-glass-bottom) 100%) !important;
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
+    -webkit-text-fill-color: transparent;
+    -webkit-text-stroke: .38px rgba(148,103,123,.27);
+    text-shadow: 0 1px 0 rgba(255,255,255,.74), 0 8px 24px rgba(139,94,114,.13);
     border: 0;
     border-radius: 0;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     box-shadow: none !important;
-  }
-  .lk-time::after {
-    content: attr(data-time); position: absolute; inset: 0; pointer-events: none;
-    color: rgba(255,255,255,.26); -webkit-text-fill-color: rgba(255,255,255,.26);
-    -webkit-text-stroke: .35px rgba(255,255,255,.46);
-    text-shadow: 0 1px rgba(255,255,255,.52);
-    clip-path: inset(0 0 54% 0);
   }
   html[data-theme="dark"] header .iconbtn {
     background: linear-gradient(145deg, rgba(255,235,244,.12), rgba(205,145,171,.055)) !important;
@@ -2283,8 +2284,11 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     box-shadow: 0 7px 20px rgba(12,8,10,.14), inset 0 1px rgba(255,235,244,.08) !important;
   }
   html[data-theme="dark"] .lk-time {
-    color: rgba(255,235,244,.34); -webkit-text-fill-color: rgba(255,235,244,.34);
-    -webkit-text-stroke-color: rgba(255,246,250,.30);
+    --clock-glass-top: rgba(255,250,252,.62);
+    --clock-glass-mid: rgba(232,204,216,.36);
+    --clock-glass-bottom: rgba(177,137,155,.48);
+    color: rgba(255,235,244,.42); -webkit-text-fill-color: transparent;
+    -webkit-text-stroke-color: rgba(255,246,250,.16);
     text-shadow: 0 1px rgba(255,255,255,.13), 0 9px 28px rgba(0,0,0,.24);
   }
   .background-preview {
@@ -2326,8 +2330,11 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   }
   @media (prefers-color-scheme: dark) {
     html:not([data-theme="light"]) .lk-time {
-      color: rgba(255,235,244,.34); -webkit-text-fill-color: rgba(255,235,244,.34);
-      -webkit-text-stroke-color: rgba(255,246,250,.30);
+      --clock-glass-top: rgba(255,250,252,.62);
+      --clock-glass-mid: rgba(232,204,216,.36);
+      --clock-glass-bottom: rgba(177,137,155,.48);
+      color: rgba(255,235,244,.42); -webkit-text-fill-color: transparent;
+      -webkit-text-stroke-color: rgba(255,246,250,.16);
       text-shadow: 0 1px rgba(255,255,255,.08), 0 9px 28px rgba(0,0,0,.24);
     }
     html:not([data-theme="light"]) .hrow, html:not([data-theme="light"]) .hadd {
@@ -2556,7 +2563,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
       <button class="recent" id="recGong">另一位</button>
     </div>
     <div class="drawer-foot">
-      <button id="avatarBtn" title="设置">设置</button>
+      <button id="avatarBtn" title="设置" aria-label="设置"><span class="ic" data-i="sliders"></span></button>
     </div>
   </div>
 </div>
@@ -2579,6 +2586,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
       <div class="group">
         <button class="grow static" id="aliveRow"><span class="ic" data-i="activity"></span>后端在跑吗<span class="val" id="aliveVal">看看…</span></button>
         <button class="grow" id="themeRow"><span class="ic" data-i="moon"></span>夜间模式<span class="sw wait" id="themeSw"></span></button>
+        <button class="grow" id="petVisibilityRow"><span class="ic" data-i="activity"></span>隐藏 Clawd<span class="val" id="petVisibilityVal">已显示</span></button>
         <button class="grow" id="backgroundRow"><span class="ic" data-i="image"></span>聊天背景<span class="val" id="backgroundVal">默认</span><span class="chev">›</span></button>
         <button class="grow" id="messageStyleRow"><span class="ic" data-i="chat"></span>消息样式<span class="val">浅色 / 深色</span><span class="chev">›</span></button>
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>模型供应商<span class="chev">›</span></button>
@@ -3096,6 +3104,18 @@ setInterval(() => {
 }, 30e3);
 /* 拽着满屏跑：拖到哪儿住哪儿（记在 localStorage），轻点一下他跳给你看 */
 const petEl = document.getElementById('pet');
+const PET_VISIBILITY_KEY = 'dwellPetHidden';
+function petIsHidden() {
+  try { return localStorage.getItem(PET_VISIBILITY_KEY) === '1'; } catch { return false; }
+}
+function applyPetVisibility() {
+  petEl.classList.toggle('is-hidden', petIsHidden());
+}
+function refreshPetVisibilityRow() {
+  const value = document.getElementById('petVisibilityVal');
+  if (value) value.textContent = petIsHidden() ? '已隐藏' : '已显示';
+}
+applyPetVisibility();
 (function restorePetPos() {
   try {
     const p = JSON.parse(localStorage.getItem('petPos'));
@@ -7315,6 +7335,12 @@ function wearTheme(t) {
 document.getElementById('themeRow').onclick = () =>
   wearTheme(themeNow() === 'dark' ? 'auto' : 'dark');
 wearTheme(themeNow());
+document.getElementById('petVisibilityRow').onclick = () => {
+  try { localStorage.setItem(PET_VISIBILITY_KEY, petIsHidden() ? '0' : '1'); } catch {}
+  applyPetVisibility();
+  refreshPetVisibilityRow();
+};
+refreshPetVisibilityRow();
 
 /* 聊天背景只存在这台设备的浏览器：既不上传，也不带进聊天或备份。 */
 const CHAT_BACKGROUND_KEY = 'dwellChatBackground';
@@ -8638,12 +8664,13 @@ document.addEventListener('touchend', (e) => {
   }
 
   /* 锁屏上那句话：按时候换，不是固定标语 */
-  const LOCK_WORD = 'slide to unlock';
+  const LOCK_WORD = 'Hello';
   const LOCK_WHEN = [
     [0,  5, 'Still up?'],
-    [5, 10, 'Good morning'],
-    [11, 13, 'Lunch time'],
-    [18, 20, 'Evening'],
+    [5, 11, 'Good morning'],
+    [11, 14, 'Lunch time'],
+    [14, 18, 'Good afternoon'],
+    [18, 22, 'Good evening'],
     [22, 24, 'Getting late'],
   ];
   function tick() {
@@ -8653,7 +8680,6 @@ document.addEventListener('touchend', (e) => {
     const timeText = hh + ':' + mm;
     const timeEl = document.getElementById('lkTime');
     timeEl.textContent = timeText;
-    timeEl.dataset.time = timeText;
     document.getElementById('lkDate').textContent = new Intl.DateTimeFormat('en-US', {
       weekday: 'long', month: 'long', day: 'numeric'
     }).format(n);
@@ -8754,4 +8780,5 @@ window.promptLogin = async function() {
 </script>
 </body>
 </html>
+
 
