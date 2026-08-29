@@ -1036,6 +1036,17 @@ async def her_diary_add(payload: dict = Body(...)):
     return db.her_diary_add(text)
 
 
+@app.patch("/api/her-diary/{item_id}", dependencies=authed)
+async def her_diary_update(item_id: str, payload: dict = Body(...)):
+    text = str(payload.get("text", "")).strip()
+    if not text:
+        raise HTTPException(400, "写点什么再保存")
+    item = db.her_diary_update(item_id, text)
+    if not item:
+        raise HTTPException(404, "这页日记没有找到")
+    return {"ok": True, "item": item}
+
+
 @app.delete("/api/her-diary/{item_id}", dependencies=authed)
 async def her_diary_del(item_id: str):
     return {"ok": db.her_diary_del(item_id)}
@@ -1117,16 +1128,19 @@ async def todos_post(payload: dict = Body(...)):
 
 # ---------------------------------------------------------------- 日历
 
-@app.get("/api/cal", dependencies=authed)
-async def cal_get():
-    """calData.period.days —— 前端心情记录挂在 period 底下。
-
-    上游把生理周期那块拆掉时漏了这一处，心情还留在 period.days，
-    所以这里必须把 days 塞进 period 里，不然日历渲染直接炸。
-    """
+def _cal_response(extra: dict | None = None) -> dict:
+    """日历的读写都回传同一份完整状态，前端可以立即重绘。"""
     data = db.cal_all()
     data["period"] = {"days": data["days"]}
-    return {"ok": True, "cal": data, "predict": {}, **data}
+    response = {"ok": True, "cal": data, "predict": {}, **data}
+    if extra:
+        response.update(extra)
+    return response
+
+
+@app.get("/api/cal", dependencies=authed)
+async def cal_get():
+    return _cal_response()
 
 
 @app.post("/api/cal", dependencies=authed)
@@ -1138,25 +1152,29 @@ async def cal_post(payload: dict = Body(...)):
         text = str(payload.get("text", "")).strip()
         if not date or not text:
             raise HTTPException(400, "要有日期和事情")
-        return db.cal_add_event(
+        item = db.cal_add_event(
             date, text,
             str(payload.get("time", "")),
             bool(payload.get("yearly")),
             bool(payload.get("special")),
         )
+        return _cal_response({"item": item})
 
     if action == "del_event":
-        return {"ok": db.cal_del_event(str(payload.get("id", "")))}
+        if not db.cal_del_event(str(payload.get("id", ""))):
+            raise HTTPException(404, "这件事已经不在日历上了")
+        return _cal_response()
 
     if action == "set_mood":
-        date = str(payload.get("date", "")).strip()
+        date = str(payload.get("date", "").strip())
         if not date:
             raise HTTPException(400, "要有日期")
         note = payload.get("note")
-        return db.cal_set_mood(
+        db.cal_set_mood(
             date, str(payload.get("mood", "")),
             None if note is None else str(note),
         )
+        return _cal_response()
 
     raise HTTPException(400, f"不认识的动作：{action}")
 
@@ -1188,6 +1206,18 @@ async def whisper_post(request: Request):
         raise HTTPException(400, "空的就不算悄悄话了")
     item = db.whisper_add("her", text)
     return {**(item or {}), "ok": True}
+
+
+@app.patch("/api/whisper/{item_id}", dependencies=authed)
+async def whisper_update(item_id: str, request: Request):
+    payload = await _read_json(request)
+    text = str(payload.get("text", "")).strip()
+    if not text:
+        raise HTTPException(400, "写点什么再保存")
+    item = db.whisper_update(item_id, text)
+    if not item:
+        raise HTTPException(404, "这句悄悄话没有找到")
+    return {"ok": True, "item": item}
 
 
 @app.post("/api/whisper-mine", dependencies=authed)
