@@ -1166,7 +1166,7 @@ async def cal_post(payload: dict = Body(...)):
         return _cal_response()
 
     if action == "set_mood":
-        date = str(payload.get("date", "").strip())
+        date = str(payload.get("date", "")).strip()
         if not date:
             raise HTTPException(400, "要有日期")
         note = payload.get("note")
