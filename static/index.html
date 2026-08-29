@@ -1236,6 +1236,13 @@ html[data-theme="dark"] .composer {
   .wh.gu  { align-self: flex-start; background: var(--panel); border-bottom-left-radius: 6px; }
   .wh time { display: block; font-size: 12.5px; color: var(--dim); margin-top: 5px;
     font-variant-numeric: tabular-nums; }
+  .wh-meta { display: flex; align-items: center; gap: 6px; }
+  .wh-meta time { flex: 1; }
+  .wh-edit { border: 0; background: transparent; color: var(--dim); opacity: .55; padding: 4px; line-height: 0; }
+  .wh-edit:hover, .wh-edit:focus-visible { opacity: 1; color: var(--text); }
+  .wh-editor textarea { width: 100%; min-height: 94px; box-sizing: border-box; resize: vertical;
+    border: 1px solid var(--pink); border-radius: 10px; background: var(--bg); color: var(--text);
+    padding: 9px 10px; font: inherit; line-height: 1.65; }
   .wh-empty { color: var(--dim); font-size: 13.5px; line-height: 1.8; padding: 30px 6px; text-align: center; }
   .wh-write { display: flex; gap: 8px; align-items: flex-end; margin-top: 14px; }
   .wh-write textarea { flex: 1; background: var(--panel); border: none; border-radius: 15px;
@@ -1327,6 +1334,13 @@ html[data-theme="dark"] .hl-row + .hl-row { border-top-color: rgba(255,255,255,.
     font-variant-numeric: tabular-nums; margin-bottom: 6px; }
   .hd-item .hdt { font-size: 15px; line-height: 1.85; white-space: pre-wrap; word-break: break-word; }
   .hd-item .hdx { position: absolute; right: 10px; top: 10px; opacity: .3; padding: 4px; }
+  .hd-item .hd-edit-trigger { right: 38px; }
+  .hd-item .hdx:hover, .hd-item .hdx:focus-visible { opacity: .8; }
+  .hd-editor textarea { width: 100%; min-height: 112px; resize: vertical; box-sizing: border-box;
+    border: 1px solid var(--pink); border-radius: 11px; background: var(--bg); color: var(--text);
+    padding: 10px 11px; font: inherit; line-height: 1.7; }
+  .hd-editor-actions, .wh-editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 9px; }
+  .hd-cancel { border: 0; background: transparent; color: var(--dim); padding: 8px 10px; font: inherit; }
 
   .fav-card { position: relative; border-radius: 18px; padding: 20px 18px 16px;
     background: var(--panel); margin-bottom: 14px; overflow: hidden; }
@@ -3377,7 +3391,7 @@ function attachMessageActions(el, message) {
       const r = await fetch('api/quotes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quote, date, note: message.role === 'assistant' ? 'Cloudy 说' : '我说' }),
+        body: JSON.stringify({ quote, date }),
       });
       if (!r.ok) throw new Error('没有保存');
       note('（摘进“最喜欢的话”了）');
@@ -5118,14 +5132,18 @@ async function loadCal() {
   }
 }
 async function calAct(payload) {
+  const failed = payload.action === 'del_event' ? '（没删掉，再试一次）' : '（没记上，再试一次）';
   try {
     const r = await fetch('api/cal', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     const d = await r.json();
-    if (d.ok) { calData = d.cal; calPredict = d.predict; renderCal(); }
-  } catch { note('（没记上，再试一次）', 'err'); }
+    if (!r.ok || !d.ok || !d.cal) throw new Error(d.detail || '没有保存');
+    calData = d.cal;
+    calPredict = d.predict || {};
+    renderCal();
+  } catch (e) { note(failed, 'err'); }
 }
 function eventsOn(ds) {
   return calData.events.filter(e => e.date === ds || (e.yearly && e.date.slice(5) === ds.slice(5)));
@@ -5478,15 +5496,58 @@ async function renderHerDiary() {
         + String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
       const text = document.createElement('div');
       text.className = 'hdt'; text.textContent = item.text;
+      const edit = document.createElement('button');
+      edit.className = 'hdx hd-edit-trigger';
+      edit.setAttribute('aria-label', '编辑日记'); edit.title = '编辑日记';
+      edit.appendChild(icEl('pen', 13));
       const del = document.createElement('button');
       del.className = 'hdx';
+      del.setAttribute('aria-label', '删除日记'); del.title = '删除日记';
       del.appendChild(icEl('x', 13));
+      edit.onclick = () => {
+        const editor = document.createElement('div');
+        editor.className = 'hd-editor';
+        const input = document.createElement('textarea');
+        input.value = item.text; input.maxLength = 4000;
+        input.setAttribute('aria-label', '编辑日记内容');
+        const actions = document.createElement('div');
+        actions.className = 'hd-editor-actions';
+        const cancel = document.createElement('button');
+        cancel.className = 'hd-cancel'; cancel.textContent = '算了';
+        cancel.onclick = () => renderHerDiary();
+        const save = document.createElement('button');
+        save.className = 'go'; save.textContent = '保存';
+        save.onclick = async () => {
+          const value = input.value.trim();
+          if (!value) { input.focus(); return; }
+          save.disabled = true;
+          try {
+            const response = await fetch('api/her-diary/' + encodeURIComponent(item.id), {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: value }),
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) throw new Error(result.detail || '没有保存');
+            renderHerDiary();
+          } catch (e) {
+            note('（这页没改好：' + e.message + '）', 'err');
+            save.disabled = false;
+          }
+        };
+        actions.append(cancel, save);
+        editor.append(input, actions);
+        text.replaceWith(editor);
+        edit.hidden = true; del.hidden = true;
+        input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+      };
       del.onclick = async () => {
         const response = await fetch('api/her-diary/' + encodeURIComponent(item.id), { method: 'DELETE' });
-        if (!response.ok) { note('（这页没删掉）', 'err'); return; }
+        const result = await response.json();
+        if (!response.ok || !result.ok) { note('（这页没删掉）', 'err'); return; }
         renderHerDiary();
       };
-      card.append(date, text, del);
+      card.append(date, text, edit, del);
       wallBody.appendChild(card);
     });
     if (!(data.items || []).length) {
@@ -5520,14 +5581,15 @@ async function renderFav() {
       const quote = document.createElement('div');
       quote.className = 'fx'; quote.textContent = String(item.quote || '').replace(/^[“"]|[”"]$/g, '');
       card.append(icon, date, quote);
-      if (item.note) {
+      const memoText = String(item.note || '').trim();
+      if (memoText && memoText !== 'Cloudy 说' && memoText !== '我说') {
         const memo = document.createElement('div');
-        memo.className = 'fn'; memo.textContent = item.note;
+        memo.className = 'fn'; memo.textContent = memoText;
         card.appendChild(memo);
       }
       const del = document.createElement('button');
       del.className = 'hdx';
-      del.setAttribute('aria-label', '删除摘录');
+      del.setAttribute('aria-label', '删除摘录'); del.title = '删除摘录';
       del.appendChild(icEl('x', 13));
       del.onclick = async () => {
         const response = await fetch('api/quotes/' + encodeURIComponent(item.id), { method: 'DELETE' });
@@ -5785,8 +5847,10 @@ async function renderWhisper() {
   wallBody.innerHTML = '<div class="wh-empty">正在开抽屉…</div>';
   let items = [];
   try {
-    const d = await (await fetch('api/whisper', { cache: 'no-store' })).json();
-    items = d.items || [];
+    const response = await fetch('api/whisper', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '没有打开');
+    items = data.items || [];
   } catch (e) {}
   const wrap = document.createElement('div');
   wrap.className = 'wh-list';
@@ -5799,12 +5863,59 @@ async function renderWhisper() {
   items.forEach(it => {
     const d = document.createElement('div');
     d.className = 'wh ' + (it.who === 'her' ? 'her' : 'gu');
-    d.textContent = it.text;
+    const content = document.createElement('div');
+    content.className = 'wh-text'; content.textContent = it.text;
+    const meta = document.createElement('div');
+    meta.className = 'wh-meta';
     const t = document.createElement('time');
     const dt = new Date(it.at * 1000);
     t.textContent = (dt.getMonth() + 1) + '月' + dt.getDate() + '日 '
       + String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
-    d.appendChild(t);
+    meta.appendChild(t);
+    if (it.who === 'her') {
+      const edit = document.createElement('button');
+      edit.className = 'wh-edit'; edit.setAttribute('aria-label', '编辑这句悄悄话'); edit.title = '编辑';
+      edit.appendChild(icEl('pen', 13));
+      edit.onclick = () => {
+        const editor = document.createElement('div');
+        editor.className = 'wh-editor';
+        const input = document.createElement('textarea');
+        input.value = it.text; input.maxLength = 2000;
+        input.setAttribute('aria-label', '编辑悄悄话');
+        const actions = document.createElement('div');
+        actions.className = 'wh-editor-actions';
+        const cancel = document.createElement('button');
+        cancel.className = 'hd-cancel'; cancel.textContent = '算了';
+        cancel.onclick = () => renderWhisper();
+        const save = document.createElement('button');
+        save.className = 'go'; save.textContent = '保存';
+        save.onclick = async () => {
+          const value = input.value.trim();
+          if (!value) { input.focus(); return; }
+          save.disabled = true;
+          try {
+            const response = await fetch('api/whisper/' + encodeURIComponent(it.id), {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: value }),
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) throw new Error(result.detail || '没有保存');
+            renderWhisper();
+          } catch (e) {
+            note('（这句没改好：' + e.message + '）', 'err');
+            save.disabled = false;
+          }
+        };
+        actions.append(cancel, save);
+        editor.append(input, actions);
+        content.replaceWith(editor);
+        meta.hidden = true;
+        input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+      };
+      meta.appendChild(edit);
+    }
+    d.append(content, meta);
     wrap.appendChild(d);
   });
   wallBody.innerHTML = '';
@@ -5819,14 +5930,23 @@ async function renderWhisper() {
   const btn = document.createElement('button');
   btn.className = 'wh-send'; btn.textContent = '放进去';
   btn.onclick = async () => {
-    const t = ta.value.trim();
-    if (!t) return;
-    btn.textContent = '…';
+    const text = ta.value.trim();
+    if (!text) return;
+    btn.disabled = true; btn.textContent = '…';
     try {
-      await fetch('api/whisper', { method: 'POST', body: JSON.stringify({ text: t }) });
+      const response = await fetch('api/whisper', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.detail || '没有放进去');
       ta.value = ''; ta.style.height = '';
       renderWhisper();
-    } catch (e) { btn.textContent = '放进去'; }
+    } catch (e) {
+      note('（这句没有放进去）', 'err');
+      btn.disabled = false; btn.textContent = '放进去';
+    }
   };
   w.append(ta, btn);
   wallBody.appendChild(w);
