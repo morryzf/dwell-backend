@@ -204,6 +204,28 @@ CREATE TABLE IF NOT EXISTS chat_memory_segments (
 CREATE INDEX IF NOT EXISTS ix_chat_memory_segments_chat
 ON chat_memory_segments(chat_id, start_rowid, end_rowid);
 
+-- 模型新整理出的长期记忆先放在草稿里。只有用户确认后才替换正式记忆。
+CREATE TABLE IF NOT EXISTS chat_memory_drafts (
+    chat_id          TEXT PRIMARY KEY,
+    overview         TEXT NOT NULL DEFAULT '',
+    through_rowid    INTEGER NOT NULL DEFAULT 0,
+    generated_at     INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+
+-- 每次正式记忆被编辑、采用新草稿或恢复旧版前，先保留当前版本。
+CREATE TABLE IF NOT EXISTS chat_memory_versions (
+    id               TEXT PRIMARY KEY,
+    chat_id          TEXT NOT NULL,
+    overview         TEXT NOT NULL,
+    through_rowid    INTEGER NOT NULL DEFAULT 0,
+    reason           TEXT NOT NULL DEFAULT '',
+    made             INTEGER NOT NULL,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_chat_memory_versions_chat
+ON chat_memory_versions(chat_id, made DESC);
+
 -- AI 回复的旧版本。重新生成或手动编辑时先存一份，当前 messages 表始终只保留
 -- 后续上下文真正会读到的那一版。
 CREATE TABLE IF NOT EXISTS message_versions (
@@ -1090,6 +1112,13 @@ def chat_memory_get(chat_id: str) -> dict:
         segments = cx.execute(
             "SELECT COUNT(*) FROM chat_memory_segments WHERE chat_id=?", (chat_id,)
         ).fetchone()[0]
+        draft = cx.execute(
+            "SELECT overview,through_rowid,generated_at FROM chat_memory_drafts WHERE chat_id=?",
+            (chat_id,),
+        ).fetchone()
+        version_count = cx.execute(
+            "SELECT COUNT(*) FROM chat_memory_versions WHERE chat_id=?", (chat_id,)
+        ).fetchone()[0]
     out = dict(row) if row else {
         "chat_id": chat_id, "enabled": 0, "overview": "", "through_rowid": 0,
         "status": "idle", "error": "", "generated_at": 0,
@@ -1098,6 +1127,11 @@ def chat_memory_get(chat_id: str) -> dict:
     out["message_count"] = int(total)
     out["last_rowid"] = int(last)
     out["segment_count"] = int(segments)
+    out["has_draft"] = bool(draft)
+    out["draft_overview"] = str(draft["overview"]) if draft else ""
+    out["draft_through_rowid"] = int(draft["through_rowid"]) if draft else 0
+    out["draft_generated_at"] = int(draft["generated_at"]) if draft else 0
+    out["version_count"] = int(version_count)
     return out
 
 
@@ -1124,18 +1158,17 @@ def chat_memory_set_status(chat_id: str, status: str, error: str = "", enabled: 
 
 
 def chat_memory_reset(chat_id: str) -> None:
-    """只清除派生摘要，绝不动聊天原文。用于重新从头生成。"""
+    """让重建从原文开始；正式记忆和历史版本始终保留到用户采用新草稿。"""
     with conn() as cx:
         cx.execute("DELETE FROM chat_memory_segments WHERE chat_id=?", (chat_id,))
+        cx.execute("DELETE FROM chat_memory_drafts WHERE chat_id=?", (chat_id,))
         cx.execute(
             """INSERT INTO chat_memory_state
                (chat_id,enabled,overview,through_rowid,status,error,generated_at)
                VALUES (?,1,'',0,'queued','',0)
-               ON CONFLICT(chat_id) DO UPDATE SET enabled=1,overview='',through_rowid=0,
-               status='queued',error='',generated_at=0""",
+               ON CONFLICT(chat_id) DO UPDATE SET enabled=1,status='queued',error=''""",
             (chat_id,),
         )
-
 
 def chat_memory_add_segment(chat_id: str, start_rowid: int, end_rowid: int, content: str) -> dict:
     row = {
@@ -1159,32 +1192,123 @@ def chat_memory_segments(chat_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def chat_memory_finish(chat_id: str, overview: str, through_rowid: int) -> None:
+def _chat_memory_archive(cx: sqlite3.Connection, current: dict, reason: str) -> None:
+    overview = str(current.get("overview") or "").strip()
+    if not overview:
+        return
+    cx.execute(
+        """INSERT INTO chat_memory_versions (id,chat_id,overview,through_rowid,reason,made)
+           VALUES (?,?,?,?,?,?)""",
+        (
+            new_id(), current["chat_id"], overview, int(current.get("through_rowid") or 0),
+            reason[:80], int(time.time()),
+        ),
+    )
+
+
+def chat_memory_stage(chat_id: str, overview: str, through_rowid: int) -> None:
+    """保存待确认草稿；Cloudy 继续使用原来的正式记忆。"""
     now = int(time.time())
     with conn() as cx:
+        cx.execute(
+            """INSERT INTO chat_memory_drafts (chat_id,overview,through_rowid,generated_at)
+               VALUES (?,?,?,?)
+               ON CONFLICT(chat_id) DO UPDATE SET overview=excluded.overview,
+               through_rowid=excluded.through_rowid,generated_at=excluded.generated_at""",
+            (chat_id, overview.strip()[:12000], int(through_rowid), now),
+        )
+        cx.execute(
+            """INSERT INTO chat_memory_state
+               (chat_id,enabled,overview,through_rowid,status,error,generated_at)
+               VALUES (?,1,'',0,'review','',0)
+               ON CONFLICT(chat_id) DO UPDATE SET enabled=1,status='review',error=''""",
+            (chat_id,),
+        )
+
+
+def chat_memory_accept_draft(chat_id: str, overview: str) -> None:
+    """采用用户审过的草稿，并在替换前保存当前正式版本。"""
+    current = chat_memory_get(chat_id)
+    now = int(time.time())
+    with conn() as cx:
+        draft = cx.execute(
+            "SELECT through_rowid FROM chat_memory_drafts WHERE chat_id=?", (chat_id,)
+        ).fetchone()
+        if not draft:
+            raise ValueError("没有待确认的长期记忆草稿")
+        chosen = overview.strip()[:12000]
+        if chosen != str(current.get("overview") or "").strip():
+            _chat_memory_archive(cx, current, "采用新草稿")
         cx.execute(
             """INSERT INTO chat_memory_state
                (chat_id,enabled,overview,through_rowid,status,error,generated_at)
                VALUES (?,1,?,?,'ready','',?)
                ON CONFLICT(chat_id) DO UPDATE SET enabled=1,overview=excluded.overview,
-               through_rowid=excluded.through_rowid,status='ready',error='',generated_at=excluded.generated_at""",
-            (chat_id, overview.strip()[:12000], int(through_rowid), now),
+               through_rowid=excluded.through_rowid,status='ready',error='',
+               generated_at=excluded.generated_at""",
+            (chat_id, chosen, int(draft["through_rowid"]), now),
+        )
+        cx.execute("DELETE FROM chat_memory_drafts WHERE chat_id=?", (chat_id,))
+
+
+def chat_memory_discard_draft(chat_id: str) -> None:
+    current = chat_memory_get(chat_id)
+    with conn() as cx:
+        cx.execute("DELETE FROM chat_memory_drafts WHERE chat_id=?", (chat_id,))
+        cx.execute(
+            "UPDATE chat_memory_state SET status=?,error='' WHERE chat_id=?",
+            ("ready" if current.get("overview") else "idle", chat_id),
         )
 
 
 def chat_memory_save_overview(chat_id: str, overview: str) -> None:
-    """保存用户校订过的长期记忆；后续自动更新会以它作为已有记忆。"""
+    """保存用户直接编辑的正式记忆，并在替换前保留旧版本。"""
     current = chat_memory_get(chat_id)
+    chosen = overview.strip()[:12000]
     now = int(time.time())
     with conn() as cx:
+        if chosen != str(current.get("overview") or "").strip():
+            _chat_memory_archive(cx, current, "手动编辑")
         cx.execute(
             """INSERT INTO chat_memory_state
                (chat_id,enabled,overview,through_rowid,status,error,generated_at)
                VALUES (?,1,?,?,'ready','',?)
                ON CONFLICT(chat_id) DO UPDATE SET enabled=1,overview=excluded.overview,
                status='ready',error='',generated_at=excluded.generated_at""",
-            (chat_id, overview.strip()[:12000], int(current["through_rowid"]), now),
+            (chat_id, chosen, int(current["through_rowid"]), now),
         )
+
+
+def chat_memory_versions(chat_id: str, limit: int = 12) -> list[dict]:
+    with conn() as cx:
+        rows = cx.execute(
+            """SELECT id,overview,through_rowid,reason,made FROM chat_memory_versions
+               WHERE chat_id=? ORDER BY made DESC LIMIT ?""",
+            (chat_id, max(1, min(int(limit), 50))),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def chat_memory_restore_version(chat_id: str, version_id: str) -> None:
+    """恢复旧文本；保留当前覆盖水位，避免重复压缩已经处理过的消息。"""
+    current = chat_memory_get(chat_id)
+    now = int(time.time())
+    with conn() as cx:
+        version = cx.execute(
+            "SELECT overview FROM chat_memory_versions WHERE id=? AND chat_id=?",
+            (version_id, chat_id),
+        ).fetchone()
+        if not version:
+            raise ValueError("没有找到这个长期记忆版本")
+        restored = str(version["overview"]).strip()[:12000]
+        if restored != str(current.get("overview") or "").strip():
+            _chat_memory_archive(cx, current, "恢复旧版前")
+        cx.execute(
+            """UPDATE chat_memory_state SET enabled=1,overview=?,status='ready',
+               error='',generated_at=? WHERE chat_id=?""",
+            (restored, now, chat_id),
+        )
+        cx.execute("DELETE FROM chat_memory_drafts WHERE chat_id=?", (chat_id,))
 
 
 def chat_memory_source_messages(chat_id: str, after_rowid: int, before_rowid: int, limit: int) -> list[dict]:
