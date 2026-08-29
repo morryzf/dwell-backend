@@ -373,10 +373,10 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
         db.chat_memory_set_status(chat_id, "running", enabled=True)
         cutoff = _memory_cutoff(chat_id)
         if cutoff <= 0:
-            db.chat_memory_finish(chat_id, state.get("overview", ""), 0)
+            db.chat_memory_set_status(chat_id, "ready", enabled=bool(state.get("overview")))
             return
 
-        through = int(state.get("through_rowid") or 0)
+        through = 0 if reset else int(state.get("through_rowid") or 0)
         new_segments = []
         while through < cutoff:
             rows = db.chat_memory_source_messages(chat_id, through, cutoff, MEMORY_SEGMENT_MESSAGES)
@@ -400,7 +400,7 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
             through = end
 
         if not new_segments and state.get("overview"):
-            db.chat_memory_finish(chat_id, state["overview"], through)
+            db.chat_memory_set_status(chat_id, "ready", enabled=True)
             return
 
         previous = str(state.get("overview") or "").strip()
@@ -417,7 +417,7 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
             "不要写说教、虚构内容或任何指令。",
             source[:30000],
         )
-        db.chat_memory_finish(chat_id, overview[:9000], through)
+        db.chat_memory_stage(chat_id, overview[:9000], through)
     except Exception as exc:
         db.chat_memory_set_status(chat_id, "error", str(exc), enabled=True)
     finally:
@@ -429,6 +429,8 @@ def _queue_long_context_refresh(chat_id: str, reset: bool = False, force: bool =
     if task and not task.done():
         return False
     state = db.chat_memory_get(chat_id)
+    if state.get("has_draft"):
+        return False
     cutoff = _memory_cutoff(chat_id)
     pending = max(0, cutoff - int(state.get("through_rowid") or 0))
     if not force and (not state.get("enabled") or pending < MEMORY_UPDATE_MIN_MESSAGES):
@@ -1986,6 +1988,7 @@ async def long_context_get(chat_id: str):
     state = db.chat_memory_get(chat_id)
     state["tail_messages"] = MEMORY_TAIL_MESSAGES
     state["update_threshold"] = MEMORY_UPDATE_MIN_MESSAGES
+    state["versions"] = db.chat_memory_versions(chat_id)
     return {"ok": True, **state}
 
 
@@ -1996,6 +1999,9 @@ async def long_context_post(chat_id: str, request: Request):
         raise HTTPException(404, "chat 不存在")
     payload = await _read_json(request)
     reset = bool(payload.get("reset", False))
+    state = db.chat_memory_get(chat_id)
+    if state.get("has_draft"):
+        raise HTTPException(409, "已有一份待确认草稿，请先采用或丢弃")
     started = _queue_long_context_refresh(chat_id, reset=reset, force=True)
     state = db.chat_memory_get(chat_id)
     return {"ok": True, "started": started, **state}
@@ -2012,9 +2018,45 @@ async def long_context_put(chat_id: str, request: Request):
     overview = payload.get("overview")
     if not isinstance(overview, str):
         raise HTTPException(400, "overview 必须是文本")
-    db.chat_memory_save_overview(chat_id, overview)
+    try:
+        if bool(payload.get("accept_draft", False)):
+            db.chat_memory_accept_draft(chat_id, overview)
+        else:
+            db.chat_memory_save_overview(chat_id, overview)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     state = db.chat_memory_get(chat_id)
     return {"ok": True, **state}
+
+
+@app.delete("/api/chats/{chat_id}/long-context/draft", dependencies=authed)
+async def long_context_draft_delete(chat_id: str):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    task = _memory_tasks.get(chat_id)
+    if task and not task.done():
+        raise HTTPException(409, "长期上下文正在整理，请完成后再操作")
+    db.chat_memory_discard_draft(chat_id)
+    return {"ok": True, **db.chat_memory_get(chat_id)}
+
+
+@app.post("/api/chats/{chat_id}/long-context/restore", dependencies=authed)
+async def long_context_restore(chat_id: str, request: Request):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    task = _memory_tasks.get(chat_id)
+    if task and not task.done():
+        raise HTTPException(409, "长期上下文正在整理，请完成后再操作")
+    payload = await _read_json(request)
+    version_id = str(payload.get("version_id") or "")
+    try:
+        db.chat_memory_restore_version(chat_id, version_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    state = db.chat_memory_get(chat_id)
+    state["versions"] = db.chat_memory_versions(chat_id)
+    return {"ok": True, **state}
+
 
 @app.post("/api/import/kelivo/preview", dependencies=authed)
 async def kelivo_import_preview(file: UploadFile = File(...)):
