@@ -476,6 +476,18 @@ def her_diary_list() -> list:
     return [dict(r) for r in rows]
 
 
+def her_diary_update(item_id: str, text: str) -> dict | None:
+    with conn() as cx:
+        cur = cx.execute(
+            "UPDATE her_diary SET text=? WHERE id=?",
+            (text.strip()[:4000], item_id),
+        )
+        if cur.rowcount < 1:
+            return None
+        row = cx.execute("SELECT * FROM her_diary WHERE id=?", (item_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def her_diary_del(item_id: str) -> bool:
     with conn() as cx:
         cur = cx.execute("DELETE FROM her_diary WHERE id=?", (item_id,))
@@ -700,6 +712,21 @@ def whisper_add(who: str, text: str) -> dict:
             (WHISPER_CAP,),
         )
     return row
+
+
+def whisper_update(item_id: str, text: str) -> dict | None:
+    """只允许修改用户自己的悄悄话，不碰 Cloudy 留下的内容。"""
+    with conn() as cx:
+        cur = cx.execute(
+            "UPDATE whispers SET text=? WHERE id=? AND who='her'",
+            (text.strip()[:2000], item_id),
+        )
+        if cur.rowcount < 1:
+            return None
+        row = cx.execute(
+            "SELECT id,who,text,at FROM whispers WHERE id=?", (item_id,)
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def whisper_list(limit: int = 500) -> list:
