@@ -7788,17 +7788,32 @@ async function loadLongContext() {
     const state = await response.json(); if (!response.ok || !state.ok) throw new Error(state.detail || '没有读取到');
     const modelState = await modelResponse.json(); if (!modelResponse.ok || !modelState.ok) throw new Error(modelState.detail || '压缩模型没拿到');
     const working = state.status === 'queued' || state.status === 'running';
-    const generated = state.generated_at ? new Date(state.generated_at * 1000).toLocaleString('zh-CN') : '尚未生成';
-    const status = working ? '正在整理。可以离开这里，完成后会自动用于后续消息。' : state.status === 'error' ? ('没有生成成功：' + instructionEsc(state.error || '未知错误')) : (state.enabled ? '已启用；后续每约 30 条离开近期窗口的消息会在后台更新。' : '尚未启用；模型目前只会看到最近消息。');
+    const reviewing = !!state.has_draft;
+    const generated = state.generated_at ? new Date(state.generated_at * 1000).toLocaleString('zh-CN') : '尚未保存正式记忆';
+    const draftGenerated = state.draft_generated_at ? new Date(state.draft_generated_at * 1000).toLocaleString('zh-CN') : '';
+    const status = working
+      ? '正在整理。完成后只会生成待确认草稿，不会覆盖正式记忆。'
+      : reviewing
+        ? '有一份新草稿等待确认；Cloudy 仍在使用下方的正式记忆。'
+        : state.status === 'error'
+          ? ('没有生成成功：' + instructionEsc(state.error || '未知错误'))
+          : (state.overview ? '正式记忆已启用；之后的新整理会先进入草稿。' : '尚未有正式记忆；模型目前只会看到最近消息。');
     const modelOptions = (modelState.items || []).map(item => `<option value="${instructionEsc(item.provider_id)}::${instructionEsc(item.model_id)}" ${(item.provider_id === modelState.provider_id && item.model_id === modelState.model_id) ? 'selected' : ''}>${instructionEsc(item.provider_name || '供应商')} · ${instructionEsc(item.model_id)}</option>`).join('');
-    body.innerHTML = `<div class="sh-head"><h1>${instructionEsc(chat.name || '新对话')}</h1><div class="sub">原聊天记录不会改动或删除。长期上下文只是一份可从原文重新生成的压缩记录。</div></div>`
-      + `<div class="ap-section"><div class="ap-section-title">状态</div><div class="gnote">${status}</div><div class="gnote">原消息 ${state.message_count} 条；已压缩 ${state.segment_count} 段；最近 ${state.tail_messages} 条仍保持原文。</div><div class="gnote">最近生成：${generated}</div></div>`
+    const versionsHtml = (state.versions || []).map(item => {
+      const when = item.made ? new Date(item.made * 1000).toLocaleString('zh-CN') : '较早版本';
+      return `<details style="margin-top:10px"><summary>${instructionEsc(when)} · ${instructionEsc(item.reason || '历史版本')}</summary><div class="gnote" style="white-space:pre-wrap;margin-top:8px;max-height:260px;overflow:auto">${instructionEsc(item.overview || '')}</div><div class="ap-btns"><button class="ap-b longContextRestore" data-version="${instructionEsc(item.id)}">恢复这一版</button></div></details>`;
+    }).join('');
+    const blocked = working || reviewing;
+    body.innerHTML = `<div class="sh-head"><h1>${instructionEsc(chat.name || '新对话')}</h1><div class="sub">原聊天记录不会改动或删除。自动整理只产生草稿，由你决定是否成为正式记忆。</div></div>`
+      + `<div class="ap-section"><div class="ap-section-title">状态</div><div class="gnote">${status}</div><div class="gnote">原消息 ${state.message_count} 条；已压缩 ${state.segment_count} 段；最近 ${state.tail_messages} 条仍保持原文。</div><div class="gnote">正式记忆最近保存：${generated}</div></div>`
       + `<div class="ap-section"><div class="ap-section-title">压缩模型</div><div class="gnote">这台模型专门整理长期上下文，不会跟着聊天页临时切换。</div>${modelOptions ? `<select class="ap-in" id="longContextModel" style="width:100%;margin-top:10px">${modelOptions}</select><div class="ap-msg" id="longContextModelMsg"></div>` : '<div class="gnote">还没有可选模型。先在设置里为供应商添加模型。</div>'}</div>`
-      + `<div class="ap-btns"><button class="ap-b go" id="longContextGenerate">${state.enabled ? '现在更新' : '生成长期上下文'}</button>${state.enabled ? '<button class="ap-b" id="longContextRebuild">从原文重建</button>' : ''}</div><div class="ap-msg" id="longContextMsg"></div>`
-      + (state.overview ? `<div class="ap-section"><div class="ap-section-title">Cloudy 的长期记忆</div><div class="gnote">这是模型整理的初稿。你可以删掉冗余、补充遗漏或直接改写；保存后会成为后续更新的基础。</div><textarea id="longContextOverview" maxlength="12000" style="width:100%;min-height:260px;margin-top:12px;box-sizing:border-box;resize:vertical">${instructionEsc(state.overview)}</textarea><div class="ap-btns"><button class="ap-b go" id="longContextSave">保存修改</button></div></div>` : '');
-    const start = async (reset) => {
+      + `<div class="ap-btns"><button class="ap-b go" id="longContextGenerate" ${blocked ? 'disabled' : ''}>${reviewing ? '先处理待确认草稿' : (state.overview ? '现在更新' : '生成长期上下文')}</button>${state.enabled ? `<button class="ap-b" id="longContextRebuild" ${blocked ? 'disabled' : ''}>从原文重建</button>` : ''}</div><div class="ap-msg" id="longContextMsg"></div>`
+      + (reviewing ? `<div class="ap-section"><div class="ap-section-title">待确认的新草稿</div><div class="gnote">生成于 ${instructionEsc(draftGenerated)}。你可以先修改；采用前，Cloudy 不会读取这份草稿。</div><textarea id="longContextDraft" maxlength="12000" style="width:100%;min-height:260px;margin-top:12px;box-sizing:border-box;resize:vertical">${instructionEsc(state.draft_overview || '')}</textarea><div class="ap-btns"><button class="ap-b go" id="longContextAccept">采用这份草稿</button><button class="ap-b" id="longContextDiscard">丢弃草稿</button></div></div>` : '')
+      + (state.overview ? `<div class="ap-section"><div class="ap-section-title">Cloudy 正在使用的正式记忆</div><div class="gnote">你可以直接校订；保存前会自动留下旧版本。</div><textarea id="longContextOverview" maxlength="12000" style="width:100%;min-height:260px;margin-top:12px;box-sizing:border-box;resize:vertical">${instructionEsc(state.overview)}</textarea><div class="ap-btns"><button class="ap-b go" id="longContextSave">保存修改</button></div></div>` : '')
+      + (versionsHtml ? `<div class="ap-section"><div class="ap-section-title">历史版本（${state.version_count || 0}）</div><div class="gnote">展开可检查内容；恢复前也会先保存当前正式记忆。</div>${versionsHtml}</div>` : '');
+    const startUpdate = async (reset) => {
       const msg = document.getElementById('longContextMsg');
-      if (reset && !confirm('重新从原聊天记录生成摘要？原记录不会删除。')) return;
+      if (reset && !confirm('从原聊天记录重新生成一份待确认草稿？当前正式记忆不会删除。')) return;
       msg.textContent = '已开始整理…'; msg.className = 'ap-msg on';
       try {
         const r = await fetch('api/chats/' + encodeURIComponent(chat.id) + '/long-context', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reset:!!reset})});
@@ -7806,8 +7821,8 @@ async function loadLongContext() {
         setTimeout(loadLongContext, 500);
       } catch (e) { msg.textContent = '没有开始：' + e.message; msg.className = 'ap-msg on bad'; }
     };
-    document.getElementById('longContextGenerate').onclick = () => start(false);
-    const rebuild = document.getElementById('longContextRebuild'); if (rebuild) rebuild.onclick = () => start(true);
+    const generate = document.getElementById('longContextGenerate'); if (generate && !blocked) generate.onclick = () => startUpdate(false);
+    const rebuild = document.getElementById('longContextRebuild'); if (rebuild && !blocked) rebuild.onclick = () => startUpdate(true);
     const modelSelect = document.getElementById('longContextModel');
     if (modelSelect) modelSelect.onchange = async () => {
       const msg = document.getElementById('longContextModelMsg');
@@ -7827,9 +7842,39 @@ async function loadLongContext() {
       try {
         const r = await fetch('api/chats/' + encodeURIComponent(chat.id) + '/long-context', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({overview})});
         const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
-        msg.textContent = '已保存。之后自动更新会以这份记忆为基础。'; msg.className = 'ap-msg on';
+        msg.textContent = '已保存，并留下了修改前的版本。'; msg.className = 'ap-msg on';
+        setTimeout(loadLongContext, 500);
       } catch (e) { msg.textContent = '没有保存：' + e.message; msg.className = 'ap-msg on bad'; }
     };
+    const accept = document.getElementById('longContextAccept');
+    if (accept) accept.onclick = async () => {
+      const overview = document.getElementById('longContextDraft').value;
+      if (!confirm('采用这份草稿作为 Cloudy 的正式记忆？当前版本会保留在历史版本中。')) return;
+      try {
+        const r = await fetch('api/chats/' + encodeURIComponent(chat.id) + '/long-context', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({overview,accept_draft:true})});
+        const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有采用');
+        loadLongContext();
+      } catch (e) { alert('没有采用：' + e.message); }
+    };
+    const discard = document.getElementById('longContextDiscard');
+    if (discard) discard.onclick = async () => {
+      if (!confirm('丢弃这份待确认草稿？正式记忆不会改变。')) return;
+      try {
+        const r = await fetch('api/chats/' + encodeURIComponent(chat.id) + '/long-context/draft', {method:'DELETE'});
+        const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有丢弃');
+        loadLongContext();
+      } catch (e) { alert('没有丢弃：' + e.message); }
+    };
+    document.querySelectorAll('.longContextRestore').forEach(button => {
+      button.onclick = async () => {
+        if (!confirm('恢复这一版长期记忆？当前正式记忆也会先保存。')) return;
+        try {
+          const r = await fetch('api/chats/' + encodeURIComponent(chat.id) + '/long-context/restore', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({version_id:button.dataset.version})});
+          const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有恢复');
+          loadLongContext();
+        } catch (e) { alert('没有恢复：' + e.message); }
+      };
+    });
     if (working) longContextPoll = setTimeout(loadLongContext, 1800);
   } catch (e) { body.innerHTML = '<div class="gnote">长期上下文没拿到：' + instructionEsc(e.message) + '</div>'; }
 }
