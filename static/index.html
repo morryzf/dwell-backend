@@ -1307,7 +1307,7 @@ html[data-theme="dark"] .composer {
   .nk-book-cover .fallback small { display: block; margin-top: 7px; font: 500 8px/1.35 inherit;
     letter-spacing: .08em; color: rgba(238,225,215,.56); }
   @media (hover:hover) and (pointer:fine) { .nk-book-cover:hover { transform: translateY(-7px) rotate(-1deg); filter: brightness(1.08); } }
-  .nk-book-cover:active, .nk-room-primary:active, .nk-collection-keepsake:active { transform: scale(.97); }
+  .nk-book-cover:active, .nk-room-primary:active, .nk-collection-keepsake:active, .nk-study-watch:active { transform: scale(.97); }
   .nk-empty-slot { width: 100%; aspect-ratio: 2/3; border: 1px dashed rgba(234,223,218,.09); border-radius: 3px;
     background: rgba(3,1,2,.1); color: rgba(234,223,218,.26); display: grid; place-items: center; }
   .nk-empty-slot.upload { cursor: pointer; transition: border-color 180ms ease, color 180ms ease; }
@@ -1320,20 +1320,11 @@ html[data-theme="dark"] .composer {
     font: 500 9px/1 inherit; letter-spacing: .12em; transition: transform 140ms cubic-bezier(.23,1,.32,1), filter 180ms ease; }
   .nk-collection-keepsake::after { content: ''; position: absolute; left: 8px; right: 7px; bottom: 5px; height: 1px;
     background: rgba(221,198,184,.24); box-shadow: 0 -3px rgba(221,198,184,.1); }
-  .nk-lock-drawer { position: relative; width: min(56%,190px); height: 74px; padding: 0; border: 0;
-    background: transparent; transform-origin: bottom center; }
-  .nk-lock-drawer .drawer-face { position: absolute; left: 0; right: 0; bottom: 0; line-height: 0;
-    transition: transform 230ms cubic-bezier(.32,.72,0,1), filter 180ms ease; }
-  .nk-lock-drawer .drawer-face img { display: block; width: 100%; border-radius: 2px; }
-  .nk-lock-drawer .silver-key { position: absolute; z-index: 2; left: 50%; bottom: 33%; height: 58px; width: auto;
-    transform-origin: 50% 94%; transform: translateX(-50%) rotate(-7deg);
-    filter: drop-shadow(0 3px 4px rgba(0,0,0,.58));
-    transition: transform 180ms cubic-bezier(.77,0,.175,1), filter 180ms ease; }
-  .nk-lock-drawer.opening .silver-key { transform: translateX(-50%) rotate(18deg); }
-  .nk-lock-drawer.opening .drawer-face { transform: translateY(9px) scale(.985); filter: brightness(1.08); }
-  @media (hover:hover) and (pointer:fine) {
-    .nk-lock-drawer:hover .silver-key, .nk-collection-keepsake:hover { filter: brightness(1.12); }
-  }
+  .nk-study-watch { position: absolute; z-index: 2; top: clamp(96px,7.5dvh,142px); right: clamp(22px,6vw,56px);
+    width: clamp(88px,20.5vw,192px); padding: 0; border: 0; background: transparent; line-height: 0;
+    opacity: .5; transform-origin: center; transition: opacity 160ms ease, transform 140ms cubic-bezier(.23,1,.32,1); }
+  .nk-study-watch img { display: block; width: 100%; height: auto; filter: drop-shadow(0 5px 7px rgba(0,0,0,.32)); }
+  @media (hover:hover) and (pointer:fine) { .nk-study-watch:hover { opacity: .64; } }
   .nk-room-panel { position: relative; z-index: 1; width: min(100%,620px); margin: 0 auto; padding: 18px 16px 34px; }
   .nk-room-panel .sh-head h1, .nk-room-panel .sh-head .sub { color: #eadfda; }
   .nk-detail-hero { display: grid; grid-template-columns: 112px 1fr; gap: 20px; align-items: end; margin: 18px 0 22px; }
@@ -1375,8 +1366,8 @@ html[data-theme="dark"] .composer {
   }
   @media (max-width:420px) { .nk-cabinet { padding-inline: 9px; } .nk-shelf-tier { gap: 7px; } .nk-detail-hero { grid-template-columns: 92px 1fr; gap: 16px; } }
   @media (prefers-reduced-motion:reduce) {
-    .nk-book-cover, .nk-room-primary, .nk-collection-keepsake, .nk-lock-drawer .drawer-face, .nk-lock-drawer .silver-key { transition: opacity 160ms ease; }
-    .nk-lock-drawer.opening .silver-key, .nk-lock-drawer.opening .drawer-face { transform: none; }
+    .nk-book-cover, .nk-room-primary, .nk-collection-keepsake, .nk-study-watch { transition: opacity 160ms ease; }
+    .nk-study-watch:active { transform: none; }
   }
 
   .wh-list { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 10px; }
@@ -6427,9 +6418,10 @@ function nkCover(book, detail) {
   return cover;
 }
 
-function nkRoomShell(panel) {
+function nkRoomShell(panel, roomObject) {
   nkRoomMode(true); nkBody.innerHTML = ''; nkBody.scrollTop = 0;
   const room = document.createElement('div'); room.className = 'nk-room';
+  if (roomObject) room.appendChild(roomObject);
   room.appendChild(panel); nkBody.appendChild(room);
 }
 
@@ -6476,21 +6468,13 @@ async function loadShelf() {
   const tools = document.createElement('div'); tools.className = 'nk-cabinet-tools';
   const collection = document.createElement('button'); collection.className = 'nk-collection-keepsake';
   collection.type = 'button'; collection.textContent = '收藏'; collection.title = '收藏的书'; collection.onclick = renderCollection;
-  const drawer = document.createElement('button'); drawer.className = 'nk-lock-drawer'; drawer.type = 'button';
-  drawer.title = '打开阅读安排'; drawer.setAttribute('aria-label', '打开阅读安排、模型和摘要来源');
-  const face = document.createElement('span'); face.className = 'drawer-face';
-  const faceImg = document.createElement('img'); faceImg.src = 'assets/study/study-drawer-v1.webp'; faceImg.alt = '';
-  face.appendChild(faceImg);
-  const key = document.createElement('img'); key.className = 'silver-key'; key.src = 'assets/study/study-key-v1.webp'; key.alt = '';
-  drawer.append(face, key);
-  drawer.onclick = () => {
-    if (drawer.classList.contains('opening')) return;
-    drawer.classList.add('opening'); drawer.disabled = true;
-    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    setTimeout(renderStudySettings, reduced ? 0 : 235);
-  };
-  tools.append(collection, drawer); cabinet.append(tools, input); inner.appendChild(cabinet);
-  nkRoomShell(inner);
+  const watch = document.createElement('button'); watch.className = 'nk-study-watch'; watch.type = 'button';
+  watch.title = '打开阅读安排'; watch.setAttribute('aria-label', '打开阅读安排、模型和摘要来源');
+  const watchImg = document.createElement('img'); watchImg.src = 'assets/study/study-pocket-watch-v1.png';
+  watchImg.alt = '打开阅读安排'; watch.appendChild(watchImg);
+  watch.onclick = renderStudySettings;
+  tools.append(collection); cabinet.append(tools, input); inner.appendChild(cabinet);
+  nkRoomShell(inner, watch);
 }
 
 async function renderBookDetail(bookId) {
