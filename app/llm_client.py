@@ -10,7 +10,8 @@ import httpx
 from .provider_secrets import SecretConfigurationError, decrypt_api_key
 
 
-async def stream_chat(provider: dict, model_id: str, messages: list, tools: list | None = None):
+async def stream_chat(provider: dict, model_id: str, messages: list, tools: list | None = None,
+                      max_tokens: int | None = None):
     """以 OpenAI 兼容 SSE 请求聊天，yield 文本或完整的工具调用组。"""
     if not model_id:
         yield {"type": "text", "text": "[配置错误] 这个聊天还没有选择模型"}
@@ -29,6 +30,8 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
     payload = {"model": model_id, "messages": messages, "stream": True}
     if tools:
         payload["tools"] = tools
+    if max_tokens is not None:
+        payload["max_tokens"] = max(1, int(max_tokens))
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "text/event-stream"}
 
     try:
