@@ -807,7 +807,8 @@ async def _study_read(passage: dict, chat_id: str) -> dict:
         "role": "user",
         "content": json.dumps({
             "book": passage["book_title"], "author": passage["author"],
-            "chapter": passage["chapter_title"], "passage": passage["text"],
+            "chapter": passage["chapter_title"], "source_sections": passage.get("sections", []),
+            "passage": passage["text"],
             "previous_reading_notes": notes,
             "passage_token_budget": passage["token_budget"],
         }, ensure_ascii=False),
