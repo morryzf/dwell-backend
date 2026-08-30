@@ -680,6 +680,9 @@ def config() -> dict:
         slot_state = {"date": today, "slots": []}
         db.setting_set("study_completed_slots", json.dumps(slot_state, ensure_ascii=False))
     completed = [item for item in slot_state.get("slots", []) if item in times]
+    model_provider_id = db.setting_get("study_model_provider_id", "").strip()
+    model_id = db.setting_get("study_model_id", "").strip()
+    model_provider = db.provider_get(model_provider_id) if model_provider_id else None
     return {
         "on": db.setting_get("study_on", "0") == "1",
         "times": times,
@@ -689,6 +692,9 @@ def config() -> dict:
         "reading_tokens": integer("study_reading_tokens", DEFAULT_READING_TOKENS,
                                   MIN_READING_TOKENS, MAX_READING_TOKENS),
         "chat_id": db.setting_get("study_chat_id", "").strip(),
+        "model_provider_id": model_provider_id,
+        "model_id": model_id,
+        "model_provider_name": (model_provider or {}).get("name", ""),
         "last_read": integer("study_last_read", 0, 0, 4_000_000_000),
         "last_status": db.setting_get("study_last_status", "idle"),
         "last_error": db.setting_get("study_last_error", ""),
@@ -730,6 +736,17 @@ def set_config(payload: dict) -> dict:
         if not chat_id or not db.chat_get(chat_id):
             raise ValueError("请选择一间仍然存在的聊天")
         db.setting_set("study_chat_id", chat_id)
+    if "model_provider_id" in payload or "model_id" in payload:
+        current = config()
+        provider_id = str(payload.get("model_provider_id", current["model_provider_id"]) or "").strip()
+        model_id = str(payload.get("model_id", current["model_id"]) or "").strip()[:200]
+        provider = db.provider_get(provider_id)
+        if not provider or not provider.get("enabled"):
+            raise ValueError("请选择一个已启用的书房模型供应商")
+        if not model_id or not any(item["model_id"] == model_id for item in db.provider_model_list(provider_id)):
+            raise ValueError("请选择模型目录中已有的书房模型")
+        db.setting_set("study_model_provider_id", provider_id)
+        db.setting_set("study_model_id", model_id)
     return config()
 
 

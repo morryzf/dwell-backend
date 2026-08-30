@@ -6300,11 +6300,12 @@ async function loadShelf() {
   nkSlug = ''; nkChapters = []; nkView = 'shelf';
   nkTocBtn.style.display = 'none';
   nkNote('正在开门…');
-  let books, prog, settings, activity, chats;
+  let books, prog, settings, activity, chats, modelCatalog;
   try {
-    [books, prog, settings, activity, chats] = await Promise.all([
+    [books, prog, settings, activity, chats, modelCatalog] = await Promise.all([
       nkGet('books'), nkGet('progress'), nkGet('settings'), nkGet('activity'),
       fetch('api/chats?scope=live', { cache: 'no-store' }).then(r => r.json()),
+      fetch('api/model-catalog', { cache: 'no-store' }).then(r => r.json()),
     ]);
   }
   catch (e) { return nkNote('书房那头没应声'); }
@@ -6312,6 +6313,7 @@ async function loadShelf() {
   settings = settings || {};
   activity = (activity && activity.items) || [];
   chats = (chats && chats.items) || [];
+  modelCatalog = modelCatalog || {};
 
   nkBody.innerHTML = '';
   nkBody.appendChild(nkHead('书房', books.length ? books.length + ' 本书在这里' : '先放一本 Cloudy 想读的书进来'));
@@ -6334,9 +6336,9 @@ async function loadShelf() {
   const toggle = document.createElement('button'); toggle.className = 'primary';
   toggle.textContent = settings.on ? '先暂停' : '打开自动阅读';
   toggle.onclick = async () => {
-    if (!settings.on && !settings.chat_id) {
+    if (!settings.on && (!settings.chat_id || !settings.model_id)) {
       form.classList.add('on');
-      note0('先在下面选择书房里的 Cloudy。');
+      note0('先在下面选择 Cloudy 的摘要来源和书房模型。');
       return;
     }
     toggle.disabled = true;
@@ -6348,7 +6350,7 @@ async function loadShelf() {
     } catch (e) { toggle.disabled = false; note0('（没有保存好）'); }
   };
   const tune = document.createElement('button'); tune.textContent = '阅读安排';
-  const run = document.createElement('button'); run.textContent = '现在读一会儿'; run.disabled = !books.length || !settings.chat_id;
+  const run = document.createElement('button'); run.textContent = '现在读一会儿'; run.disabled = !books.length || !settings.chat_id || !settings.model_id;
   run.onclick = async () => {
     run.disabled = true; run.textContent = '叫他去了…';
     try {
@@ -6376,6 +6378,19 @@ async function loadShelf() {
   }
   chatLabel.appendChild(chatSelect); form.appendChild(chatLabel);
 
+  const modelLabel = document.createElement('label'); modelLabel.textContent = '书房使用的模型';
+  const modelSelect = document.createElement('select');
+  const blankModel = document.createElement('option'); blankModel.value = ''; blankModel.textContent = '请选择模型';
+  modelSelect.appendChild(blankModel);
+  const enabledProviders = new Set((modelCatalog.providers || []).filter(p => p.enabled).map(p => p.id));
+  (modelCatalog.items || []).filter(item => enabledProviders.has(item.provider_id)).forEach(item => {
+    const option = document.createElement('option'); option.value = item.provider_id + '\u0000' + item.model_id;
+    option.textContent = (item.provider_name || '供应商') + ' · ' + item.model_id;
+    option.selected = item.provider_id === settings.model_provider_id && item.model_id === settings.model_id;
+    modelSelect.appendChild(option);
+  });
+  modelLabel.appendChild(modelSelect); form.appendChild(modelLabel);
+
   const timeLabel = document.createElement('label'); timeLabel.textContent = '每天准确在这些时间读';
   const timeList = document.createElement('div'); timeList.className = 'nk-time-list';
   const addTimeRow = value => {
@@ -6395,7 +6410,7 @@ async function loadShelf() {
   tokenInput.max = 12000; tokenInput.step = 500; tokenInput.value = settings.reading_tokens || 4000;
   tokenLabel.appendChild(tokenInput); form.appendChild(tokenLabel);
   const hint = document.createElement('div'); hint.className = 'nk-setting-hint';
-  hint.textContent = '填几个时间就是每天读几次。到点若分享本有你的新留言，他会先单独醒来回信，再进行这次阅读。普通延迟最多约两分钟，服务器长时间离线不会补读。';
+  hint.textContent = '填几个时间就是每天读几次。到点若分享本有你的新留言，会先以回信模式查看并回复；之后另起一次阅读模式继续读书。两次使用不同输入。普通延迟最多约两分钟，服务器长时间离线不会补读。';
   form.appendChild(hint);
 
   const save = document.createElement('button'); save.className = 'save'; save.textContent = '保存阅读安排';
@@ -6403,8 +6418,9 @@ async function loadShelf() {
     save.disabled = true;
     try {
       const exactTimes = [...timeList.querySelectorAll('input[type="time"]')].map(x => x.value).filter(Boolean);
+      const [model_provider_id, model_id] = modelSelect.value.split('\u0000');
       const r = await fetch('api/nook/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ times: exactTimes, reading_tokens: +tokenInput.value, chat_id: chatSelect.value }) });
+        body: JSON.stringify({ times: exactTimes, reading_tokens: +tokenInput.value, chat_id: chatSelect.value, model_provider_id, model_id }) });
       const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
       loadShelf();
     } catch (e) { note0('（' + e.message + '）'); save.disabled = false; }
@@ -6512,7 +6528,7 @@ async function renderStudyShares() {
   try { d = await nkGet('shares'); } catch (e) { return nkNote('分享本这会儿打不开'); }
   const items = (d && d.items) || [];
   nkBody.innerHTML = '';
-  nkBody.appendChild(nkHead('想和小猫分享的', '不是即时聊天。你留的话，他下次来书房才会看到。'));
+  nkBody.appendChild(nkHead('想和小猫分享的', '不是即时聊天。你留话后，他会在下一次安排的书房时间先单独回信，再继续读书。'));
   if (!items.length) {
     const empty = document.createElement('div'); empty.className = 'nk-ct';
     empty.textContent = '本子还是空的。等 Cloudy 读到真想告诉你的地方，他会自己写在这里。';

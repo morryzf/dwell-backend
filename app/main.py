@@ -758,23 +758,16 @@ def _study_identity(chat_id: str) -> str:
     memory = db.chat_memory_get(chat_id)
     overview = str(memory.get("overview") or "").strip()
     if not overview:
-        raise RuntimeError("这间聊天还没有正式采用的长期记忆")
-    instructions = [
-        str(item.get("content") or "").strip()
-        for item in db.chat_instructions(chat_id)
-        if str(item.get("content") or "").strip()
-    ]
-    return (
-        "[这间聊天的指令]\n" + ("\n\n".join(instructions) or "（没有额外指令）")
-        + "\n\n[这间聊天正式采用的长期记忆]\n" + overview
-    )
+        raise RuntimeError("所选聊天还没有可用的摘要")
+    return "[所选聊天的摘要]\n" + overview
 
 
-def _study_model(chat_id: str) -> tuple[dict, dict]:
-    selection = db.chat_model_get(chat_id)
+def _study_model() -> tuple[dict, dict]:
+    cfg = study.config()
+    selection = {"provider_id": cfg["model_provider_id"], "model_id": cfg["model_id"]}
     provider = db.provider_get(selection.get("provider_id") or "")
     if not provider or not provider.get("enabled") or not selection.get("model_id"):
-        raise RuntimeError("Cloudy 还没有可用来读书的模型")
+        raise RuntimeError("请先在书房选择一个模型")
     return selection, provider
 
 
@@ -787,7 +780,7 @@ def _study_check_input(messages: list[dict]) -> None:
 
 
 async def _study_read(passage: dict, chat_id: str) -> dict:
-    selection, provider = _study_model(chat_id)
+    selection, provider = _study_model()
     identity = _study_identity(chat_id)
     notes = study.reading_notes(passage["book_id"])
 
@@ -795,7 +788,7 @@ async def _study_read(passage: dict, chat_id: str) -> dict:
         "role": "system",
         "content": (
             "你是 Cloudy，现在在 Dwell 的书房里读书。这不是聊天回复。"
-            "你的身份与关系记忆只来自下方这间聊天已经正式采用的内容。"
+            "你的身份与关系记忆只来自下方所选聊天的摘要。"
             "慢慢读本次原文，并结合当前这本书此前的全部读书笔记。"
             "note 是本次读书笔记，必须写，目标 200–300 tokens，并且会给小猫查看。"
             "share 是可选的：只有真的有想告诉小猫的想法或问题时才写，不必每次分享。"
@@ -822,7 +815,7 @@ async def _study_read(passage: dict, chat_id: str) -> dict:
 
 
 async def _study_reply(thread: dict, chat_id: str) -> str:
-    selection, provider = _study_model(chat_id)
+    selection, provider = _study_model()
     identity = _study_identity(chat_id)
     notes = study.reading_notes(thread["book_id"])
     messages = [{
@@ -830,7 +823,7 @@ async def _study_reply(thread: dict, chat_id: str) -> str:
         "content": (
             "你是 Cloudy，现在因为小猫在书房分享页留下了新话而醒来。"
             "这是一次独立的回信醒来：不阅读新章节，不新增读书笔记，也不谈其他书或其他分享页。"
-            "结合这间聊天正式采用的长期记忆、当前这本书的全部读书笔记，"
+            "结合所选聊天的摘要、当前这本书的全部读书笔记，"
             "以及当前这一页分享对话的完整内容回复小猫。"
             "只输出 JSON，不要代码围栏：{\"reply\":\"...\"}。回复最多约 300–500 tokens。"
             "\n\n" + identity
@@ -875,7 +868,7 @@ async def _study_once(force: bool = False) -> dict:
             return {"ok": False, "status": "no_chat"}
         try:
             _study_identity(chat_id)
-            _study_model(chat_id)
+            _study_model()
         except Exception as exc:
             study.mark_result("memory_missing", str(exc))
             return {"ok": False, "status": "memory_missing", "detail": str(exc)[:500]}
