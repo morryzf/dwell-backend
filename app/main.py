@@ -2036,6 +2036,25 @@ async def nook_upload(file: UploadFile = File(...)):
     return {"ok": True, "book": item}
 
 
+@app.get("/api/nook/books/{book_id}/cover", dependencies=authed)
+async def nook_book_cover(book_id: str):
+    item = study.book_cover(book_id)
+    if not item:
+        raise HTTPException(404, "这本书没有自带封面")
+    data, media_type = item
+    return Response(content=data, media_type=media_type, headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.post("/api/nook/books/{book_id}/collection", dependencies=authed)
+async def nook_collect_book(book_id: str, payload: dict = Body(...)):
+    try:
+        if not study.collect_book(book_id, bool(payload.get("collected", True))):
+            raise HTTPException(404, "没有找到这本书")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True}
+
+
 @app.delete("/api/nook/books/{book_id}", dependencies=authed)
 async def nook_delete_book(book_id: str):
     if not study.delete_book(book_id):

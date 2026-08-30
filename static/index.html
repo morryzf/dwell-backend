@@ -1270,6 +1270,97 @@ html[data-theme="dark"] .composer {
   .nk-note-meta { font-size: 11.5px; color: var(--dim); margin-bottom: 8px; }
   .nk-note-text { font-size: 15px; line-height: 1.75; white-space: pre-wrap; }
 
+  /* Cloudy's study is a place, not another settings dashboard. */
+  #nookSheet.room .sheet { background: #120c0f; color: #eadfda; }
+  #nookSheet.room .grabber { background: rgba(235,220,213,.24); }
+  #nookSheet.room .head { color: #eadfda; background: rgba(18,12,15,.96); border-bottom-color: rgba(235,220,213,.08); }
+  #nookSheet.room .body { padding: 0; }
+  .nk-room {
+    position: relative; min-height: 100%; box-sizing: border-box; overflow: hidden;
+    padding: 24px clamp(14px,4vw,34px) calc(30px + env(safe-area-inset-bottom));
+    background: #1a0d10 url('assets/study/cloudy-study-backdrop-v1.jpg') center / cover fixed;
+    color: #eadfda;
+  }
+  .nk-room::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(180deg, rgba(9,5,7,.18), rgba(9,5,7,.48)),
+      radial-gradient(circle at 50% 42%, rgba(108,35,43,.18), transparent 55%); }
+  .nk-room-inner { position: relative; z-index: 1; width: min(100%, 680px); margin: 0 auto; }
+  .nk-room-title { text-align: center; margin: 2px 0 20px; }
+  .nk-room-title .eyebrow { font: 500 10px/1.2 inherit; letter-spacing: .28em; text-transform: uppercase;
+    color: rgba(234,223,218,.52); }
+  .nk-room-title h1 { margin: 8px 0 4px; font-family: var(--serif); font-size: clamp(27px,7vw,42px);
+    font-weight: 400; letter-spacing: .02em; color: #f0e4df; text-shadow: 0 2px 20px rgba(0,0,0,.5); }
+  .nk-room-title p { margin: 0; font-size: 12.5px; line-height: 1.65; color: rgba(234,223,218,.62); }
+  .nk-cabinet { position: relative; padding: 20px 16px 17px; border: 1px solid rgba(221,197,184,.16);
+    border-radius: 5px 5px 16px 16px;
+    background: linear-gradient(90deg, rgba(18,8,10,.96), rgba(54,23,25,.94) 18%, rgba(24,10,12,.96) 52%, rgba(58,25,27,.94) 82%, rgba(16,7,9,.97));
+    box-shadow: 0 28px 60px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.05), inset 0 0 36px rgba(0,0,0,.56); }
+  .nk-cabinet::before { content: ''; position: absolute; left: 10px; right: 10px; top: 8px; height: 4px;
+    border-radius: 999px; background: linear-gradient(90deg, #1a090c, #7b4942 45%, #261014 80%); opacity: .72; }
+  .nk-shelf-tier { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: clamp(7px,2vw,16px);
+    align-items: end; min-height: clamp(124px,34vw,188px); padding: 12px clamp(4px,1.6vw,12px) 8px;
+    border-bottom: 11px solid #1b090c; box-shadow: inset 0 -1px 0 rgba(210,157,143,.24), 0 8px 12px rgba(0,0,0,.5); }
+  .nk-shelf-tier + .nk-shelf-tier { margin-top: 10px; }
+  .nk-book-cover { position: relative; display: flex; align-items: center; justify-content: center; width: 100%;
+    aspect-ratio: 2 / 3; min-width: 0; padding: 0; border: 0; border-radius: 2px 4px 4px 2px; overflow: hidden;
+    color: #eee1d7; background: linear-gradient(145deg,#321018,#13090d 72%); box-shadow: -3px 2px 0 #090406, 4px 7px 13px rgba(0,0,0,.48);
+    transform-origin: bottom center; transition: transform 180ms cubic-bezier(.23,1,.32,1), filter 180ms ease; }
+  .nk-book-cover::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 2px 0 rgba(255,255,255,.08), inset -1px 0 rgba(0,0,0,.5); }
+  .nk-book-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .nk-book-cover .fallback { padding: 9px 6px; text-align: center; font-family: var(--serif); font-size: clamp(9px,2.5vw,14px);
+    line-height: 1.3; overflow-wrap: anywhere; }
+  .nk-book-cover .fallback small { display: block; margin-top: 7px; font: 500 8px/1.35 inherit;
+    letter-spacing: .08em; color: rgba(238,225,215,.56); }
+  @media (hover:hover) and (pointer:fine) { .nk-book-cover:hover { transform: translateY(-7px) rotate(-1deg); filter: brightness(1.08); } }
+  .nk-book-cover:active, .nk-room-object:active, .nk-room-primary:active { transform: scale(.97); }
+  .nk-empty-slot { width: 100%; aspect-ratio: 2/3; border: 1px dashed rgba(234,223,218,.09); border-radius: 3px;
+    background: rgba(3,1,2,.1); color: rgba(234,223,218,.26); display: grid; place-items: center; }
+  .nk-empty-slot.upload { cursor: pointer; transition: border-color 180ms ease, color 180ms ease; }
+  @media (hover:hover) and (pointer:fine) { .nk-empty-slot.upload:hover { border-color: rgba(234,223,218,.24); color: rgba(234,223,218,.58); } }
+  .nk-room-objects { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 18px 0 0; }
+  .nk-room-object { border: 1px solid rgba(234,223,218,.1); border-radius: 13px; padding: 11px 5px 9px;
+    color: rgba(234,223,218,.72); background: rgba(10,5,7,.52); -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
+    font: 500 10px/1.35 inherit; transition: transform 140ms cubic-bezier(.23,1,.32,1), background 180ms ease; }
+  .nk-room-object .ic { display: block; width: 22px; height: 22px; margin: 0 auto 7px; color: #bba19a; }
+  @media (hover:hover) and (pointer:fine) { .nk-room-object:hover { background: rgba(59,23,29,.68); } }
+  .nk-room-status { margin-top: 14px; padding: 12px 14px; border-left: 1px solid rgba(190,137,132,.34);
+    color: rgba(234,223,218,.58); font-size: 11.5px; line-height: 1.65; background: linear-gradient(90deg,rgba(25,9,13,.52),transparent); }
+  .nk-room-panel { position: relative; z-index: 1; width: min(100%,620px); margin: 0 auto; padding: 18px 16px 34px; }
+  .nk-room-panel .sh-head h1, .nk-room-panel .sh-head .sub { color: #eadfda; }
+  .nk-detail-hero { display: grid; grid-template-columns: 112px 1fr; gap: 20px; align-items: end; margin: 18px 0 22px; }
+  .nk-detail-cover { aspect-ratio: 2/3; border-radius: 3px 6px 6px 3px; overflow: hidden;
+    background: linear-gradient(145deg,#43151e,#12090c); box-shadow: -5px 4px 0 #080405, 10px 18px 35px rgba(0,0,0,.46); }
+  .nk-detail-cover img { width: 100%; height: 100%; object-fit: cover; }
+  .nk-detail-cover .fallback { height: 100%; display: grid; place-content: center; padding: 14px; text-align: center;
+    font-family: var(--serif); color: #eadfda; }
+  .nk-detail-copy h1 { margin: 0; font: 400 clamp(24px,6vw,36px)/1.15 var(--serif); color: #f0e4df; }
+  .nk-detail-copy .author { margin-top: 8px; font-size: 12px; color: rgba(234,223,218,.56); }
+  .nk-detail-progress { margin-top: 16px; color: rgba(234,223,218,.68); font-size: 12px; line-height: 1.6; }
+  .nk-detail-progress .nk-bar { background: rgba(234,223,218,.1); }
+  .nk-detail-progress .nk-bar i { background: #8f4c55; }
+  .nk-detail-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-bottom: 18px; }
+  .nk-detail-actions button, .nk-room-primary, .nk-room-quiet { border: 1px solid rgba(234,223,218,.1); border-radius: 12px; padding: 12px;
+    color: #eadfda; background: rgba(39,15,20,.78); font: 600 12px/1.3 inherit; }
+  .nk-detail-actions .primary, .nk-room-primary { background: #ddd0c7; color: #211014; }
+  .nk-room-list { display: grid; gap: 10px; }
+  .nk-collected-book { display: grid; grid-template-columns: 54px 1fr auto; gap: 12px; align-items: center;
+    padding: 10px; border: 1px solid rgba(234,223,218,.09); border-radius: 13px; background: rgba(13,6,8,.5); }
+  .nk-collected-book img, .nk-collected-book .mini-cover { width: 54px; aspect-ratio: 2/3; object-fit: cover; border-radius: 2px; }
+  .nk-collected-book .mini-cover { display: grid; place-content: center; text-align: center; padding: 4px; box-sizing: border-box;
+    background: #321018; color: #eadfda; font: 9px/1.2 var(--serif); }
+  .nk-collected-book .name { font-family: var(--serif); font-size: 15px; }
+  .nk-collected-book .meta { margin-top: 3px; font-size: 10.5px; color: rgba(234,223,218,.5); }
+  .nk-collected-book button { border: 0; color: #d9c8c0; background: rgba(234,223,218,.08); border-radius: 9px; padding: 9px; }
+  .nk-room-panel .nk-settings { display: grid; padding: 16px; border: 1px solid rgba(234,223,218,.1); border-radius: 15px;
+    background: rgba(13,6,8,.56); }
+  .nk-room-panel .nk-settings label, .nk-room-panel .nk-setting-hint { color: rgba(234,223,218,.56); }
+  .nk-room-panel .nk-settings input, .nk-room-panel .nk-settings select { color: #eadfda; background: rgba(234,223,218,.08); }
+  .nk-room-panel .nk-settings option { color: #1d1013; }
+  .nk-room-panel .nk-settings .save { color: #211014; background: #ddd0c7; }
+  @media (max-width:420px) { .nk-cabinet { padding-inline: 9px; } .nk-shelf-tier { gap: 7px; } .nk-detail-hero { grid-template-columns: 92px 1fr; gap: 16px; } }
+  @media (prefers-reduced-motion:reduce) { .nk-book-cover, .nk-room-object, .nk-room-primary { transition: opacity 160ms ease; } }
+
   .wh-list { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 10px; }
   .wh { max-width: 82%; padding: 12px 14px; border-radius: 16px; font-size: 15.5px;
     line-height: 1.68; white-space: pre-wrap; word-break: break-word;
@@ -6272,7 +6363,7 @@ async function repoOpenFile(path) {
   if (b) b.onclick = () => repoLoadTree(up);
 }
 
-let nkSlug = '', nkCh = 0, nkChapters = [], nkView = 'shelf';
+let nkSlug = '', nkCh = 0, nkChapters = [], nkView = 'shelf', nkDetailId = '';
 const nkMode = 2;
 const nkBody = document.getElementById('nookBody');
 const nkTocBtn = document.getElementById('nookToc');
@@ -6296,216 +6387,203 @@ function nkHead(title, sub) {
   return h;
 }
 
+function nkRoomMode(on) {
+  document.getElementById('nookSheet').classList.toggle('room', !!on);
+}
+
+function nkCover(book, detail) {
+  const cover = document.createElement(detail ? 'div' : 'button');
+  cover.className = detail ? 'nk-detail-cover' : 'nk-book-cover';
+  if (!detail) cover.type = 'button';
+  if (book.has_cover) {
+    const img = document.createElement('img');
+    img.src = 'api/nook/books/' + encodeURIComponent(book.id) + '/cover';
+    img.alt = '《' + (book.title || '未命名') + '》封面';
+    cover.appendChild(img);
+  } else {
+    const fallback = document.createElement('div'); fallback.className = 'fallback';
+    fallback.textContent = book.title || '未命名';
+    if (book.author) { const author = document.createElement('small'); author.textContent = book.author; fallback.appendChild(author); }
+    cover.appendChild(fallback);
+  }
+  return cover;
+}
+
+function nkRoomShell(panel) {
+  nkRoomMode(true); nkBody.innerHTML = ''; nkBody.scrollTop = 0;
+  const room = document.createElement('div'); room.className = 'nk-room';
+  room.appendChild(panel); nkBody.appendChild(room);
+}
+
+function nkRoomObject(icon, label, onclick) {
+  const b = document.createElement('button'); b.className = 'nk-room-object'; b.type = 'button';
+  b.appendChild(icEl(icon, 22));
+  const span = document.createElement('span'); span.textContent = label; b.appendChild(span);
+  b.onclick = onclick; return b;
+}
+
 async function loadShelf() {
-  nkSlug = ''; nkChapters = []; nkView = 'shelf';
+  nkSlug = ''; nkChapters = []; nkView = 'shelf'; nkDetailId = '';
   nkTocBtn.style.display = 'none';
   nkNote('正在开门…');
-  let books, prog, settings, activity, chats, modelCatalog;
+  let books, settings, activity;
   try {
-    [books, prog, settings, activity, chats, modelCatalog] = await Promise.all([
-      nkGet('books'), nkGet('progress'), nkGet('settings'), nkGet('activity'),
-      fetch('api/chats?scope=live', { cache: 'no-store' }).then(r => r.json()),
-      fetch('api/model-catalog', { cache: 'no-store' }).then(r => r.json()),
-    ]);
+    [books, settings, activity] = await Promise.all([nkGet('books'), nkGet('settings'), nkGet('activity')]);
   }
   catch (e) { return nkNote('书房那头没应声'); }
   if (!Array.isArray(books)) books = [];
   settings = settings || {};
   activity = (activity && activity.items) || [];
-  chats = (chats && chats.items) || [];
-  modelCatalog = modelCatalog || {};
+  const shelfBooks = books.filter(b => !b.collected).slice(0, 8);
+  const inner = document.createElement('div'); inner.className = 'nk-room-inner';
+  const title = document.createElement('div'); title.className = 'nk-room-title';
+  const eyebrow = document.createElement('div'); eyebrow.className = 'eyebrow'; eyebrow.textContent = "Cloudy's space";
+  const h = document.createElement('h1'); h.textContent = 'Cloudy 的书房';
+  const sub = document.createElement('p'); sub.textContent = shelfBooks.length ? '他正在慢慢读这些书。你可以进来看看。' : '书架空着，等你替他放一本想读的书。';
+  title.append(eyebrow, h, sub); inner.appendChild(title);
 
-  nkBody.innerHTML = '';
-  nkBody.appendChild(nkHead('书房', books.length ? books.length + ' 本书在这里' : '先放一本 Cloudy 想读的书进来'));
-
-  const studio = document.createElement('div');
-  studio.className = 'nk-study-card';
-  const top = document.createElement('div'); top.className = 'nk-study-top';
-  const copy = document.createElement('div'); copy.className = 'copy';
-  const title = document.createElement('div'); title.className = 'title';
-  title.textContent = settings.on ? 'Cloudy 会自己来读' : '自动阅读还没有打开';
-  const sub = document.createElement('div'); sub.className = 'sub';
-  sub.textContent = settings.on
-    ? ('今天读过 ' + (settings.count || 0) + '/' + (settings.daily_sessions || 0)
-      + ' 次 · ' + ((settings.times || []).join('、') || '还没设时间')
-      + ' · 每次约 ' + (settings.reading_tokens || 4000) + ' tokens')
-    : '打开后，Dwell 只会在你写下的准确时间叫醒他。';
-  copy.append(title, sub); top.appendChild(copy); studio.appendChild(top);
-
-  const actions = document.createElement('div'); actions.className = 'nk-study-actions';
-  const toggle = document.createElement('button'); toggle.className = 'primary';
-  toggle.textContent = settings.on ? '先暂停' : '打开自动阅读';
-  toggle.onclick = async () => {
-    if (!settings.on && (!settings.chat_id || !settings.model_id)) {
-      form.classList.add('on');
-      note0('先在下面选择 Cloudy 的摘要来源和书房模型。');
-      return;
-    }
-    toggle.disabled = true;
-    try {
-      const r = await fetch('api/nook/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ on: !settings.on }) });
-      if (!r.ok) throw 0;
-      loadShelf();
-    } catch (e) { toggle.disabled = false; note0('（没有保存好）'); }
-  };
-  const tune = document.createElement('button'); tune.textContent = '阅读安排';
-  const run = document.createElement('button'); run.textContent = '现在读一会儿'; run.disabled = !books.length || !settings.chat_id || !settings.model_id;
-  run.onclick = async () => {
-    run.disabled = true; run.textContent = '叫他去了…';
-    try {
-      const r = await fetch('api/nook/run', { method: 'POST' });
-      if (!r.ok) throw 0;
-      note('Cloudy 醒来后会自己进书房，读完会在这里留下笔记。');
-      setTimeout(loadShelf, 3500);
-    } catch (e) { note0('（这次没有叫醒他）'); }
-    finally { run.disabled = false; run.textContent = '现在读一会儿'; }
-  };
-  actions.append(toggle, tune, run); studio.appendChild(actions);
-
-  const form = document.createElement('div'); form.className = 'nk-settings';
-  const chatLabel = document.createElement('label'); chatLabel.textContent = '书房里的 Cloudy 来自';
-  const chatSelect = document.createElement('select');
-  chats.forEach(chat => {
-    const option = document.createElement('option'); option.value = chat.id;
-    option.textContent = chat.name || '新对话';
-    option.selected = chat.id === settings.chat_id || (!settings.chat_id && chat.current);
-    chatSelect.appendChild(option);
-  });
-  if (!chats.length) {
-    const option = document.createElement('option'); option.value = ''; option.textContent = '还没有聊天';
-    chatSelect.appendChild(option);
-  }
-  chatLabel.appendChild(chatSelect); form.appendChild(chatLabel);
-
-  const modelLabel = document.createElement('label'); modelLabel.textContent = '书房使用的模型';
-  const modelSelect = document.createElement('select');
-  const blankModel = document.createElement('option'); blankModel.value = ''; blankModel.textContent = '请选择模型';
-  modelSelect.appendChild(blankModel);
-  const enabledProviders = new Set((modelCatalog.providers || []).filter(p => p.enabled).map(p => p.id));
-  (modelCatalog.items || []).filter(item => enabledProviders.has(item.provider_id)).forEach(item => {
-    const option = document.createElement('option'); option.value = item.provider_id + '\u0000' + item.model_id;
-    option.textContent = (item.provider_name || '供应商') + ' · ' + item.model_id;
-    option.selected = item.provider_id === settings.model_provider_id && item.model_id === settings.model_id;
-    modelSelect.appendChild(option);
-  });
-  modelLabel.appendChild(modelSelect); form.appendChild(modelLabel);
-
-  const timeLabel = document.createElement('label'); timeLabel.textContent = '每天准确在这些时间读';
-  const timeList = document.createElement('div'); timeList.className = 'nk-time-list';
-  const addTimeRow = value => {
-    const row = document.createElement('div'); row.className = 'nk-time-row';
-    const input = document.createElement('input'); input.type = 'time'; input.value = value || '20:00';
-    const del = document.createElement('button'); del.type = 'button'; del.title = '删掉这个时间'; del.textContent = '×';
-    del.onclick = () => { if (timeList.children.length > 1) row.remove(); };
-    row.append(input, del); timeList.appendChild(row);
-  };
-  (settings.times || ['10:30', '16:00', '22:00']).forEach(addTimeRow);
-  const addTime = document.createElement('button'); addTime.type = 'button'; addTime.className = 'nk-time-add';
-  addTime.textContent = '＋ 再加一次'; addTime.onclick = () => addTimeRow('20:00');
-  timeLabel.append(timeList, addTime); form.appendChild(timeLabel);
-
-  const tokenLabel = document.createElement('label'); tokenLabel.textContent = '每次原文最多读取 tokens';
-  const tokenInput = document.createElement('input'); tokenInput.type = 'number'; tokenInput.min = 1000;
-  tokenInput.max = 12000; tokenInput.step = 500; tokenInput.value = settings.reading_tokens || 4000;
-  tokenLabel.appendChild(tokenInput); form.appendChild(tokenLabel);
-  const hint = document.createElement('div'); hint.className = 'nk-setting-hint';
-  hint.textContent = '填几个时间就是每天读几次。到点若分享本有你的新留言，会先以回信模式查看并回复；之后另起一次阅读模式继续读书。两次使用不同输入。普通延迟最多约两分钟，服务器长时间离线不会补读。';
-  form.appendChild(hint);
-
-  const save = document.createElement('button'); save.className = 'save'; save.textContent = '保存阅读安排';
-  save.onclick = async () => {
-    save.disabled = true;
-    try {
-      const exactTimes = [...timeList.querySelectorAll('input[type="time"]')].map(x => x.value).filter(Boolean);
-      const [model_provider_id, model_id] = modelSelect.value.split('\u0000');
-      const r = await fetch('api/nook/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ times: exactTimes, reading_tokens: +tokenInput.value, chat_id: chatSelect.value, model_provider_id, model_id }) });
-      const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
-      loadShelf();
-    } catch (e) { note0('（' + e.message + '）'); save.disabled = false; }
-  };
-  form.appendChild(save); studio.appendChild(form);
-  tune.onclick = () => form.classList.toggle('on');
-  nkBody.appendChild(studio);
-
-  const shelfActions = document.createElement('div'); shelfActions.className = 'nk-study-actions';
-  const upload = document.createElement('button'); upload.className = 'nk-upload'; upload.textContent = '放一本 EPUB 进来';
+  const cabinet = document.createElement('div'); cabinet.className = 'nk-cabinet';
   const input = document.createElement('input'); input.type = 'file'; input.accept = '.epub,application/epub+zip'; input.hidden = true;
-  upload.onclick = () => input.click();
   input.onchange = async () => {
     const file = input.files && input.files[0]; if (!file) return;
-    upload.disabled = true; upload.textContent = '正在整理《' + file.name.replace(/\.epub$/i, '') + '》…';
+    nkNote('正在把《' + file.name.replace(/\.epub$/i, '') + '》放上书架…');
     const data = new FormData(); data.append('file', file);
     try {
       const r = await fetch('api/nook/books', { method: 'POST', body: data });
       const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有放进去');
       loadShelf();
-    } catch (e) { note0('（' + e.message + '）'); upload.disabled = false; upload.textContent = '放一本 EPUB 进来'; }
+    } catch (e) { note0('（' + e.message + '）'); setTimeout(loadShelf, 1800); }
   };
-  const shares = document.createElement('button'); shares.className = 'nk-share-open'; shares.textContent = '想和小猫分享的';
-  shares.onclick = renderStudyShares;
-  const notes = document.createElement('button'); notes.className = 'nk-share-open'; notes.textContent = 'Cloudy 的读书笔记';
-  notes.onclick = renderReadingNotes;
-  shelfActions.append(upload, notes, shares, input); nkBody.appendChild(shelfActions);
-
-  const wrap = document.createElement('div');
-  wrap.className = 'nk-shelf';
-  const 读过的 = books.filter(b => b.last_read).length;
-  books.forEach(b => {
-    const chs = b.chapters || [], total = chs.length || 1;
-    const pr = (prog && prog[b.slug]) || {};
-    const ch = Math.max(0, Math.min(pr.ch || 0, total - 1));
-    const started = !!(b.last_read || pr.ch || pr.offset || pr.finished);
-    const row = document.createElement('div'); row.className = 'nk-book-row';
-    const btn = document.createElement('button');
-    btn.className = 'nk-book';
-    const t = document.createElement('div'); t.className = 't';
-    t.textContent = b.title || b.slug;
-    const a = document.createElement('div'); a.className = 'a';
-    a.textContent = started
-      ? ((pr.finished ? '读完了 · ' : 'Cloudy 读到 ') + (chs[ch] || ('第 ' + (ch + 1) + ' 节')) + ' · 共 ' + total + ' 节')
-      : ('还没开始 · 共 ' + total + ' 节');
-    const bar = document.createElement('div'); bar.className = 'nk-bar';
-    const i = document.createElement('i');
-    i.style.width = Math.round((started ? ch + 1 : 0) / total * 100) + '%';
-    bar.appendChild(i);
-    btn.append(t, a, bar);
-    btn.onclick = () => openChapter(b.slug, ch);
-    const del = document.createElement('button'); del.className = 'nk-book-del'; del.title = '移走这本书';
-    del.appendChild(icEl('trash', 15));
-    del.onclick = async () => {
-      if (!confirm('把《' + (b.title || b.slug) + '》和它的笔记一起移出书房吗？')) return;
-      const r = await fetch('api/nook/books/' + encodeURIComponent(b.slug), { method: 'DELETE' });
-      if (r.ok) loadShelf(); else note0('（没有移走）');
-    };
-    row.append(btn, del); wrap.appendChild(row);
-  });
-  if (!books.length) {
-    const empty = document.createElement('div'); empty.className = 'nk-ct';
-    empty.textContent = '书架还空着。EPUB 放进来后，Cloudy 会一次读一点，不会一口气读完。';
-    wrap.appendChild(empty);
+  for (let tier = 0; tier < 2; tier++) {
+    const row = document.createElement('div'); row.className = 'nk-shelf-tier';
+    for (let slot = 0; slot < 4; slot++) {
+      const index = tier * 4 + slot, book = shelfBooks[index];
+      if (book) {
+        const cover = nkCover(book, false); cover.title = book.title || '打开这本书';
+        cover.onclick = () => renderBookDetail(book.id); row.appendChild(cover);
+      } else {
+        const empty = document.createElement('button'); empty.className = 'nk-empty-slot'; empty.type = 'button';
+        if (index === shelfBooks.length) {
+          empty.classList.add('upload'); empty.title = '放一本 EPUB 进来'; empty.appendChild(icEl('plus', 19)); empty.onclick = () => input.click();
+        } else { empty.disabled = true; }
+        row.appendChild(empty);
+      }
+    }
+    cabinet.appendChild(row);
   }
-  nkBody.appendChild(wrap);
+  cabinet.appendChild(input); inner.appendChild(cabinet);
 
-  if (activity.length) {
-    const recent = document.createElement('div'); recent.className = 'nk-activity';
-    const h = document.createElement('h2'); h.textContent = '最近在书房'; recent.appendChild(h);
-    activity.slice(0, 8).forEach(it => {
-      const a = document.createElement('div'); a.className = 'nk-act';
-      const s = document.createElement('div'); s.className = 's'; s.textContent = it.summary;
-      const t = document.createElement('time'); t.textContent = it.ts || '';
-      a.append(s, t); recent.appendChild(a);
-    });
-    nkBody.appendChild(recent);
-  }
+  const objects = document.createElement('div'); objects.className = 'nk-room-objects';
+  objects.append(
+    nkRoomObject('pen', '读书笔记', () => renderReadingNotes()),
+    nkRoomObject('heartIc', '分享本', () => renderStudyShares()),
+    nkRoomObject('filePlus', '收藏', renderCollection),
+    nkRoomObject('clock', '阅读安排', renderStudySettings),
+  );
+  inner.appendChild(objects);
+  const status = document.createElement('div'); status.className = 'nk-room-status';
+  const schedule = settings.on ? ('今天读过 ' + (settings.count || 0) + '/' + (settings.daily_sessions || 0) + ' 次') : '阅读安排暂时关着';
+  status.textContent = schedule + (activity[0] ? ' · ' + activity[0].summary : ' · 这里还很安静');
+  inner.appendChild(status); nkRoomShell(inner);
 }
 
-async function renderReadingNotes() {
-  nkSlug = ''; nkView = 'notes'; nkTocBtn.style.display = 'none'; nkNote('正在翻读书笔记…');
+async function renderBookDetail(bookId) {
+  nkView = 'detail'; nkDetailId = bookId; nkSlug = ''; nkTocBtn.style.display = 'none'; nkNote('正在抽出这本书…');
+  let books, prog;
+  try { [books, prog] = await Promise.all([nkGet('books'), nkGet('progress')]); }
+  catch (e) { return nkNote('这本书一时找不到'); }
+  const book = (books || []).find(b => b.id === bookId); if (!book) return loadShelf();
+  const pr = (prog && prog[book.id]) || {}; const chapters = book.chapters || []; const total = chapters.length || 1;
+  const ch = Math.max(0, Math.min(pr.ch || 0, total - 1)); const started = !!(book.last_read || pr.ch || pr.offset || pr.finished);
+  const panel = document.createElement('div'); panel.className = 'nk-room-panel';
+  const hero = document.createElement('div'); hero.className = 'nk-detail-hero'; hero.appendChild(nkCover(book, true));
+  const copy = document.createElement('div'); copy.className = 'nk-detail-copy';
+  const title = document.createElement('h1'); title.textContent = book.title || '未命名';
+  const author = document.createElement('div'); author.className = 'author'; author.textContent = book.author || '作者不详';
+  const progress = document.createElement('div'); progress.className = 'nk-detail-progress';
+  progress.textContent = started ? (pr.finished ? 'Cloudy 已经读完了' : 'Cloudy 读到：' + (chapters[ch] || ('第 ' + (ch + 1) + ' 节'))) : 'Cloudy 还没有开始读';
+  const bar = document.createElement('div'); bar.className = 'nk-bar'; const fill = document.createElement('i');
+  fill.style.width = Math.round((started ? ch + 1 : 0) / total * 100) + '%'; bar.appendChild(fill); progress.appendChild(bar);
+  copy.append(title, author, progress); hero.appendChild(copy); panel.appendChild(hero);
+  const actions = document.createElement('div'); actions.className = 'nk-detail-actions';
+  const read = document.createElement('button'); read.className = 'primary'; read.textContent = '翻开这本书'; read.onclick = () => openChapter(book.id, ch);
+  const notes = document.createElement('button'); notes.textContent = '他的读书笔记'; notes.onclick = () => renderReadingNotes(book.id);
+  const shares = document.createElement('button'); shares.textContent = '这本书的分享本'; shares.onclick = () => renderStudyShares(book.id);
+  const collect = document.createElement('button'); collect.textContent = book.collected ? '放回书架' : '收进收藏';
+  collect.onclick = async () => {
+    collect.disabled = true;
+    try {
+      const r = await fetch('api/nook/books/' + encodeURIComponent(book.id) + '/collection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ collected: !book.collected }) });
+      const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有收好');
+      loadShelf();
+    } catch (e) { note0('（' + e.message + '）'); collect.disabled = false; }
+  };
+  actions.append(read, notes, shares, collect); panel.appendChild(actions);
+  const remove = document.createElement('button'); remove.className = 'nk-room-quiet'; remove.textContent = '把这本书和它的笔记移出书房';
+  remove.onclick = async () => {
+    if (!confirm('把《' + (book.title || '这本书') + '》和它的笔记一起移出书房吗？')) return;
+    const r = await fetch('api/nook/books/' + encodeURIComponent(book.id), { method: 'DELETE' });
+    if (r.ok) loadShelf(); else note0('（没有移走）');
+  };
+  panel.appendChild(remove); nkRoomShell(panel);
+}
+
+async function renderCollection() {
+  nkView = 'collection'; nkDetailId = ''; nkTocBtn.style.display = 'none'; nkNote('正在打开收藏…');
+  let books; try { books = await nkGet('books'); } catch (e) { return nkNote('收藏这会儿打不开'); }
+  const items = (books || []).filter(b => b.collected); const panel = document.createElement('div'); panel.className = 'nk-room-panel';
+  panel.appendChild(nkHead('收藏', '暂时不放在书架上的书，内容和笔记都还留着。'));
+  const list = document.createElement('div'); list.className = 'nk-room-list';
+  items.forEach(book => {
+    const row = document.createElement('div'); row.className = 'nk-collected-book';
+    const cover = book.has_cover ? document.createElement('img') : document.createElement('div');
+    if (book.has_cover) { cover.src = 'api/nook/books/' + encodeURIComponent(book.id) + '/cover'; cover.alt = ''; }
+    else { cover.className = 'mini-cover'; cover.textContent = book.title || '未命名'; }
+    const copy = document.createElement('button'); copy.style.cssText = 'border:0;background:none;color:inherit;text-align:left;padding:0';
+    const name = document.createElement('div'); name.className = 'name'; name.textContent = book.title || '未命名';
+    const meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = book.author || '作者不详'; copy.append(name, meta); copy.onclick = () => renderBookDetail(book.id);
+    const restore = document.createElement('button'); restore.textContent = '放回'; restore.onclick = async () => {
+      const r = await fetch('api/nook/books/' + encodeURIComponent(book.id) + '/collection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ collected: false }) });
+      const d = await r.json(); if (!r.ok || !d.ok) return note0('（' + (d.detail || '书架放不下了') + '）'); renderCollection();
+    };
+    row.append(cover, copy, restore); list.appendChild(row);
+  });
+  if (!items.length) { const empty = document.createElement('div'); empty.className = 'nk-room-status'; empty.textContent = '还没有收进收藏的书。'; list.appendChild(empty); }
+  panel.appendChild(list); nkRoomShell(panel);
+}
+
+async function renderStudySettings() {
+  nkView = 'settings'; nkDetailId = ''; nkTocBtn.style.display = 'none'; nkNote('正在打开阅读安排…');
+  let settings, chats, modelCatalog, books;
+  try { [settings, chats, modelCatalog, books] = await Promise.all([nkGet('settings'), fetch('api/chats?scope=live',{cache:'no-store'}).then(r=>r.json()), fetch('api/model-catalog',{cache:'no-store'}).then(r=>r.json()), nkGet('books')]); }
+  catch (e) { return nkNote('阅读安排这会儿打不开'); }
+  settings = settings || {}; chats = (chats && chats.items) || []; modelCatalog = modelCatalog || {}; books = books || [];
+  const panel = document.createElement('div'); panel.className = 'nk-room-panel'; panel.appendChild(nkHead('阅读安排', '藏在书房小物件里的设置。只有你来决定他什么时候读、一次读多少。'));
+  const form = document.createElement('div'); form.className = 'nk-settings on';
+  const chatLabel = document.createElement('label'); chatLabel.textContent = '使用哪段聊天的摘要'; const chatSelect = document.createElement('select');
+  chats.forEach(chat => { const o=document.createElement('option'); o.value=chat.id; o.textContent=chat.name||'新对话'; o.selected=chat.id===settings.chat_id||(!settings.chat_id&&chat.current); chatSelect.appendChild(o); });
+  if (!chats.length) { const o=document.createElement('option'); o.value=''; o.textContent='还没有聊天'; chatSelect.appendChild(o); } chatLabel.appendChild(chatSelect); form.appendChild(chatLabel);
+  const modelLabel=document.createElement('label'); modelLabel.textContent='书房使用的模型'; const modelSelect=document.createElement('select');
+  const blank=document.createElement('option'); blank.value=''; blank.textContent='请选择模型'; modelSelect.appendChild(blank);
+  const enabled=new Set((modelCatalog.providers||[]).filter(p=>p.enabled).map(p=>p.id));
+  (modelCatalog.items||[]).filter(x=>enabled.has(x.provider_id)).forEach(x=>{ const o=document.createElement('option'); o.value=x.provider_id+'\u0000'+x.model_id; o.textContent=(x.provider_name||'供应商')+' · '+x.model_id; o.selected=x.provider_id===settings.model_provider_id&&x.model_id===settings.model_id; modelSelect.appendChild(o); });
+  modelLabel.appendChild(modelSelect); form.appendChild(modelLabel);
+  const timeLabel=document.createElement('label'); timeLabel.textContent='每天准确在这些时间读'; const timeList=document.createElement('div'); timeList.className='nk-time-list';
+  const addTimeRow=value=>{ const row=document.createElement('div'); row.className='nk-time-row'; const input=document.createElement('input'); input.type='time'; input.value=value||'20:00'; const del=document.createElement('button'); del.type='button'; del.textContent='×'; del.onclick=()=>{if(timeList.children.length>1)row.remove();}; row.append(input,del); timeList.appendChild(row); };
+  (settings.times&&settings.times.length?settings.times:['20:00']).forEach(addTimeRow); const add=document.createElement('button'); add.type='button'; add.className='nk-time-add'; add.textContent='＋ 再加一次'; add.onclick=()=>addTimeRow('20:00'); timeLabel.append(timeList,add); form.appendChild(timeLabel);
+  const tokenLabel=document.createElement('label'); tokenLabel.textContent='每次原文最多读取 tokens'; const tokenInput=document.createElement('input'); tokenInput.type='number'; tokenInput.min=1000; tokenInput.max=12000; tokenInput.step=500; tokenInput.value=settings.reading_tokens||4000; tokenLabel.appendChild(tokenInput); form.appendChild(tokenLabel);
+  const hint=document.createElement('div'); hint.className='nk-setting-hint'; hint.textContent='有新留言时，会先单独回信，再另起一次阅读。两次使用不同输入。'; form.appendChild(hint);
+  const save=document.createElement('button'); save.className='save'; save.textContent='保存阅读安排'; save.onclick=async()=>{ save.disabled=true; try { const times=[...timeList.querySelectorAll('input[type="time"]')].map(x=>x.value).filter(Boolean); const parts=modelSelect.value.split('\u0000'); const r=await fetch('api/nook/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({times,reading_tokens:+tokenInput.value,chat_id:chatSelect.value,model_provider_id:parts[0]||'',model_id:parts[1]||''})}); const d=await r.json(); if(!r.ok||!d.ok)throw new Error(d.detail||'没有保存'); renderStudySettings(); } catch(e){ note0('（'+e.message+'）'); save.disabled=false; } }; form.appendChild(save); panel.appendChild(form);
+  const controls=document.createElement('div'); controls.className='nk-detail-actions';
+  const toggle=document.createElement('button'); toggle.className='primary'; toggle.textContent=settings.on?'暂停定时阅读':'打开定时阅读'; toggle.onclick=async()=>{ if(!settings.on&&(!settings.chat_id||!settings.model_id))return note0('（先选择摘要来源和模型）'); toggle.disabled=true; const r=await fetch('api/nook/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:!settings.on})}); if(r.ok)renderStudySettings(); else {toggle.disabled=false;note0('（没有保存好）');} };
+  const run=document.createElement('button'); run.textContent='现在读一会儿'; run.disabled=!books.some(b=>!b.collected)||!settings.chat_id||!settings.model_id; run.onclick=async()=>{run.disabled=true;run.textContent='叫他去了…';try{const r=await fetch('api/nook/run',{method:'POST'});if(!r.ok)throw 0;note('Cloudy 醒来后会自己进书房。');setTimeout(renderStudySettings,3000);}catch(e){note0('（这次没有叫醒他）');run.disabled=false;run.textContent='现在读一会儿';}}; controls.append(toggle,run); panel.appendChild(controls); nkRoomShell(panel);
+}
+
+async function renderReadingNotes(bookId) {
+  nkSlug = ''; nkView = 'notes'; nkDetailId = bookId || ''; nkRoomMode(false); nkTocBtn.style.display = 'none'; nkNote('正在翻读书笔记…');
   let d;
   try { d = await nkGet('reading-notes'); } catch (e) { return nkNote('读书笔记这会儿打不开'); }
-  const items = (d && d.items) || [];
+  const items = ((d && d.items) || []).filter(it => !bookId || it.book_id === bookId);
   nkBody.innerHTML = '';
   nkBody.appendChild(nkHead('Cloudy 的读书笔记', '这是读完每一小段留下的正式笔记，你可以进来看。'));
   if (!items.length) {
@@ -6522,11 +6600,11 @@ async function renderReadingNotes() {
   });
 }
 
-async function renderStudyShares() {
-  nkSlug = ''; nkView = 'shares'; nkTocBtn.style.display = 'none'; nkNote('正在翻分享本…');
+async function renderStudyShares(bookId) {
+  nkSlug = ''; nkView = 'shares'; nkDetailId = bookId || ''; nkRoomMode(false); nkTocBtn.style.display = 'none'; nkNote('正在翻分享本…');
   let d;
   try { d = await nkGet('shares'); } catch (e) { return nkNote('分享本这会儿打不开'); }
-  const items = (d && d.items) || [];
+  const items = ((d && d.items) || []).filter(it => !bookId || it.book_id === bookId);
   nkBody.innerHTML = '';
   nkBody.appendChild(nkHead('想和小猫分享的', '不是即时聊天。你留话后，他会在下一次安排的书房时间先单独回信，再继续读书。'));
   if (!items.length) {
@@ -6557,7 +6635,7 @@ async function renderStudyShares() {
         const r = await fetch('api/nook/shares/' + encodeURIComponent(it.id) + '/reply', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: value }),
         });
-        if (!r.ok) throw 0; renderStudyShares();
+        if (!r.ok) throw 0; renderStudyShares(bookId);
       } catch (e) { go.disabled = false; note0('（这句没有夹进本子）'); }
     };
     say.append(ta, go); card.appendChild(say); nkBody.appendChild(card);
@@ -6565,7 +6643,7 @@ async function renderStudyShares() {
 }
 
 async function openChapter(slug, idx) {
-  nkView = 'chapter';
+  nkView = 'chapter'; nkDetailId = slug; nkRoomMode(false);
   nkNote('翻过去…');
   let d;
   try { d = await nkGet('chapter/' + encodeURIComponent(slug) + '/' + idx); }
@@ -6772,8 +6850,9 @@ function openAnno(anchor, fresh) {
 
 nkTocBtn.onclick = openToc;
 nkBackBtn.onclick = () => {
-  if (nkView !== 'shelf') return loadShelf(); // 在书里或分享本 → 退回书架
-  sheets.nook.classList.remove('open');       // 在书架 → 关掉这一页
+  if ((nkView === 'chapter' || nkView === 'notes' || nkView === 'shares') && nkDetailId) return renderBookDetail(nkDetailId);
+  if (nkView !== 'shelf') return loadShelf();
+  nkRoomMode(false); sheets.nook.classList.remove('open');
 };
 document.getElementById('navNook').onclick = () => {
   closeDrawer(); sheets.nook.classList.add('open'); loadShelf();
