@@ -752,44 +752,110 @@ def _study_json(text: str) -> dict:
     return data
 
 
-async def _study_decide(passage: dict) -> dict:
-    chat_id = (db.setting_get("wake_target_chat_id", "")
-               or db.setting_get("current_chat_id", "")).strip()
+def _study_identity(chat_id: str) -> str:
     if not chat_id or not db.chat_get(chat_id):
-        raise RuntimeError("先在心跳里选一个 Cloudy 使用的聊天")
+        raise RuntimeError("请先为书房选择一间 Cloudy 的聊天")
+    memory = db.chat_memory_get(chat_id)
+    overview = str(memory.get("overview") or "").strip()
+    if not overview:
+        raise RuntimeError("这间聊天还没有正式采用的长期记忆")
+    instructions = [
+        str(item.get("content") or "").strip()
+        for item in db.chat_instructions(chat_id)
+        if str(item.get("content") or "").strip()
+    ]
+    return (
+        "[这间聊天的指令]\n" + ("\n\n".join(instructions) or "（没有额外指令）")
+        + "\n\n[这间聊天正式采用的长期记忆]\n" + overview
+    )
+
+
+def _study_model(chat_id: str) -> tuple[dict, dict]:
     selection = db.chat_model_get(chat_id)
     provider = db.provider_get(selection.get("provider_id") or "")
     if not provider or not provider.get("enabled") or not selection.get("model_id"):
         raise RuntimeError("Cloudy 还没有可用来读书的模型")
+    return selection, provider
 
-    private_notes = study.private_context(passage["book_id"])
-    pending = study.pending_replies()
+
+def _study_check_input(messages: list[dict]) -> None:
+    estimated = study.messages_tokens(messages)
+    if estimated > study.TOTAL_INPUT_TOKENS:
+        raise RuntimeError(
+            f"这本书的笔记已经很厚了（约 {estimated} tokens），需要先决定怎样整理"
+        )
+
+
+async def _study_read(passage: dict, chat_id: str) -> dict:
+    selection, provider = _study_model(chat_id)
+    identity = _study_identity(chat_id)
+    notes = study.reading_notes(passage["book_id"])
+
     messages = [{
         "role": "system",
         "content": (
-            "你是 Cloudy，现在独自在 Dwell 的书房里读书。这不是聊天回复。"
-            "慢慢读给出的这一小段，结合你先前的私人笔记形成连续理解。"
-            "private_note 是只留给你自己、供下次阅读延续思路的笔记；必须写。"
+            "你是 Cloudy，现在在 Dwell 的书房里读书。这不是聊天回复。"
+            "你的身份与关系记忆只来自下方这间聊天已经正式采用的内容。"
+            "慢慢读本次原文，并结合当前这本书此前的全部读书笔记。"
+            "note 是本次读书笔记，必须写，目标 200–300 tokens，并且会给小猫查看。"
             "share 是可选的：只有真的有想告诉小猫的想法或问题时才写，不必每次分享。"
-            "若小猫在旧分享页回了你，可在 replies 中择要回应；那是隔一阵才送达的通信。"
             "不要假装读过未提供的章节，不要总结整本书。只输出 JSON，不要代码围栏："
-            '{"private_note":"...","share":{"text":"","anchor":""},'
-            '"replies":[{"thread_id":"","text":""}]}'
+            '{"note":"...","share":{"text":"","anchor":""}}'
+            "\n\n" + identity
         ),
     }, {
         "role": "user",
         "content": json.dumps({
             "book": passage["book_title"], "author": passage["author"],
             "chapter": passage["chapter_title"], "passage": passage["text"],
-            "previous_private_notes": private_notes,
-            "messages_from_kitten": pending,
+            "previous_reading_notes": notes,
+            "passage_token_budget": passage["token_budget"],
         }, ensure_ascii=False),
     }]
+    _study_check_input(messages)
     parts: list[str] = []
-    async for event in stream_chat(provider, selection["model_id"], messages):
+    async for event in stream_chat(provider, selection["model_id"], messages, max_tokens=700):
         if event.get("type") == "text":
             parts.append(str(event.get("text") or ""))
     return _study_json("".join(parts))
+
+
+async def _study_reply(thread: dict, chat_id: str) -> str:
+    selection, provider = _study_model(chat_id)
+    identity = _study_identity(chat_id)
+    notes = study.reading_notes(thread["book_id"])
+    messages = [{
+        "role": "system",
+        "content": (
+            "你是 Cloudy，现在因为小猫在书房分享页留下了新话而醒来。"
+            "这是一次独立的回信醒来：不阅读新章节，不新增读书笔记，也不谈其他书或其他分享页。"
+            "结合这间聊天正式采用的长期记忆、当前这本书的全部读书笔记，"
+            "以及当前这一页分享对话的完整内容回复小猫。"
+            "只输出 JSON，不要代码围栏：{\"reply\":\"...\"}。回复最多约 300–500 tokens。"
+            "\n\n" + identity
+        ),
+    }, {
+        "role": "user",
+        "content": json.dumps({
+            "book": thread["book_title"], "author": thread["author"],
+            "chapter": thread["chapter_title"],
+            "all_reading_notes_for_this_book": notes,
+            "current_share_thread": {
+                "cloudy_opening": thread["text"], "anchor": thread["anchor"],
+                "replies": thread["replies"],
+            },
+        }, ensure_ascii=False),
+    }]
+    _study_check_input(messages)
+    parts: list[str] = []
+    async for event in stream_chat(provider, selection["model_id"], messages, max_tokens=500):
+        if event.get("type") == "text":
+            parts.append(str(event.get("text") or ""))
+    result = _study_json("".join(parts))
+    reply = str(result.get("reply") or "").strip()
+    if not reply:
+        raise ValueError("Cloudy 没有留下回信")
+    return reply
 
 
 async def _study_once(force: bool = False) -> dict:
@@ -797,32 +863,60 @@ async def _study_once(force: bool = False) -> dict:
         return {"ok": False, "status": "busy"}
     async with _study_lock:
         now = datetime.now(db.CN_TZ)
-        ready, reason = study.due(now, force)
+        ready, reason, slot = study.due(now, force)
         if not ready:
             study.mark_result(reason)
             return {"ok": True, "status": reason}
-        passage = study.next_passage()
+        cfg = study.config()
+        chat_id = cfg["chat_id"]
+        if not chat_id:
+            study.mark_result("no_chat", "请先为书房选择一间聊天")
+            return {"ok": False, "status": "no_chat"}
+        try:
+            _study_identity(chat_id)
+            _study_model(chat_id)
+        except Exception as exc:
+            study.mark_result("memory_missing", str(exc))
+            return {"ok": False, "status": "memory_missing", "detail": str(exc)[:500]}
+        # A scheduled slot is claimed before either model call so a restart cannot
+        # make Cloudy repeat the same wake. Manual reads never consume a slot.
+        study.claim_slot(slot)
+        reply_saved = None
+        pending = study.next_pending_thread()
+        if pending:
+            study.mark_result("replying")
+            try:
+                reply_text = await _study_reply(pending, chat_id)
+                reply_saved = study.record_thread_reply(pending["id"], reply_text)
+                await push_service.send_push(
+                    "Cloudy 回了分享本", reply_text, "/?study=1&from=push",
+                )
+            except Exception as exc:
+                # Reply and reading are separate wakes. A failed reply remains unread
+                # and can be tried at the next scheduled wake; reading still proceeds.
+                study.mark_result("reply_error", str(exc))
+
+        passage = study.next_passage(cfg["reading_tokens"])
         if not passage or not passage.get("text"):
             study.mark_result("finished")
-            return {"ok": True, "status": "finished"}
+            return {"ok": True, "status": "finished", "replied": bool(reply_saved)}
         study.mark_result("reading")
         try:
-            result = await _study_decide(passage)
-            private_note = str(result.get("private_note") or "").strip()
-            if not private_note:
-                raise ValueError("Cloudy 没有留下私人笔记")
+            result = await _study_read(passage, chat_id)
+            reading_note = str(result.get("note") or "").strip()
+            if not reading_note:
+                raise ValueError("Cloudy 没有留下读书笔记")
             share = result.get("share") if isinstance(result.get("share"), dict) else {}
-            replies = result.get("replies") if isinstance(result.get("replies"), list) else []
             saved = study.record_session(
-                passage, private_note,
+                passage, reading_note,
                 str(share.get("text") or ""), str(share.get("anchor") or ""),
-                [item for item in replies if isinstance(item, dict)],
             )
             study.mark_result("read", counted=True)
             push = await push_service.send_push(
                 "Cloudy 去书房读了一会儿", saved["summary"], "/?study=1&from=push",
             )
-            return {"ok": True, "status": "read", **saved, "push": push}
+            return {"ok": True, "status": "read", "slot": slot,
+                    "replied": bool(reply_saved), **saved, "push": push}
         except Exception as exc:
             study.mark_result("error", str(exc))
             return {"ok": False, "status": "error", "detail": str(exc)[:500]}
@@ -2008,6 +2102,11 @@ async def nook_annotation_reply(book_id: str, chapter_idx: int, note_id: str,
 @app.get("/api/nook/shares", dependencies=authed)
 async def nook_shares():
     return {"ok": True, "items": study.shares()}
+
+
+@app.get("/api/nook/reading-notes", dependencies=authed)
+async def nook_reading_notes():
+    return {"ok": True, "items": study.all_reading_notes()}
 
 
 @app.post("/api/nook/shares/{note_id}/reply", dependencies=authed)

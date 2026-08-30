@@ -1,4 +1,4 @@
-"""Cloudy's study: EPUB ingestion, reading progress, private notes and shared threads."""
+"""Cloudy's study: EPUB ingestion, reading progress, visible notes and shared threads."""
 
 import io
 import json
@@ -16,7 +16,10 @@ from . import db
 MAX_EPUB_BYTES = 25 * 1024 * 1024
 MAX_UNPACKED_BYTES = 60 * 1024 * 1024
 MAX_TEXT_BYTES = 12 * 1024 * 1024
-READING_CHUNK_CHARS = 4200
+DEFAULT_READING_TOKENS = 4000
+MIN_READING_TOKENS = 1000
+MAX_READING_TOKENS = 12000
+TOTAL_INPUT_TOKENS = 32000
 
 
 SCHEMA = """
@@ -145,6 +148,31 @@ class _Text(HTMLParser):
 def init_db() -> None:
     with db.conn() as cx:
         cx.executescript(SCHEMA)
+        # PR #68 called these private notes.  They are now the visible reading notebook;
+        # a genuinely private diary will be a separate feature later.
+        cx.execute("UPDATE study_notes SET kind='reading' WHERE kind='private'")
+
+
+def estimate_tokens(text: str) -> int:
+    """Conservative model-independent estimate for mixed English/CJK text.
+
+    Providers in Dwell can use different tokenizers, so an exact universal count is
+    impossible.  We keep a ten percent safety margin when selecting book text.
+    """
+    total = 0
+    for piece in re.findall(r"[A-Za-z0-9_]+|[\u3400-\u9fff\uf900-\ufaff]|[^\s]", text or ""):
+        if re.fullmatch(r"[A-Za-z0-9_]+", piece):
+            total += max(1, (len(piece) + 3) // 4)
+        else:
+            total += 1
+    return total
+
+
+def messages_tokens(messages: list[dict]) -> int:
+    total = 0
+    for item in messages:
+        total += 12 + estimate_tokens(str(item.get("content") or ""))
+    return total
 
 
 def _safe_member(path: str) -> str:
@@ -403,7 +431,77 @@ def pending_replies(limit: int = 20) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def next_passage() -> dict | None:
+def next_pending_thread() -> dict | None:
+    with db.conn() as cx:
+        pending = cx.execute(
+            """SELECT note_id FROM study_replies
+               WHERE who='user' AND seen_by_cloudy=0 ORDER BY made LIMIT 1"""
+        ).fetchone()
+        if not pending:
+            return None
+        note = cx.execute(
+            """SELECT n.*,b.title AS book_title,b.author,c.title AS chapter_title
+               FROM study_notes n JOIN study_books b ON b.id=n.book_id
+               LEFT JOIN study_chapters c ON c.book_id=n.book_id AND c.idx=n.chapter_idx
+               WHERE n.id=? AND n.kind='share'""", (pending["note_id"],)
+        ).fetchone()
+        if not note:
+            return None
+        replies = cx.execute(
+            "SELECT * FROM study_replies WHERE note_id=? ORDER BY made", (pending["note_id"],)
+        ).fetchall()
+    return {
+        **dict(note),
+        "replies": [{**dict(r), "ts": _fmt_ts(r["made"])} for r in replies],
+    }
+
+
+def record_thread_reply(note_id: str, text: str) -> dict:
+    text = text.strip()[:1600]
+    if not text:
+        raise ValueError("Cloudy 没有留下回信")
+    now = int(time.time())
+    with db.conn() as cx:
+        note = cx.execute(
+            """SELECT n.*,b.title AS book_title FROM study_notes n
+               JOIN study_books b ON b.id=n.book_id WHERE n.id=? AND n.kind='share'""",
+            (note_id,),
+        ).fetchone()
+        if not note:
+            raise KeyError(note_id)
+        row = {
+            "id": db.new_id(), "note_id": note_id, "who": "cloudy", "text": text,
+            "made": now, "seen_by_cloudy": 1,
+        }
+        cx.execute(
+            """INSERT INTO study_replies (id,note_id,who,text,made,seen_by_cloudy)
+               VALUES (:id,:note_id,:who,:text,:made,:seen_by_cloudy)""", row,
+        )
+        cx.execute(
+            "UPDATE study_replies SET seen_by_cloudy=1 WHERE note_id=? AND who='user'",
+            (note_id,),
+        )
+        summary = f"读了小猫在《{note['book_title']}》分享页留下的话，也回了一页"
+        cx.execute(
+            "INSERT INTO study_activity (id,book_id,chapter_idx,summary,made) VALUES (?,?,?,?,?)",
+            (db.new_id(), note["book_id"], note["chapter_idx"], summary, now),
+        )
+    return {"reply": row, "summary": summary, "book_id": note["book_id"]}
+
+
+def all_reading_notes(limit: int = 300) -> list[dict]:
+    with db.conn() as cx:
+        rows = cx.execute(
+            """SELECT n.*,b.title AS book_title,c.title AS chapter_title
+               FROM study_notes n JOIN study_books b ON b.id=n.book_id
+               LEFT JOIN study_chapters c ON c.book_id=n.book_id AND c.idx=n.chapter_idx
+               WHERE n.kind='reading' ORDER BY n.made DESC LIMIT ?""",
+            (max(1, min(limit, 1000)),),
+        ).fetchall()
+    return [{**dict(r), "ts": _fmt_ts(r["made"])} for r in rows]
+
+
+def next_passage(token_budget: int = DEFAULT_READING_TOKENS) -> dict | None:
     with db.conn() as cx:
         book = cx.execute(
             "SELECT * FROM study_books WHERE finished=0 ORDER BY last_read ASC,made ASC LIMIT 1"
@@ -420,33 +518,49 @@ def next_passage() -> dict | None:
         body = chapter_row["body"]
     if offset >= len(body):
         offset = 0
-    end = min(len(body), offset + READING_CHUNK_CHARS)
-    if end < len(body):
-        cut = body.rfind("\n", offset + READING_CHUNK_CHARS // 2, end)
+    token_budget = max(MIN_READING_TOKENS, min(int(token_budget), MAX_READING_TOKENS))
+    safe_budget = max(1, int(token_budget * .9))
+    remaining = body[offset:]
+    if estimate_tokens(remaining) <= safe_budget:
+        end = len(body)
+    else:
+        low, high = 1, len(remaining)
+        while low < high:
+            mid = (low + high + 1) // 2
+            if estimate_tokens(remaining[:mid]) <= safe_budget:
+                low = mid
+            else:
+                high = mid - 1
+        end = offset + low
+        paragraph = body.rfind("\n", offset + max(1, int(low * .7)), end)
+        sentence = max(body.rfind(". ", offset + max(1, int(low * .7)), end),
+                       body.rfind("。", offset + max(1, int(low * .7)), end))
+        cut = max(paragraph, sentence + 1 if sentence >= 0 else -1)
         if cut > offset:
             end = cut
+    passage_text = body[offset:end].strip()
     return {
         "book_id": book["id"], "book_title": book["title"], "author": book["author"],
         "chapter_idx": chapter_idx, "chapter_title": chapter_row["title"],
         "start_offset": offset, "end_offset": end, "chapter_length": len(body),
-        "chapter_count": book["chapter_count"], "text": body[offset:end].strip(),
+        "chapter_count": book["chapter_count"], "text": passage_text,
+        "estimated_tokens": estimate_tokens(passage_text), "token_budget": token_budget,
     }
 
 
-def private_context(book_id: str, limit: int = 12) -> list[dict]:
+def reading_notes(book_id: str) -> list[dict]:
     with db.conn() as cx:
         rows = cx.execute(
-            """SELECT n.text,n.anchor,n.chapter_idx,c.title AS chapter_title,n.made
+            """SELECT n.id,n.text,n.anchor,n.chapter_idx,c.title AS chapter_title,n.made
                FROM study_notes n LEFT JOIN study_chapters c
                ON c.book_id=n.book_id AND c.idx=n.chapter_idx
-               WHERE n.book_id=? AND n.kind='private' ORDER BY n.made DESC LIMIT ?""",
-            (book_id, max(1, min(limit, 30))),
+               WHERE n.book_id=? AND n.kind='reading' ORDER BY n.made""",
+            (book_id,),
         ).fetchall()
-    return [dict(r) for r in reversed(rows)]
+    return [{**dict(r), "ts": _fmt_ts(r["made"])} for r in rows]
 
 
-def record_session(passage: dict, private_note: str, share_text: str = "", share_anchor: str = "",
-                   thread_replies: list[dict] | None = None) -> dict:
+def record_session(passage: dict, reading_note: str, share_text: str = "", share_anchor: str = "") -> dict:
     now = int(time.time())
     book_id = passage["book_id"]
     next_chapter = passage["chapter_idx"]
@@ -460,31 +574,21 @@ def record_session(passage: dict, private_note: str, share_text: str = "", share
             finished = 1
     share_id = ""
     with db.conn() as cx:
-        private_row = (
+        note_row = (
             db.new_id(), book_id, passage["chapter_idx"], passage["text"][:220],
-            private_note.strip()[:5000], "private", "cloudy", now,
+            reading_note.strip()[:2400], "reading", "cloudy", now,
         )
         cx.execute(
             """INSERT INTO study_notes (id,book_id,chapter_idx,anchor,text,kind,who,made)
-               VALUES (?,?,?,?,?,?,?,?)""", private_row,
+               VALUES (?,?,?,?,?,?,?,?)""", note_row,
         )
         if share_text.strip():
             share_id = db.new_id()
             cx.execute(
                 """INSERT INTO study_notes (id,book_id,chapter_idx,anchor,text,kind,who,made)
                    VALUES (?,?,?,?,?,'share','cloudy',?)""",
-                (share_id, book_id, passage["chapter_idx"], share_anchor.strip()[:280], share_text.strip()[:5000], now),
+                (share_id, book_id, passage["chapter_idx"], share_anchor.strip()[:280], share_text.strip()[:1600], now),
             )
-        valid_notes = {r["id"] for r in cx.execute("SELECT id FROM study_notes WHERE kind='share'").fetchall()}
-        for item in thread_replies or []:
-            note_id = str(item.get("thread_id") or "")
-            text = str(item.get("text") or "").strip()[:4000]
-            if note_id in valid_notes and text:
-                cx.execute(
-                    """INSERT INTO study_replies (id,note_id,who,text,made,seen_by_cloudy)
-                       VALUES (?,?,'cloudy',?,?,1)""", (db.new_id(), note_id, text, now),
-                )
-        cx.execute("UPDATE study_replies SET seen_by_cloudy=1 WHERE who='user' AND seen_by_cloudy=0")
         cx.execute(
             """UPDATE study_books SET current_chapter=?,current_offset=?,finished=?,last_read=?,updated=?
                WHERE id=?""", (next_chapter, next_offset, finished, now, now, book_id),
@@ -492,10 +596,8 @@ def record_session(passage: dict, private_note: str, share_text: str = "", share
         summary = f"读了《{passage['book_title']}》的「{passage['chapter_title']}」"
         if share_id:
             summary += "，在分享本里留了一页"
-        elif thread_replies:
-            summary += "，也看了小猫的回话"
         else:
-            summary += "，给自己记了一页"
+            summary += "，写了一页读书笔记"
         cx.execute(
             "INSERT INTO study_activity (id,book_id,chapter_idx,summary,made) VALUES (?,?,?,?,?)",
             (db.new_id(), book_id, passage["chapter_idx"], summary, now),
@@ -520,62 +622,104 @@ def config() -> dict:
         except (TypeError, ValueError):
             return default
     today = db.today_str()
-    if db.setting_get("study_count_date", "") != today:
-        db.setting_set("study_count_date", today)
-        db.setting_set("study_count_today", "0")
+    raw_times = db.setting_get("study_read_times", '["10:30","16:00","22:00"]')
+    try:
+        times = normalize_times(json.loads(raw_times))
+    except Exception:
+        times = ["10:30", "16:00", "22:00"]
+    raw_slots = db.setting_get("study_completed_slots", "")
+    try:
+        slot_state = json.loads(raw_slots) if raw_slots else {}
+    except Exception:
+        slot_state = {}
+    if slot_state.get("date") != today:
+        slot_state = {"date": today, "slots": []}
+        db.setting_set("study_completed_slots", json.dumps(slot_state, ensure_ascii=False))
+    completed = [item for item in slot_state.get("slots", []) if item in times]
     return {
         "on": db.setting_get("study_on", "0") == "1",
-        "day_start": integer("study_day_start", 10, 0, 23),
-        "day_end": integer("study_day_end", 23, 1, 24),
-        "daily_sessions": integer("study_daily_sessions", 3, 1, 8),
-        "count": integer("study_count_today", 0, 0, 99),
+        "times": times,
+        "daily_sessions": len(times),
+        "count": len(completed),
+        "completed_slots": completed,
+        "reading_tokens": integer("study_reading_tokens", DEFAULT_READING_TOKENS,
+                                  MIN_READING_TOKENS, MAX_READING_TOKENS),
+        "chat_id": db.setting_get("study_chat_id", "").strip(),
         "last_read": integer("study_last_read", 0, 0, 4_000_000_000),
         "last_status": db.setting_get("study_last_status", "idle"),
         "last_error": db.setting_get("study_last_error", ""),
     }
 
 
-def set_config(payload: dict) -> dict:
-    if "on" in payload:
-        db.setting_set("study_on", "1" if bool(payload["on"]) else "0")
-    for field, low, high in (("day_start", 0, 23), ("day_end", 1, 24), ("daily_sessions", 1, 8)):
-        if field not in payload:
-            continue
-        try:
-            value = max(low, min(int(payload[field]), high))
-        except (TypeError, ValueError):
-            raise ValueError(f"{field} 不是有效数字")
-        db.setting_set("study_" + field, str(value))
-    result = config()
-    if result["day_start"] == result["day_end"]:
-        raise ValueError("开始和结束时间不能相同")
+def normalize_times(value) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("阅读时间必须是一组时间")
+    result = []
+    for raw in value:
+        match = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", str(raw).strip())
+        if not match:
+            raise ValueError("时间要写成 08:30 这样的格式")
+        result.append(match.group(1) + ":" + match.group(2))
+    result = sorted(set(result))
+    if not result:
+        raise ValueError("至少留下一个阅读时间")
+    if len(result) > 12:
+        raise ValueError("每天最多安排 12 次阅读")
     return result
 
 
-def due(now: datetime, force: bool = False) -> tuple[bool, str]:
+def set_config(payload: dict) -> dict:
+    if "on" in payload:
+        db.setting_set("study_on", "1" if bool(payload["on"]) else "0")
+    if "times" in payload:
+        db.setting_set("study_read_times", json.dumps(normalize_times(payload["times"]), ensure_ascii=False))
+    if "reading_tokens" in payload:
+        try:
+            value = int(payload["reading_tokens"])
+        except (TypeError, ValueError):
+            raise ValueError("原文 token 数不是有效数字")
+        if not MIN_READING_TOKENS <= value <= MAX_READING_TOKENS:
+            raise ValueError(f"每次原文请设在 {MIN_READING_TOKENS}–{MAX_READING_TOKENS} tokens")
+        db.setting_set("study_reading_tokens", str(value))
+    if "chat_id" in payload:
+        chat_id = str(payload["chat_id"] or "").strip()
+        if not chat_id or not db.chat_get(chat_id):
+            raise ValueError("请选择一间仍然存在的聊天")
+        db.setting_set("study_chat_id", chat_id)
+    return config()
+
+
+def due(now: datetime, force: bool = False) -> tuple[bool, str, str]:
     cfg = config()
     if not force and not cfg["on"]:
-        return False, "off"
+        return False, "off", ""
     if not books():
-        return False, "no_books"
-    if cfg["count"] >= cfg["daily_sessions"] and not force:
-        return False, "daily_limit"
-    start, end, hour = cfg["day_start"], cfg["day_end"], now.hour
-    in_window = start <= hour < end if start < end else (hour >= start or hour < end)
-    if not force and not in_window:
-        return False, "outside_window"
-    window_hours = (end - start) % 24 or 24
-    interval = max(30 * 60, int(window_hours * 3600 / cfg["daily_sessions"]))
-    if not force and cfg["last_read"] and int(now.timestamp()) - cfg["last_read"] < interval:
-        return False, "waiting"
-    return True, "ready"
+        return False, "no_books", ""
+    if force:
+        return True, "ready", "manual"
+    current = now.hour * 60 + now.minute
+    for slot in cfg["times"]:
+        hour, minute = (int(value) for value in slot.split(":"))
+        delta = current - (hour * 60 + minute)
+        # The background loop runs once a minute.  A two-minute grace window covers
+        # ordinary scheduling drift but deliberately does not catch up after downtime.
+        if 0 <= delta <= 2 and slot not in cfg["completed_slots"]:
+            return True, "ready", slot
+    return False, "waiting", ""
+
+
+def claim_slot(slot: str) -> None:
+    if not slot or slot == "manual":
+        return
+    cfg = config()
+    completed = sorted(set(cfg["completed_slots"] + [slot]))
+    db.setting_set("study_completed_slots", json.dumps({
+        "date": db.today_str(), "slots": completed,
+    }, ensure_ascii=False))
 
 
 def mark_result(status: str, error: str = "", counted: bool = False) -> None:
     db.setting_set("study_last_status", status)
     db.setting_set("study_last_error", error[:500])
     if counted:
-        cfg = config()
-        db.setting_set("study_count_today", str(cfg["count"] + 1))
         db.setting_set("study_last_read", str(int(time.time())))
-
