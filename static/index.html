@@ -1285,12 +1285,6 @@ html[data-theme="dark"] .composer {
     background: linear-gradient(180deg, rgba(9,5,7,.1), rgba(9,5,7,.34)),
       radial-gradient(circle at 50% 42%, rgba(108,35,43,.18), transparent 55%); }
   .nk-room-inner { position: relative; z-index: 1; width: min(100%, 680px); margin: 0 auto; }
-  .nk-room-title { text-align: center; margin: 2px 0 20px; }
-  .nk-room-title .eyebrow { font: 500 10px/1.2 inherit; letter-spacing: .28em; text-transform: uppercase;
-    color: rgba(234,223,218,.52); }
-  .nk-room-title h1 { margin: 8px 0 4px; font-family: var(--serif); font-size: clamp(27px,7vw,42px);
-    font-weight: 400; letter-spacing: .02em; color: #f0e4df; text-shadow: 0 2px 20px rgba(0,0,0,.5); }
-  .nk-room-title p { margin: 0; font-size: 12.5px; line-height: 1.65; color: rgba(234,223,218,.62); }
   .nk-cabinet { position: relative; padding: 20px 16px 17px; border: 1px solid rgba(221,197,184,.16);
     border-radius: 5px 5px 16px 16px;
     background: linear-gradient(90deg, rgba(18,8,10,.96), rgba(54,23,25,.94) 18%, rgba(24,10,12,.96) 52%, rgba(58,25,27,.94) 82%, rgba(16,7,9,.97));
@@ -1313,19 +1307,33 @@ html[data-theme="dark"] .composer {
   .nk-book-cover .fallback small { display: block; margin-top: 7px; font: 500 8px/1.35 inherit;
     letter-spacing: .08em; color: rgba(238,225,215,.56); }
   @media (hover:hover) and (pointer:fine) { .nk-book-cover:hover { transform: translateY(-7px) rotate(-1deg); filter: brightness(1.08); } }
-  .nk-book-cover:active, .nk-room-object:active, .nk-room-primary:active { transform: scale(.97); }
+  .nk-book-cover:active, .nk-room-primary:active, .nk-collection-keepsake:active { transform: scale(.97); }
   .nk-empty-slot { width: 100%; aspect-ratio: 2/3; border: 1px dashed rgba(234,223,218,.09); border-radius: 3px;
     background: rgba(3,1,2,.1); color: rgba(234,223,218,.26); display: grid; place-items: center; }
   .nk-empty-slot.upload { cursor: pointer; transition: border-color 180ms ease, color 180ms ease; }
   @media (hover:hover) and (pointer:fine) { .nk-empty-slot.upload:hover { border-color: rgba(234,223,218,.24); color: rgba(234,223,218,.58); } }
-  .nk-room-objects { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 18px 0 0; }
-  .nk-room-object { border: 1px solid rgba(234,223,218,.1); border-radius: 13px; padding: 11px 5px 9px;
-    color: rgba(234,223,218,.72); background: rgba(10,5,7,.52); -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
-    font: 500 10px/1.35 inherit; transition: transform 140ms cubic-bezier(.23,1,.32,1), background 180ms ease; }
-  .nk-room-object .ic { display: block; width: 22px; height: 22px; margin: 0 auto 7px; color: #bba19a; }
-  @media (hover:hover) and (pointer:fine) { .nk-room-object:hover { background: rgba(59,23,29,.68); } }
-  .nk-room-status { margin-top: 14px; padding: 12px 14px; border-left: 1px solid rgba(190,137,132,.34);
-    color: rgba(234,223,218,.58); font-size: 11.5px; line-height: 1.65; background: linear-gradient(90deg,rgba(25,9,13,.52),transparent); }
+  .nk-cabinet-tools { display: flex; align-items: end; justify-content: space-between; gap: 18px;
+    min-height: 76px; padding: 11px 8px 0; }
+  .nk-collection-keepsake { position: relative; width: 72px; height: 42px; border: 1px solid rgba(201,166,151,.2);
+    border-radius: 2px 6px 6px 2px; color: rgba(232,215,207,.62);
+    background: linear-gradient(145deg,#34131a,#16090d 72%); box-shadow: -2px 2px 0 #080405, 4px 7px 14px rgba(0,0,0,.4);
+    font: 500 9px/1 inherit; letter-spacing: .12em; transition: transform 140ms cubic-bezier(.23,1,.32,1), filter 180ms ease; }
+  .nk-collection-keepsake::after { content: ''; position: absolute; left: 8px; right: 7px; bottom: 5px; height: 1px;
+    background: rgba(221,198,184,.24); box-shadow: 0 -3px rgba(221,198,184,.1); }
+  .nk-lock-drawer { position: relative; width: min(56%,190px); height: 74px; padding: 0; border: 0;
+    background: transparent; transform-origin: bottom center; }
+  .nk-lock-drawer .drawer-face { position: absolute; left: 0; right: 0; bottom: 0; line-height: 0;
+    transition: transform 230ms cubic-bezier(.32,.72,0,1), filter 180ms ease; }
+  .nk-lock-drawer .drawer-face img { display: block; width: 100%; border-radius: 2px; }
+  .nk-lock-drawer .silver-key { position: absolute; z-index: 2; left: 50%; bottom: 33%; height: 58px; width: auto;
+    transform-origin: 50% 94%; transform: translateX(-50%) rotate(-7deg);
+    filter: drop-shadow(0 3px 4px rgba(0,0,0,.58));
+    transition: transform 180ms cubic-bezier(.77,0,.175,1), filter 180ms ease; }
+  .nk-lock-drawer.opening .silver-key { transform: translateX(-50%) rotate(18deg); }
+  .nk-lock-drawer.opening .drawer-face { transform: translateY(9px) scale(.985); filter: brightness(1.08); }
+  @media (hover:hover) and (pointer:fine) {
+    .nk-lock-drawer:hover .silver-key, .nk-collection-keepsake:hover { filter: brightness(1.12); }
+  }
   .nk-room-panel { position: relative; z-index: 1; width: min(100%,620px); margin: 0 auto; padding: 18px 16px 34px; }
   .nk-room-panel .sh-head h1, .nk-room-panel .sh-head .sub { color: #eadfda; }
   .nk-detail-hero { display: grid; grid-template-columns: 112px 1fr; gap: 20px; align-items: end; margin: 18px 0 22px; }
@@ -1344,6 +1352,8 @@ html[data-theme="dark"] .composer {
     color: #eadfda; background: rgba(39,15,20,.78); font: 600 12px/1.3 inherit; }
   .nk-detail-actions .primary, .nk-room-primary { background: #ddd0c7; color: #211014; }
   .nk-room-list { display: grid; gap: 10px; }
+  .nk-room-empty { padding: 14px; border-left: 1px solid rgba(190,137,132,.34);
+    color: rgba(234,223,218,.58); font-size: 12px; line-height: 1.65; background: rgba(13,6,8,.4); }
   .nk-collected-book { display: grid; grid-template-columns: 54px 1fr auto; gap: 12px; align-items: center;
     padding: 10px; border: 1px solid rgba(234,223,218,.09); border-radius: 13px; background: rgba(13,6,8,.5); }
   .nk-collected-book img, .nk-collected-book .mini-cover { width: 54px; aspect-ratio: 2/3; object-fit: cover; border-radius: 2px; }
@@ -1359,12 +1369,15 @@ html[data-theme="dark"] .composer {
   .nk-room-panel .nk-settings option { color: #1d1013; }
   .nk-room-panel .nk-settings .save { color: #211014; background: #ddd0c7; }
   @media (orientation:portrait) {
-    .nk-room { padding-top: 62px; background-image: url('assets/study/cloudy-study-backdrop-v2.jpg');
+    .nk-room { padding-top: clamp(104px,18vh,148px); background-image: url('assets/study/cloudy-study-backdrop-v2.jpg');
       background-position: center top; background-size: auto 100dvh; background-repeat: no-repeat; }
     .nk-cabinet { box-sizing: border-box; width: 86%; margin-inline: auto; }
   }
   @media (max-width:420px) { .nk-cabinet { padding-inline: 9px; } .nk-shelf-tier { gap: 7px; } .nk-detail-hero { grid-template-columns: 92px 1fr; gap: 16px; } }
-  @media (prefers-reduced-motion:reduce) { .nk-book-cover, .nk-room-object, .nk-room-primary { transition: opacity 160ms ease; } }
+  @media (prefers-reduced-motion:reduce) {
+    .nk-book-cover, .nk-room-primary, .nk-collection-keepsake, .nk-lock-drawer .drawer-face, .nk-lock-drawer .silver-key { transition: opacity 160ms ease; }
+    .nk-lock-drawer.opening .silver-key, .nk-lock-drawer.opening .drawer-face { transform: none; }
+  }
 
   .wh-list { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 10px; }
   .wh { max-width: 82%; padding: 12px 14px; border-radius: 16px; font-size: 15.5px;
@@ -6420,32 +6433,16 @@ function nkRoomShell(panel) {
   room.appendChild(panel); nkBody.appendChild(room);
 }
 
-function nkRoomObject(icon, label, onclick) {
-  const b = document.createElement('button'); b.className = 'nk-room-object'; b.type = 'button';
-  b.appendChild(icEl(icon, 22));
-  const span = document.createElement('span'); span.textContent = label; b.appendChild(span);
-  b.onclick = onclick; return b;
-}
-
 async function loadShelf() {
   nkSlug = ''; nkChapters = []; nkView = 'shelf'; nkDetailId = '';
   nkTocBtn.style.display = 'none';
   nkNote('正在开门…');
-  let books, settings, activity;
-  try {
-    [books, settings, activity] = await Promise.all([nkGet('books'), nkGet('settings'), nkGet('activity')]);
-  }
+  let books;
+  try { books = await nkGet('books'); }
   catch (e) { return nkNote('书房那头没应声'); }
   if (!Array.isArray(books)) books = [];
-  settings = settings || {};
-  activity = (activity && activity.items) || [];
   const shelfBooks = books.filter(b => !b.collected).slice(0, 8);
   const inner = document.createElement('div'); inner.className = 'nk-room-inner';
-  const title = document.createElement('div'); title.className = 'nk-room-title';
-  const eyebrow = document.createElement('div'); eyebrow.className = 'eyebrow'; eyebrow.textContent = "Cloudy's space";
-  const h = document.createElement('h1'); h.textContent = 'Cloudy 的书房';
-  const sub = document.createElement('p'); sub.textContent = shelfBooks.length ? '他正在慢慢读这些书。你可以进来看看。' : '书架空着，等你替他放一本想读的书。';
-  title.append(eyebrow, h, sub); inner.appendChild(title);
 
   const cabinet = document.createElement('div'); cabinet.className = 'nk-cabinet';
   const input = document.createElement('input'); input.type = 'file'; input.accept = '.epub,application/epub+zip'; input.hidden = true;
@@ -6476,20 +6473,24 @@ async function loadShelf() {
     }
     cabinet.appendChild(row);
   }
-  cabinet.appendChild(input); inner.appendChild(cabinet);
-
-  const objects = document.createElement('div'); objects.className = 'nk-room-objects';
-  objects.append(
-    nkRoomObject('pen', '读书笔记', () => renderReadingNotes()),
-    nkRoomObject('heartIc', '分享本', () => renderStudyShares()),
-    nkRoomObject('filePlus', '收藏', renderCollection),
-    nkRoomObject('clock', '阅读安排', renderStudySettings),
-  );
-  inner.appendChild(objects);
-  const status = document.createElement('div'); status.className = 'nk-room-status';
-  const schedule = settings.on ? ('今天读过 ' + (settings.count || 0) + '/' + (settings.daily_sessions || 0) + ' 次') : '阅读安排暂时关着';
-  status.textContent = schedule + (activity[0] ? ' · ' + activity[0].summary : ' · 这里还很安静');
-  inner.appendChild(status); nkRoomShell(inner);
+  const tools = document.createElement('div'); tools.className = 'nk-cabinet-tools';
+  const collection = document.createElement('button'); collection.className = 'nk-collection-keepsake';
+  collection.type = 'button'; collection.textContent = '收藏'; collection.title = '收藏的书'; collection.onclick = renderCollection;
+  const drawer = document.createElement('button'); drawer.className = 'nk-lock-drawer'; drawer.type = 'button';
+  drawer.title = '打开阅读安排'; drawer.setAttribute('aria-label', '打开阅读安排、模型和摘要来源');
+  const face = document.createElement('span'); face.className = 'drawer-face';
+  const faceImg = document.createElement('img'); faceImg.src = 'assets/study/study-drawer-v1.webp'; faceImg.alt = '';
+  face.appendChild(faceImg);
+  const key = document.createElement('img'); key.className = 'silver-key'; key.src = 'assets/study/study-key-v1.webp'; key.alt = '';
+  drawer.append(face, key);
+  drawer.onclick = () => {
+    if (drawer.classList.contains('opening')) return;
+    drawer.classList.add('opening'); drawer.disabled = true;
+    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    setTimeout(renderStudySettings, reduced ? 0 : 235);
+  };
+  tools.append(collection, drawer); cabinet.append(tools, input); inner.appendChild(cabinet);
+  nkRoomShell(inner);
 }
 
 async function renderBookDetail(bookId) {
@@ -6553,7 +6554,7 @@ async function renderCollection() {
     };
     row.append(cover, copy, restore); list.appendChild(row);
   });
-  if (!items.length) { const empty = document.createElement('div'); empty.className = 'nk-room-status'; empty.textContent = '还没有收进收藏的书。'; list.appendChild(empty); }
+  if (!items.length) { const empty = document.createElement('div'); empty.className = 'nk-room-empty'; empty.textContent = '还没有收进收藏的书。'; list.appendChild(empty); }
   panel.appendChild(list); nkRoomShell(panel);
 }
 
