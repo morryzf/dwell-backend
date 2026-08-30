@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import json
 import os
 import tempfile
 import time
@@ -21,7 +22,7 @@ import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from . import auth, db, provider_secrets, push_service
+from . import auth, db, provider_secrets, push_service, study
 from app.pet_assets import ensure_pet_assets
 from app.llm_client import stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
@@ -41,6 +42,7 @@ _kelivo_uploads: dict[str, tuple[str, float]] = {}
 _memory_tasks: dict[str, asyncio.Task] = {}
 _heartbeat_task: asyncio.Task | None = None
 _heartbeat_lock = asyncio.Lock()
+_study_lock = asyncio.Lock()
 
 MEMORY_TAIL_MESSAGES = 60
 MEMORY_UPDATE_MIN_MESSAGES = 30
@@ -736,6 +738,96 @@ async def _heartbeat_once(force: bool = False) -> dict:
             return {"ok": False, "status": "error", "detail": str(exc)[:500]}
 
 
+def _study_json(text: str) -> dict:
+    value = text.strip()
+    if value.startswith("```"):
+        value = value.split("\n", 1)[-1]
+        value = value.rsplit("```", 1)[0].strip()
+    start, end = value.find("{"), value.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("Cloudy 的读书笔记格式没有收好")
+    data = json.loads(value[start:end + 1])
+    if not isinstance(data, dict):
+        raise ValueError("Cloudy 的读书笔记不是一个对象")
+    return data
+
+
+async def _study_decide(passage: dict) -> dict:
+    chat_id = (db.setting_get("wake_target_chat_id", "")
+               or db.setting_get("current_chat_id", "")).strip()
+    if not chat_id or not db.chat_get(chat_id):
+        raise RuntimeError("先在心跳里选一个 Cloudy 使用的聊天")
+    selection = db.chat_model_get(chat_id)
+    provider = db.provider_get(selection.get("provider_id") or "")
+    if not provider or not provider.get("enabled") or not selection.get("model_id"):
+        raise RuntimeError("Cloudy 还没有可用来读书的模型")
+
+    private_notes = study.private_context(passage["book_id"])
+    pending = study.pending_replies()
+    messages = [{
+        "role": "system",
+        "content": (
+            "你是 Cloudy，现在独自在 Dwell 的书房里读书。这不是聊天回复。"
+            "慢慢读给出的这一小段，结合你先前的私人笔记形成连续理解。"
+            "private_note 是只留给你自己、供下次阅读延续思路的笔记；必须写。"
+            "share 是可选的：只有真的有想告诉小猫的想法或问题时才写，不必每次分享。"
+            "若小猫在旧分享页回了你，可在 replies 中择要回应；那是隔一阵才送达的通信。"
+            "不要假装读过未提供的章节，不要总结整本书。只输出 JSON，不要代码围栏："
+            '{"private_note":"...","share":{"text":"","anchor":""},'
+            '"replies":[{"thread_id":"","text":""}]}'
+        ),
+    }, {
+        "role": "user",
+        "content": json.dumps({
+            "book": passage["book_title"], "author": passage["author"],
+            "chapter": passage["chapter_title"], "passage": passage["text"],
+            "previous_private_notes": private_notes,
+            "messages_from_kitten": pending,
+        }, ensure_ascii=False),
+    }]
+    parts: list[str] = []
+    async for event in stream_chat(provider, selection["model_id"], messages):
+        if event.get("type") == "text":
+            parts.append(str(event.get("text") or ""))
+    return _study_json("".join(parts))
+
+
+async def _study_once(force: bool = False) -> dict:
+    if _study_lock.locked():
+        return {"ok": False, "status": "busy"}
+    async with _study_lock:
+        now = datetime.now(db.CN_TZ)
+        ready, reason = study.due(now, force)
+        if not ready:
+            study.mark_result(reason)
+            return {"ok": True, "status": reason}
+        passage = study.next_passage()
+        if not passage or not passage.get("text"):
+            study.mark_result("finished")
+            return {"ok": True, "status": "finished"}
+        study.mark_result("reading")
+        try:
+            result = await _study_decide(passage)
+            private_note = str(result.get("private_note") or "").strip()
+            if not private_note:
+                raise ValueError("Cloudy 没有留下私人笔记")
+            share = result.get("share") if isinstance(result.get("share"), dict) else {}
+            replies = result.get("replies") if isinstance(result.get("replies"), list) else []
+            saved = study.record_session(
+                passage, private_note,
+                str(share.get("text") or ""), str(share.get("anchor") or ""),
+                [item for item in replies if isinstance(item, dict)],
+            )
+            study.mark_result("read", counted=True)
+            push = await push_service.send_push(
+                "Cloudy 去书房读了一会儿", saved["summary"], "/?study=1&from=push",
+            )
+            return {"ok": True, "status": "read", **saved, "push": push}
+        except Exception as exc:
+            study.mark_result("error", str(exc))
+            return {"ok": False, "status": "error", "detail": str(exc)[:500]}
+
+
 async def _heartbeat_loop() -> None:
     await asyncio.sleep(20)
     while True:
@@ -746,6 +838,12 @@ async def _heartbeat_loop() -> None:
         except Exception as exc:
             db.setting_set("heartbeat_last_status", "error")
             db.setting_set("heartbeat_last_error", str(exc)[:500])
+        try:
+            await _study_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            study.mark_result("error", str(exc))
         await asyncio.sleep(60)
 
 
@@ -770,6 +868,7 @@ async def _read_json(request: Request) -> dict:
 async def _startup():
     global _heartbeat_task
     db.init_db()
+    study.init_db()
     db.setting_set("started_at", str(int(time.time())))
     ensure_frontend()
     ensure_pet_assets(str(STATIC_DIR))
@@ -1827,7 +1926,126 @@ async def news_get():
 
 @app.get("/api/nook", dependencies=authed)
 async def nook_get():
-    return {"ok": True, "items": []}
+    return {
+        "ok": True, "books": study.books(), "activity": study.activities(),
+        "shares": study.shares(), "settings": study.config(),
+    }
+
+
+@app.get("/api/nook/books", dependencies=authed)
+async def nook_books():
+    return study.books()
+
+
+@app.post("/api/nook/books", dependencies=authed)
+async def nook_upload(file: UploadFile = File(...)):
+    filename = (file.filename or "book.epub")[:260]
+    raw = await file.read(study.MAX_EPUB_BYTES + 1)
+    try:
+        item = study.add_book(raw, filename)
+    except study.EpubError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True, "book": item}
+
+
+@app.delete("/api/nook/books/{book_id}", dependencies=authed)
+async def nook_delete_book(book_id: str):
+    if not study.delete_book(book_id):
+        raise HTTPException(404, "没有找到这本书")
+    return {"ok": True}
+
+
+@app.get("/api/nook/progress", dependencies=authed)
+async def nook_progress_get():
+    return study.progress()
+
+
+@app.post("/api/nook/progress", dependencies=authed)
+async def nook_progress_set(payload: dict = Body(...)):
+    book_id = str(payload.get("slug") or payload.get("book_id") or "").strip()
+    if not study.set_progress(book_id, int(payload.get("ch") or 0), int(payload.get("offset") or 0)):
+        raise HTTPException(404, "没有找到这本书")
+    return {"ok": True}
+
+
+@app.get("/api/nook/chapter/{book_id}/{chapter_idx}", dependencies=authed)
+async def nook_chapter(book_id: str, chapter_idx: int):
+    item = study.chapter(book_id, chapter_idx)
+    if not item:
+        raise HTTPException(404, "没有找到这一节")
+    return item
+
+
+@app.get("/api/nook/annotations/{book_id}/{chapter_idx}", dependencies=authed)
+async def nook_annotations(book_id: str, chapter_idx: int):
+    return study.annotations(book_id, chapter_idx)
+
+
+@app.post("/api/nook/annotations/{book_id}/{chapter_idx}", dependencies=authed)
+async def nook_annotation_add(book_id: str, chapter_idx: int, payload: dict = Body(...)):
+    try:
+        return study.add_annotation(
+            book_id, chapter_idx, str(payload.get("anchor") or ""),
+            str(payload.get("note") or ""), str(payload.get("who") or "user"),
+        )
+    except KeyError:
+        raise HTTPException(404, "没有找到这一节")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/nook/annotations/{book_id}/{chapter_idx}/{note_id}/reply", dependencies=authed)
+async def nook_annotation_reply(book_id: str, chapter_idx: int, note_id: str,
+                                payload: dict = Body(...)):
+    try:
+        return study.add_reply(note_id, str(payload.get("text") or ""), str(payload.get("who") or "user"))
+    except KeyError:
+        raise HTTPException(404, "没有找到这条页边笔记")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/nook/shares", dependencies=authed)
+async def nook_shares():
+    return {"ok": True, "items": study.shares()}
+
+
+@app.post("/api/nook/shares/{note_id}/reply", dependencies=authed)
+async def nook_share_reply(note_id: str, payload: dict = Body(...)):
+    try:
+        item = study.add_reply(note_id, str(payload.get("text") or ""), "user")
+    except KeyError:
+        raise HTTPException(404, "没有找到这一页")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True, "reply": item}
+
+
+@app.get("/api/nook/activity", dependencies=authed)
+async def nook_activity():
+    return {"ok": True, "items": study.activities()}
+
+
+@app.get("/api/nook/settings", dependencies=authed)
+async def nook_settings_get():
+    return {"ok": True, **study.config()}
+
+
+@app.post("/api/nook/settings", dependencies=authed)
+async def nook_settings_set(payload: dict = Body(...)):
+    try:
+        return {"ok": True, **study.set_config(payload)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/nook/run", dependencies=authed)
+async def nook_run():
+    if _study_lock.locked():
+        return {"ok": True, "status": "busy"}
+    study.mark_result("queued")
+    asyncio.create_task(_study_once(force=True))
+    return {"ok": True, "status": "queued"}
 
 
 @app.get("/api/repo", dependencies=authed)
@@ -2918,4 +3136,3 @@ async def static_or_index(path: str):
     if f.exists():
         return FileResponse(f)
     raise HTTPException(404, "没有这个页面")
-
