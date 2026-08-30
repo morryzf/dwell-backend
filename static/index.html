@@ -1282,7 +1282,7 @@ html[data-theme="dark"] .composer {
     color: #eadfda;
   }
   .nk-room::before { content: ''; position: absolute; inset: 0; pointer-events: none;
-    background: linear-gradient(180deg, rgba(9,5,7,.18), rgba(9,5,7,.48)),
+    background: linear-gradient(180deg, rgba(9,5,7,.1), rgba(9,5,7,.34)),
       radial-gradient(circle at 50% 42%, rgba(108,35,43,.18), transparent 55%); }
   .nk-room-inner { position: relative; z-index: 1; width: min(100%, 680px); margin: 0 auto; }
   .nk-room-title { text-align: center; margin: 2px 0 20px; }
@@ -1358,6 +1358,11 @@ html[data-theme="dark"] .composer {
   .nk-room-panel .nk-settings input, .nk-room-panel .nk-settings select { color: #eadfda; background: rgba(234,223,218,.08); }
   .nk-room-panel .nk-settings option { color: #1d1013; }
   .nk-room-panel .nk-settings .save { color: #211014; background: #ddd0c7; }
+  @media (orientation:portrait) {
+    .nk-room { padding-top: 62px; background-image: url('assets/study/cloudy-study-backdrop-v2.jpg');
+      background-position: center top; background-size: auto 100dvh; background-repeat: no-repeat; }
+    .nk-cabinet { box-sizing: border-box; width: 86%; margin-inline: auto; }
+  }
   @media (max-width:420px) { .nk-cabinet { padding-inline: 9px; } .nk-shelf-tier { gap: 7px; } .nk-detail-hero { grid-template-columns: 92px 1fr; gap: 16px; } }
   @media (prefers-reduced-motion:reduce) { .nk-book-cover, .nk-room-object, .nk-room-primary { transition: opacity 160ms ease; } }
 
