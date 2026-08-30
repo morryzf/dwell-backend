@@ -16,6 +16,8 @@ from . import db
 MAX_EPUB_BYTES = 25 * 1024 * 1024
 MAX_UNPACKED_BYTES = 60 * 1024 * 1024
 MAX_TEXT_BYTES = 12 * 1024 * 1024
+MAX_COVER_BYTES = 3 * 1024 * 1024
+SHELF_CAPACITY = 8
 DEFAULT_READING_TOKENS = 4000
 MIN_READING_TOKENS = 1000
 MAX_READING_TOKENS = 12000
@@ -34,7 +36,10 @@ CREATE TABLE IF NOT EXISTS study_books (
     finished        INTEGER NOT NULL DEFAULT 0,
     made            INTEGER NOT NULL,
     updated         INTEGER NOT NULL,
-    last_read       INTEGER NOT NULL DEFAULT 0
+    last_read       INTEGER NOT NULL DEFAULT 0,
+    cover_data      BLOB,
+    cover_mime      TEXT NOT NULL DEFAULT '',
+    collected       INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_study_books_reading
 ON study_books(finished, last_read, made);
@@ -148,6 +153,22 @@ class _Text(HTMLParser):
 def init_db() -> None:
     with db.conn() as cx:
         cx.executescript(SCHEMA)
+        columns = {row["name"] for row in cx.execute("PRAGMA table_info(study_books)").fetchall()}
+        if "cover_data" not in columns:
+            cx.execute("ALTER TABLE study_books ADD COLUMN cover_data BLOB")
+        if "cover_mime" not in columns:
+            cx.execute("ALTER TABLE study_books ADD COLUMN cover_mime TEXT NOT NULL DEFAULT ''")
+        if "collected" not in columns:
+            cx.execute("ALTER TABLE study_books ADD COLUMN collected INTEGER NOT NULL DEFAULT 0")
+        # Older versions had no shelf limit. Keep the eight most recently touched
+        # books visible and move any overflow into the recoverable collection.
+        cx.execute(
+            """UPDATE study_books SET collected=1
+               WHERE collected=0 AND id NOT IN (
+                   SELECT id FROM study_books WHERE collected=0 ORDER BY updated DESC LIMIT ?
+               )""",
+            (SHELF_CAPACITY,),
+        )
         # PR #68 called these private notes.  They are now the visible reading notebook;
         # a genuinely private diary will be a separate feature later.
         cx.execute("UPDATE study_notes SET kind='reading' WHERE kind='private'")
@@ -189,7 +210,7 @@ def _xml_text(root: ET.Element, local_name: str) -> str:
     return ""
 
 
-def parse_epub(raw: bytes, filename: str) -> tuple[str, str, list[tuple[str, str]]]:
+def parse_epub(raw: bytes, filename: str) -> tuple[str, str, list[tuple[str, str]], bytes, str]:
     if not filename.lower().endswith(".epub"):
         raise EpubError("请上传 .epub 格式的书")
     if not raw or len(raw) > MAX_EPUB_BYTES:
@@ -219,25 +240,51 @@ def parse_epub(raw: bytes, filename: str) -> tuple[str, str, list[tuple[str, str
 
         title = _xml_text(package, "title") or PurePosixPath(filename).stem
         author = _xml_text(package, "creator")
-        manifest: dict[str, tuple[str, str]] = {}
+        manifest: dict[str, tuple[str, str, str]] = {}
         spine: list[str] = []
+        cover_id = ""
         for item in package.iter():
             local = item.tag.rsplit("}", 1)[-1]
             if local == "item" and item.attrib.get("id") and item.attrib.get("href"):
-                manifest[item.attrib["id"]] = (item.attrib["href"], item.attrib.get("media-type", ""))
+                manifest[item.attrib["id"]] = (
+                    item.attrib["href"], item.attrib.get("media-type", ""),
+                    item.attrib.get("properties", ""),
+                )
             elif local == "itemref" and item.attrib.get("idref"):
                 spine.append(item.attrib["idref"])
+            elif local == "meta" and item.attrib.get("name", "").lower() == "cover":
+                cover_id = item.attrib.get("content", "")
         if not spine:
             spine = [key for key, value in manifest.items() if "html" in value[1]]
 
         base = posixpath.dirname(opf_name)
+        cover_data = b""
+        cover_mime = ""
+        cover_candidates = []
+        if cover_id and cover_id in manifest:
+            cover_candidates.append(manifest[cover_id])
+        cover_candidates.extend(
+            value for key, value in manifest.items()
+            if "cover-image" in value[2].split() or ("cover" in key.lower() and value[1].startswith("image/"))
+        )
+        allowed_covers = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+        for href, media_type, _properties in cover_candidates:
+            if media_type not in allowed_covers:
+                continue
+            member = _safe_member(posixpath.join(base, href.split("#", 1)[0]))
+            if member not in names or names[member].file_size > MAX_COVER_BYTES:
+                continue
+            candidate = zf.read(names[member])
+            if candidate:
+                cover_data, cover_mime = candidate, media_type
+                break
         chapters: list[tuple[str, str]] = []
         total_text = 0
         for item_id in spine[:400]:
             entry = manifest.get(item_id)
             if not entry:
                 continue
-            href, media_type = entry
+            href, media_type, _properties = entry
             if "html" not in media_type and not href.lower().endswith((".html", ".xhtml", ".htm")):
                 continue
             member = _safe_member(posixpath.join(base, href.split("#", 1)[0]))
@@ -259,11 +306,15 @@ def parse_epub(raw: bytes, filename: str) -> tuple[str, str, list[tuple[str, str
             chapters.append((chapter_title or f"第 {len(chapters) + 1} 节", body))
         if not chapters:
             raise EpubError("没有从这本 EPUB 里读到正文")
-        return title[:240], author[:160], chapters[:300]
+        return title[:240], author[:160], chapters[:300], cover_data, cover_mime
 
 
 def add_book(raw: bytes, filename: str) -> dict:
-    title, author, chapters = parse_epub(raw, filename)
+    with db.conn() as cx:
+        shelf_count = cx.execute("SELECT COUNT(*) AS n FROM study_books WHERE collected=0").fetchone()["n"]
+    if shelf_count >= SHELF_CAPACITY:
+        raise EpubError("书架已经放满八本了，请先把一本书收进收藏")
+    title, author, chapters, cover_data, cover_mime = parse_epub(raw, filename)
     now = int(time.time())
     book_id = db.new_id()
     row = {
@@ -271,25 +322,33 @@ def add_book(raw: bytes, filename: str) -> dict:
         "filename": filename[:260], "chapter_count": len(chapters),
         "current_chapter": 0, "current_offset": 0, "finished": 0,
         "made": now, "updated": now, "last_read": 0,
+        "cover_data": cover_data or None, "cover_mime": cover_mime, "collected": 0,
     }
     with db.conn() as cx:
         cx.execute(
             """INSERT INTO study_books
-               (id,title,author,filename,chapter_count,current_chapter,current_offset,finished,made,updated,last_read)
-               VALUES (:id,:title,:author,:filename,:chapter_count,:current_chapter,:current_offset,:finished,:made,:updated,:last_read)""",
+               (id,title,author,filename,chapter_count,current_chapter,current_offset,finished,made,updated,last_read,cover_data,cover_mime,collected)
+               VALUES (:id,:title,:author,:filename,:chapter_count,:current_chapter,:current_offset,:finished,:made,:updated,:last_read,:cover_data,:cover_mime,:collected)""",
             row,
         )
         cx.executemany(
             "INSERT INTO study_chapters (book_id,idx,title,body) VALUES (?,?,?,?)",
             [(book_id, idx, chapter_title, body) for idx, (chapter_title, body) in enumerate(chapters)],
         )
+    row.pop("cover_data", None)
+    row["has_cover"] = bool(cover_data)
     row["chapters"] = [item[0] for item in chapters]
     return row
 
 
 def books() -> list[dict]:
     with db.conn() as cx:
-        rows = cx.execute("SELECT * FROM study_books ORDER BY finished, updated DESC").fetchall()
+        rows = cx.execute(
+            """SELECT id,title,author,filename,chapter_count,current_chapter,current_offset,
+                      finished,made,updated,last_read,collected,cover_mime,
+                      CASE WHEN cover_data IS NOT NULL THEN 1 ELSE 0 END AS has_cover
+               FROM study_books ORDER BY collected, finished, updated DESC"""
+        ).fetchall()
         out = []
         for row in rows:
             item = dict(row)
@@ -299,6 +358,28 @@ def books() -> list[dict]:
             ).fetchall()]
             out.append(item)
     return out
+
+
+def book_cover(book_id: str) -> tuple[bytes, str] | None:
+    with db.conn() as cx:
+        row = cx.execute("SELECT cover_data,cover_mime FROM study_books WHERE id=?", (book_id,)).fetchone()
+    if not row or not row["cover_data"] or not row["cover_mime"]:
+        return None
+    return bytes(row["cover_data"]), str(row["cover_mime"])
+
+
+def collect_book(book_id: str, collected: bool) -> bool:
+    with db.conn() as cx:
+        row = cx.execute("SELECT collected FROM study_books WHERE id=?", (book_id,)).fetchone()
+        if not row:
+            return False
+        if not collected and row["collected"]:
+            count = cx.execute("SELECT COUNT(*) AS n FROM study_books WHERE collected=0").fetchone()["n"]
+            if count >= SHELF_CAPACITY:
+                raise ValueError("书架已经放满八本了，请先收起另一本")
+        cx.execute("UPDATE study_books SET collected=?,updated=? WHERE id=?",
+                   (1 if collected else 0, int(time.time()), book_id))
+    return True
 
 
 def delete_book(book_id: str) -> bool:
@@ -525,7 +606,7 @@ def _cut_text(text: str, token_limit: int) -> int:
 def next_passage(token_budget: int = DEFAULT_READING_TOKENS) -> dict | None:
     with db.conn() as cx:
         book = cx.execute(
-            "SELECT * FROM study_books WHERE finished=0 ORDER BY last_read ASC,made ASC LIMIT 1"
+            "SELECT * FROM study_books WHERE finished=0 AND collected=0 ORDER BY last_read ASC,made ASC LIMIT 1"
         ).fetchone()
         if not book:
             return None
@@ -754,7 +835,7 @@ def due(now: datetime, force: bool = False) -> tuple[bool, str, str]:
     cfg = config()
     if not force and not cfg["on"]:
         return False, "off", ""
-    if not books():
+    if not any(not item.get("collected") for item in books()):
         return False, "no_books", ""
     if force:
         return True, "ready", "manual"
