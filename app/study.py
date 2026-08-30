@@ -501,6 +501,27 @@ def all_reading_notes(limit: int = 300) -> list[dict]:
     return [{**dict(r), "ts": _fmt_ts(r["made"])} for r in rows]
 
 
+def _cut_text(text: str, token_limit: int) -> int:
+    """Return a natural-boundary character offset that fits token_limit."""
+    if not text or token_limit <= 0:
+        return 0
+    if estimate_tokens(text) <= token_limit:
+        return len(text)
+    low, high = 1, len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if estimate_tokens(text[:mid]) <= token_limit:
+            low = mid
+        else:
+            high = mid - 1
+    end = low
+    natural_start = max(1, int(end * .7))
+    paragraph = text.rfind("\n", natural_start, end)
+    sentence = max(text.rfind(". ", natural_start, end), text.rfind("。", natural_start, end))
+    cut = max(paragraph, sentence + 1 if sentence >= 0 else -1)
+    return cut if cut > 0 else end
+
+
 def next_passage(token_budget: int = DEFAULT_READING_TOKENS) -> dict | None:
     with db.conn() as cx:
         book = cx.execute(
@@ -508,42 +529,69 @@ def next_passage(token_budget: int = DEFAULT_READING_TOKENS) -> dict | None:
         ).fetchone()
         if not book:
             return None
-        chapter_idx = int(book["current_chapter"])
-        offset = int(book["current_offset"])
-        chapter_row = cx.execute(
-            "SELECT * FROM study_chapters WHERE book_id=? AND idx=?", (book["id"], chapter_idx)
-        ).fetchone()
-        if not chapter_row:
+        start_chapter = int(book["current_chapter"])
+        start_offset = int(book["current_offset"])
+        chapter_rows = cx.execute(
+            "SELECT * FROM study_chapters WHERE book_id=? AND idx>=? ORDER BY idx",
+            (book["id"], start_chapter),
+        ).fetchall()
+        if not chapter_rows:
             return None
-        body = chapter_row["body"]
-    if offset >= len(body):
-        offset = 0
     token_budget = max(MIN_READING_TOKENS, min(int(token_budget), MAX_READING_TOKENS))
     safe_budget = max(1, int(token_budget * .9))
-    remaining = body[offset:]
-    if estimate_tokens(remaining) <= safe_budget:
-        end = len(body)
+    parts: list[str] = []
+    sections: list[dict] = []
+    used_tokens = 0
+    next_chapter = start_chapter
+    next_offset = start_offset
+    finished = False
+
+    for row in chapter_rows:
+        chapter_idx = int(row["idx"])
+        body = row["body"]
+        offset = start_offset if chapter_idx == start_chapter else 0
+        if offset >= len(body):
+            next_chapter, next_offset = chapter_idx + 1, 0
+            continue
+        heading = f"[章节：{row['title']}]\n"
+        heading_tokens = estimate_tokens(heading)
+        available = safe_budget - used_tokens - heading_tokens
+        if available <= 0:
+            break
+        remaining = body[offset:]
+        take = _cut_text(remaining, available)
+        if take <= 0:
+            break
+        excerpt = remaining[:take].strip()
+        if excerpt:
+            parts.append(heading + excerpt)
+            sections.append({
+                "chapter_idx": chapter_idx, "chapter_title": row["title"],
+                "start_offset": offset, "end_offset": offset + take,
+            })
+            used_tokens += estimate_tokens(heading + excerpt)
+        if offset + take < len(body):
+            next_chapter, next_offset = chapter_idx, offset + take
+            break
+        next_chapter, next_offset = chapter_idx + 1, 0
     else:
-        low, high = 1, len(remaining)
-        while low < high:
-            mid = (low + high + 1) // 2
-            if estimate_tokens(remaining[:mid]) <= safe_budget:
-                low = mid
-            else:
-                high = mid - 1
-        end = offset + low
-        paragraph = body.rfind("\n", offset + max(1, int(low * .7)), end)
-        sentence = max(body.rfind(". ", offset + max(1, int(low * .7)), end),
-                       body.rfind("。", offset + max(1, int(low * .7)), end))
-        cut = max(paragraph, sentence + 1 if sentence >= 0 else -1)
-        if cut > offset:
-            end = cut
-    passage_text = body[offset:end].strip()
+        finished = next_chapter >= int(book["chapter_count"])
+
+    if not parts:
+        return None
+    if next_chapter >= int(book["chapter_count"]):
+        next_chapter = max(0, int(book["chapter_count"]) - 1)
+        next_offset = 0
+        finished = True
+    passage_text = "\n\n".join(parts)
+    first = sections[0]
     return {
         "book_id": book["id"], "book_title": book["title"], "author": book["author"],
-        "chapter_idx": chapter_idx, "chapter_title": chapter_row["title"],
-        "start_offset": offset, "end_offset": end, "chapter_length": len(body),
+        "chapter_idx": first["chapter_idx"], "chapter_title": first["chapter_title"],
+        "start_offset": first["start_offset"], "end_offset": sections[-1]["end_offset"],
         "chapter_count": book["chapter_count"], "text": passage_text,
+        "sections": sections, "next_chapter": next_chapter, "next_offset": next_offset,
+        "finished": finished,
         "estimated_tokens": estimate_tokens(passage_text), "token_budget": token_budget,
     }
 
@@ -563,15 +611,9 @@ def reading_notes(book_id: str) -> list[dict]:
 def record_session(passage: dict, reading_note: str, share_text: str = "", share_anchor: str = "") -> dict:
     now = int(time.time())
     book_id = passage["book_id"]
-    next_chapter = passage["chapter_idx"]
-    next_offset = passage["end_offset"]
-    finished = 0
-    if next_offset >= passage["chapter_length"]:
-        next_chapter += 1
-        next_offset = 0
-        if next_chapter >= passage["chapter_count"]:
-            next_chapter = max(0, passage["chapter_count"] - 1)
-            finished = 1
+    next_chapter = int(passage["next_chapter"])
+    next_offset = int(passage["next_offset"])
+    finished = 1 if passage.get("finished") else 0
     share_id = ""
     with db.conn() as cx:
         note_row = (
@@ -593,7 +635,9 @@ def record_session(passage: dict, reading_note: str, share_text: str = "", share
             """UPDATE study_books SET current_chapter=?,current_offset=?,finished=?,last_read=?,updated=?
                WHERE id=?""", (next_chapter, next_offset, finished, now, now, book_id),
         )
-        summary = f"读了《{passage['book_title']}》的「{passage['chapter_title']}」"
+        titles = [item["chapter_title"] for item in passage.get("sections", [])]
+        chapter_label = " → ".join(dict.fromkeys(titles)) or passage["chapter_title"]
+        summary = f"读了《{passage['book_title']}》的「{chapter_label}」"
         if share_id:
             summary += "，在分享本里留了一页"
         else:
