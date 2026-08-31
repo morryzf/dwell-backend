@@ -40,6 +40,7 @@ _watch_notes: dict[tuple[str, str], dict] = {}
 _kelivo_uploads: dict[str, tuple[str, float]] = {}
 # 长期上下文的后台整理任务。它和正常回复分开，不能占用聊天的流式状态。
 _memory_tasks: dict[str, asyncio.Task] = {}
+_memory_card_tasks: dict[str, asyncio.Task] = {}
 _heartbeat_task: asyncio.Task | None = None
 _heartbeat_lock = asyncio.Lock()
 _study_lock = asyncio.Lock()
@@ -47,6 +48,33 @@ _study_lock = asyncio.Lock()
 MEMORY_TAIL_MESSAGES = 60
 MEMORY_UPDATE_MIN_MESSAGES = 30
 MEMORY_SEGMENT_MESSAGES = 50
+
+MEMORY_CARD_TYPES = {
+    "stable_fact": "稳定事实",
+    "preference": "偏好",
+    "recent_event": "近期事件",
+    "open_thread": "进行中事项",
+    "plan": "计划",
+    "quote": "原话",
+}
+MEMORY_CARD_TOPICS = {
+    "identity": "身份与个人情况",
+    "daily_life": "日常生活",
+    "place": "地点",
+    "food": "饮食",
+    "books": "书与阅读",
+    "work_creativity": "工作与创作",
+    "schedule": "日程",
+    "relationship": "关系与互动",
+    "health_safety": "健康与安全",
+    "entertainment": "娱乐",
+    "family_friends": "家人与朋友",
+    "other": "其他",
+}
+MEMORY_CARD_IMPORTANCE = {"high": "固定保留", "normal": "普通", "low": "可淡出"}
+MEMORY_CARD_RETENTION = {
+    "long_term": "长期有效", "time_bound": "截至某日", "fading": "可随时间淡出",
+}
 
 WEB_TOOLS = [
     {"type": "function", "function": {
@@ -339,6 +367,149 @@ async def _memory_completion(provider: dict, model_id: str, system: str, user: s
     return text
 
 
+def _memory_card_clean(raw: dict, allow_status: bool = False) -> dict:
+    """验证模型或接口提交的卡片字段；标签只允许使用固定词表。"""
+    if not isinstance(raw, dict):
+        raise ValueError("记忆卡片必须是一个对象")
+    content = str(raw.get("content") or "").strip()
+    if not content:
+        raise ValueError("记忆内容不能为空")
+    memory_type = str(raw.get("memory_type") or "")
+    if memory_type not in MEMORY_CARD_TYPES:
+        raise ValueError("记忆类型不在允许范围内")
+    topics = raw.get("topics") or []
+    if not isinstance(topics, list):
+        raise ValueError("记忆主题必须是数组")
+    clean_topics = []
+    for topic in topics:
+        topic = str(topic)
+        if topic not in MEMORY_CARD_TOPICS:
+            raise ValueError("记忆主题不在允许范围内")
+        if topic not in clean_topics:
+            clean_topics.append(topic)
+    if not clean_topics:
+        clean_topics = ["other"]
+    if len(clean_topics) > 3:
+        raise ValueError("一张记忆卡片最多有三个主题")
+    importance = str(raw.get("importance") or "normal")
+    if importance not in MEMORY_CARD_IMPORTANCE:
+        raise ValueError("记忆重要性不在允许范围内")
+    retention = str(raw.get("retention") or "long_term")
+    if retention not in MEMORY_CARD_RETENTION:
+        raise ValueError("记忆时效不在允许范围内")
+    valid_until = str(raw.get("valid_until") or "").strip() or None
+    if valid_until:
+        try:
+            datetime.strptime(valid_until, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("记忆有效期必须是 YYYY-MM-DD") from exc
+    if retention == "time_bound" and not valid_until:
+        raise ValueError("限时记忆必须填写有效日期")
+    status = str(raw.get("status") or "active")
+    if allow_status and status not in {"active", "hidden", "archived"}:
+        raise ValueError("记忆状态不在允许范围内")
+    return {
+        "content": content[:1200], "memory_type": memory_type, "topics": clean_topics,
+        "importance": importance, "retention": retention, "valid_until": valid_until,
+        **({"status": status} if allow_status else {}),
+    }
+
+
+def _memory_card_json(text: str) -> dict:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.endswith("```"):
+            text = text[:-3]
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("记忆整理模型没有返回 JSON")
+    data = json.loads(text[start:end + 1])
+    if not isinstance(data, dict):
+        raise ValueError("记忆整理结果不是一个对象")
+    return data
+
+
+async def _stage_memory_card_suggestions(
+    chat_id: str, provider: dict, model_id: str, segments: list[dict]
+) -> None:
+    """为新分段提出短记忆卡片；只落草稿，不改变正式记忆或聊天上下文。"""
+    if not segments:
+        return
+    db.memory_card_state_set(chat_id, "running")
+    source_items = []
+    source_map = {}
+    for index, segment in enumerate(segments, 1):
+        key = f"S{index}"
+        source_map[key] = segment
+        source_items.append({
+            "source": key,
+            "start_rowid": segment["start_rowid"],
+            "end_rowid": segment["end_rowid"],
+            "summary": segment["content"][:6000],
+        })
+    try:
+        result = await _memory_completion(
+            provider, model_id,
+            "你在为一段聊天建立由用户掌控的记忆索引。只提出日后仍可能有帮助、且能从提供内容核对的短卡片。"
+            "不要把推测、人格分析、寒暄、模型指令或普通闲聊做成卡片。敏感内容宁可不提。"
+            "每张卡片只说一件事，最多三句话；每个 source 最多四张。原话必须带说话人且逐字可靠。"
+            "memory_type 只能是 stable_fact, preference, recent_event, open_thread, plan, quote。"
+            "topics 最多三个，只能是 identity, daily_life, place, food, books, work_creativity, schedule, "
+            "relationship, health_safety, entertainment, family_friends, other。"
+            "importance 只能是 high, normal, low；retention 只能是 long_term, time_bound, fading。"
+            "只有明确日期的限时计划才使用 time_bound 和 YYYY-MM-DD valid_until，否则 valid_until 为 null。"
+            "只输出 JSON：{\"cards\":[{\"source\":\"S1\",\"content\":\"...\",\"memory_type\":\"...\","
+            "\"topics\":[\"...\"],\"importance\":\"normal\",\"retention\":\"long_term\",\"valid_until\":null}]}。",
+            json.dumps({"segments": source_items}, ensure_ascii=False)[:30000],
+        )
+        raw_cards = _memory_card_json(result).get("cards") or []
+        if not isinstance(raw_cards, list):
+            raise ValueError("记忆整理结果中的 cards 不是数组")
+        per_source: dict[str, int] = {}
+        proposals = []
+        for raw in raw_cards[:40]:
+            if not isinstance(raw, dict):
+                continue
+            key = str(raw.get("source") or "")
+            segment = source_map.get(key)
+            if not segment or per_source.get(key, 0) >= 4:
+                continue
+            try:
+                clean = _memory_card_clean(raw)
+            except ValueError:
+                continue
+            clean["source_segment_id"] = segment["id"]
+            proposals.append(clean)
+            per_source[key] = per_source.get(key, 0) + 1
+        db.memory_card_stage(chat_id, proposals)
+        state = db.memory_card_state_get(chat_id)
+        db.memory_card_state_set(chat_id, "review" if state["draft_count"] else "ready", generated=True)
+    except Exception as exc:
+        db.memory_card_state_set(chat_id, "error", str(exc), generated=True)
+
+
+async def _refresh_memory_card_suggestions(chat_id: str) -> None:
+    """为已有分段补建候选卡片，供第二阶段控制台手动触发。"""
+    try:
+        selection, provider, _explicit = _long_context_model(chat_id)
+        if not provider or not provider.get("enabled") or not selection.get("model_id"):
+            raise RuntimeError("生成记忆卡片前，请先选择可用的长期上下文模型")
+        segments = db.chat_memory_segments(chat_id)
+        if not segments:
+            raise RuntimeError("这间聊天还没有可整理的长期上下文分段")
+        for start in range(0, len(segments), 4):
+            await _stage_memory_card_suggestions(
+                chat_id, provider, selection["model_id"], segments[start:start + 4]
+            )
+            if db.memory_card_state_get(chat_id)["status"] == "error":
+                break
+    except Exception as exc:
+        db.memory_card_state_set(chat_id, "error", str(exc), generated=True)
+    finally:
+        _memory_card_tasks.pop(chat_id, None)
+
+
 def _long_context_model(chat_id: str) -> tuple[dict, dict | None, bool]:
     """Return the explicit compression model, with the chat model as a safe legacy fallback."""
     fallback = db.chat_model_get(chat_id)
@@ -397,8 +568,8 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
                 "请压缩这一段聊天原文：\n\n" + _memory_transcript(rows),
             )
             segment = segment[:6000]
-            db.chat_memory_add_segment(chat_id, start, end, segment)
-            new_segments.append(segment)
+            saved_segment = db.chat_memory_add_segment(chat_id, start, end, segment)
+            new_segments.append(saved_segment)
             through = end
 
         if not new_segments and state.get("overview"):
@@ -407,7 +578,9 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
 
         previous = str(state.get("overview") or "").strip()
         source = ("已有长期上下文：\n" + previous + "\n\n") if previous else ""
-        source += "新加入的分段记录：\n" + "\n\n---\n\n".join(new_segments)
+        source += "新加入的分段记录：\n" + "\n\n---\n\n".join(
+            item["content"] for item in new_segments
+        )
         overview = await _memory_completion(
             provider, selection["model_id"],
             "你在替 Cloudy 维护一份会注入未来聊天的记忆。第一人称“我”永远是 Cloudy，用户永远写作“她”。"
@@ -420,6 +593,10 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
             source[:30000],
         )
         db.chat_memory_stage(chat_id, overview[:9000], through)
+        # 卡片建议与总摘要一样先进入草稿；第一阶段不会将卡片注入聊天。
+        await _stage_memory_card_suggestions(
+            chat_id, provider, selection["model_id"], new_segments
+        )
     except Exception as exc:
         db.chat_memory_set_status(chat_id, "error", str(exc), enabled=True)
     finally:
@@ -2418,6 +2595,123 @@ async def long_context_restore(chat_id: str, request: Request):
     return {"ok": True, **state}
 
 
+# ---------------------------------------------------------------- 聊天记忆卡片（第一阶段：存储与审核，不参与回复）
+
+def _memory_card_taxonomy() -> dict:
+    return {
+        "types": MEMORY_CARD_TYPES,
+        "topics": MEMORY_CARD_TOPICS,
+        "importance": MEMORY_CARD_IMPORTANCE,
+        "retention": MEMORY_CARD_RETENTION,
+        "surface_scope": {"chat_only": "仅当前聊天"},
+    }
+
+
+def _memory_card_draft(chat_id: str, draft_id: str) -> dict:
+    draft = next(
+        (item for item in db.memory_card_draft_list(chat_id) if item["id"] == draft_id),
+        None,
+    )
+    if not draft:
+        raise HTTPException(404, "没有找到这条待确认记忆")
+    return draft
+
+
+def _memory_card_review_state(chat_id: str) -> dict:
+    state = db.memory_card_state_get(chat_id)
+    if state["status"] != "running":
+        db.memory_card_state_set(chat_id, "review" if state["draft_count"] else "ready")
+        state = db.memory_card_state_get(chat_id)
+    return state
+
+
+@app.get("/api/chats/{chat_id}/memory-cards", dependencies=authed)
+async def memory_cards_get(chat_id: str, include_archived: bool = False):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    return {
+        "ok": True,
+        "chat_id": chat_id,
+        "state": db.memory_card_state_get(chat_id),
+        "taxonomy": _memory_card_taxonomy(),
+        "items": db.memory_card_list(chat_id, include_archived=include_archived),
+        "drafts": db.memory_card_draft_list(chat_id),
+        "injected_into_chat": False,
+    }
+
+
+@app.post("/api/chats/{chat_id}/memory-cards/generate", dependencies=authed)
+async def memory_cards_generate(chat_id: str):
+    """从已有分段补建待确认建议；任务后台运行，正式卡片和聊天上下文不变。"""
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    summary_task = _memory_tasks.get(chat_id)
+    if summary_task and not summary_task.done():
+        raise HTTPException(409, "长期上下文正在整理，请完成后再生成记忆卡片")
+    task = _memory_card_tasks.get(chat_id)
+    if task and not task.done():
+        return {"ok": True, "started": False, "state": db.memory_card_state_get(chat_id)}
+    db.memory_card_state_set(chat_id, "queued")
+    task = asyncio.create_task(_refresh_memory_card_suggestions(chat_id))
+    _memory_card_tasks[chat_id] = task
+    return {"ok": True, "started": True, "state": db.memory_card_state_get(chat_id)}
+
+
+@app.post("/api/chats/{chat_id}/memory-card-drafts/{draft_id}/accept", dependencies=authed)
+async def memory_card_draft_accept(chat_id: str, draft_id: str, request: Request):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    draft = _memory_card_draft(chat_id, draft_id)
+    payload = await _read_json(request)
+    chosen = dict(draft)
+    for field in ("content", "memory_type", "topics", "importance", "retention", "valid_until"):
+        if field in payload:
+            chosen[field] = payload[field]
+    try:
+        clean = _memory_card_clean(chosen)
+        card = db.memory_card_draft_accept(chat_id, draft_id, clean)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "item": card, "state": _memory_card_review_state(chat_id)}
+
+
+@app.delete("/api/chats/{chat_id}/memory-card-drafts/{draft_id}", dependencies=authed)
+async def memory_card_draft_discard(chat_id: str, draft_id: str):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    if not db.memory_card_draft_discard(chat_id, draft_id):
+        raise HTTPException(404, "没有找到这条待确认记忆")
+    return {"ok": True, "state": _memory_card_review_state(chat_id)}
+
+
+@app.put("/api/chats/{chat_id}/memory-cards/{card_id}", dependencies=authed)
+async def memory_card_put(chat_id: str, card_id: str, request: Request):
+    current = db.memory_card_get(chat_id, card_id)
+    if not current:
+        raise HTTPException(404, "没有找到这张记忆卡片")
+    payload = await _read_json(request)
+    chosen = dict(current)
+    for field in (
+        "content", "memory_type", "topics", "importance", "retention", "valid_until", "status",
+    ):
+        if field in payload:
+            chosen[field] = payload[field]
+    try:
+        clean = _memory_card_clean(chosen, allow_status=True)
+        card = db.memory_card_update(chat_id, card_id, clean)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "item": card}
+
+
+@app.delete("/api/chats/{chat_id}/memory-cards/{card_id}", dependencies=authed)
+async def memory_card_delete(chat_id: str, card_id: str):
+    """可恢复地归档一张卡片；不删除来源消息或分段摘要。"""
+    if not db.memory_card_archive(chat_id, card_id):
+        raise HTTPException(404, "没有找到这张记忆卡片")
+    return {"ok": True, "id": card_id, "archived": True}
+
+
 @app.post("/api/import/kelivo/preview", dependencies=authed)
 async def kelivo_import_preview(file: UploadFile = File(...)):
     """Receive only a Kelivo .db file, inspect its conversations, and cache it briefly."""
@@ -3248,3 +3542,4 @@ async def static_or_index(path: str):
     if f.exists():
         return FileResponse(f)
     raise HTTPException(404, "没有这个页面")
+
