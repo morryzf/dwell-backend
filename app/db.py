@@ -226,6 +226,62 @@ CREATE TABLE IF NOT EXISTS chat_memory_versions (
 CREATE INDEX IF NOT EXISTS ix_chat_memory_versions_chat
 ON chat_memory_versions(chat_id, made DESC);
 
+-- 可检索的短记忆卡片。它们是从聊天原文派生出的索引，不替代原始消息，
+-- 第一阶段也不会自动注入模型上下文。
+CREATE TABLE IF NOT EXISTS memory_cards (
+    id                  TEXT PRIMARY KEY,
+    chat_id             TEXT NOT NULL,
+    content             TEXT NOT NULL,
+    memory_type         TEXT NOT NULL,
+    topics_json         TEXT NOT NULL DEFAULT '[]',
+    importance          TEXT NOT NULL DEFAULT 'normal',
+    retention           TEXT NOT NULL DEFAULT 'long_term',
+    valid_until         TEXT,
+    surface_scope       TEXT NOT NULL DEFAULT 'chat_only',
+    status              TEXT NOT NULL DEFAULT 'active',
+    source_segment_id   TEXT,
+    source_start_rowid  INTEGER NOT NULL DEFAULT 0,
+    source_end_rowid    INTEGER NOT NULL DEFAULT 0,
+    made                INTEGER NOT NULL,
+    updated             INTEGER NOT NULL,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_segment_id) REFERENCES chat_memory_segments(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS ix_memory_cards_chat
+ON memory_cards(chat_id, status, updated DESC);
+
+-- 模型只提出候选卡片。候选在用户确认前不会进入正式记忆。
+CREATE TABLE IF NOT EXISTS memory_card_drafts (
+    id                  TEXT PRIMARY KEY,
+    chat_id             TEXT NOT NULL,
+    action              TEXT NOT NULL DEFAULT 'create',
+    target_card_id      TEXT,
+    content             TEXT NOT NULL,
+    memory_type         TEXT NOT NULL,
+    topics_json         TEXT NOT NULL DEFAULT '[]',
+    importance          TEXT NOT NULL DEFAULT 'normal',
+    retention           TEXT NOT NULL DEFAULT 'long_term',
+    valid_until         TEXT,
+    surface_scope       TEXT NOT NULL DEFAULT 'chat_only',
+    source_segment_id   TEXT,
+    source_start_rowid  INTEGER NOT NULL DEFAULT 0,
+    source_end_rowid    INTEGER NOT NULL DEFAULT 0,
+    made                INTEGER NOT NULL,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_card_id) REFERENCES memory_cards(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_segment_id) REFERENCES chat_memory_segments(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS ix_memory_card_drafts_chat
+ON memory_card_drafts(chat_id, made DESC);
+
+CREATE TABLE IF NOT EXISTS memory_card_state (
+    chat_id       TEXT PRIMARY KEY,
+    status        TEXT NOT NULL DEFAULT 'idle',
+    error         TEXT NOT NULL DEFAULT '',
+    generated_at  INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+
 -- AI 回复的旧版本。重新生成或手动编辑时先存一份，当前 messages 表始终只保留
 -- 后续上下文真正会读到的那一版。
 CREATE TABLE IF NOT EXISTS message_versions (
@@ -1348,6 +1404,214 @@ def chat_memory_source_messages(chat_id: str, after_rowid: int, before_rowid: in
             (chat_id, int(after_rowid), int(before_rowid), int(limit)),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------- 聊天记忆卡片
+
+def _memory_card_dict(row: sqlite3.Row | dict | None) -> dict | None:
+    if not row:
+        return None
+    item = dict(row)
+    try:
+        topics = json.loads(item.pop("topics_json", "[]"))
+    except (TypeError, json.JSONDecodeError):
+        topics = []
+    item["topics"] = [str(topic) for topic in topics if str(topic).strip()]
+    return item
+
+
+def memory_card_state_get(chat_id: str) -> dict:
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT status,error,generated_at FROM memory_card_state WHERE chat_id=?",
+            (chat_id,),
+        ).fetchone()
+        draft_count = cx.execute(
+            "SELECT COUNT(*) FROM memory_card_drafts WHERE chat_id=?", (chat_id,)
+        ).fetchone()[0]
+        card_count = cx.execute(
+            "SELECT COUNT(*) FROM memory_cards WHERE chat_id=? AND status<>'archived'", (chat_id,)
+        ).fetchone()[0]
+    out = dict(row) if row else {"status": "idle", "error": "", "generated_at": 0}
+    out["draft_count"] = int(draft_count)
+    out["card_count"] = int(card_count)
+    return out
+
+
+def memory_card_state_set(chat_id: str, status: str, error: str = "", generated: bool = False) -> None:
+    now = int(time.time()) if generated else 0
+    with conn() as cx:
+        cx.execute(
+            """INSERT INTO memory_card_state (chat_id,status,error,generated_at)
+               VALUES (?,?,?,?)
+               ON CONFLICT(chat_id) DO UPDATE SET status=excluded.status,error=excluded.error,
+               generated_at=CASE WHEN excluded.generated_at>0 THEN excluded.generated_at
+                                 ELSE memory_card_state.generated_at END""",
+            (chat_id, status[:40], error[:1000], now),
+        )
+
+
+def memory_card_list(chat_id: str, include_archived: bool = False) -> list[dict]:
+    with conn() as cx:
+        if include_archived:
+            rows = cx.execute(
+                "SELECT * FROM memory_cards WHERE chat_id=? ORDER BY updated DESC, rowid DESC",
+                (chat_id,),
+            ).fetchall()
+        else:
+            rows = cx.execute(
+                "SELECT * FROM memory_cards WHERE chat_id=? AND status<>'archived' "
+                "ORDER BY updated DESC, rowid DESC",
+                (chat_id,),
+            ).fetchall()
+    return [_memory_card_dict(row) for row in rows]
+
+
+def memory_card_get(chat_id: str, card_id: str) -> dict | None:
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT * FROM memory_cards WHERE id=? AND chat_id=?", (card_id, chat_id)
+        ).fetchone()
+    return _memory_card_dict(row)
+
+
+def memory_card_draft_list(chat_id: str) -> list[dict]:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT * FROM memory_card_drafts WHERE chat_id=? ORDER BY made ASC, rowid ASC",
+            (chat_id,),
+        ).fetchall()
+    return [_memory_card_dict(row) for row in rows]
+
+
+def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
+    """保存模型建议；相同内容的正式卡片或待审草稿不会重复出现。"""
+    now = int(time.time())
+    inserted = 0
+    with conn() as cx:
+        existing = {
+            re.sub(r"\s+", "", str(row["content"])).casefold()
+            for row in cx.execute(
+                "SELECT content FROM memory_cards WHERE chat_id=? AND status<>'archived' "
+                "UNION ALL SELECT content FROM memory_card_drafts WHERE chat_id=?",
+                (chat_id, chat_id),
+            ).fetchall()
+        }
+        for proposal in proposals[:40]:
+            content = str(proposal.get("content") or "").strip()[:1200]
+            fingerprint = re.sub(r"\s+", "", content).casefold()
+            if not content or fingerprint in existing:
+                continue
+            segment_id = str(proposal.get("source_segment_id") or "") or None
+            if segment_id:
+                segment = cx.execute(
+                    "SELECT start_rowid,end_rowid FROM chat_memory_segments WHERE id=? AND chat_id=?",
+                    (segment_id, chat_id),
+                ).fetchone()
+                if not segment:
+                    continue
+                source_start = int(segment["start_rowid"])
+                source_end = int(segment["end_rowid"])
+            else:
+                source_start = max(0, int(proposal.get("source_start_rowid") or 0))
+                source_end = max(source_start, int(proposal.get("source_end_rowid") or 0))
+            row = {
+                "id": new_id(), "chat_id": chat_id, "action": "create", "target_card_id": None,
+                "content": content, "memory_type": str(proposal.get("memory_type") or "stable_fact")[:40],
+                "topics_json": json.dumps(proposal.get("topics") or [], ensure_ascii=False),
+                "importance": str(proposal.get("importance") or "normal")[:20],
+                "retention": str(proposal.get("retention") or "long_term")[:20],
+                "valid_until": proposal.get("valid_until") or None, "surface_scope": "chat_only",
+                "source_segment_id": segment_id, "source_start_rowid": source_start,
+                "source_end_rowid": source_end, "made": now,
+            }
+            cx.execute(
+                """INSERT INTO memory_card_drafts
+                   (id,chat_id,action,target_card_id,content,memory_type,topics_json,importance,
+                    retention,valid_until,surface_scope,source_segment_id,source_start_rowid,
+                    source_end_rowid,made)
+                   VALUES (:id,:chat_id,:action,:target_card_id,:content,:memory_type,:topics_json,
+                           :importance,:retention,:valid_until,:surface_scope,:source_segment_id,
+                           :source_start_rowid,:source_end_rowid,:made)""",
+                row,
+            )
+            existing.add(fingerprint)
+            inserted += 1
+    return inserted
+
+
+def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
+    """采用一条经过用户确认或编辑的建议。第一阶段只生成 create 建议。"""
+    now = int(time.time())
+    with conn() as cx:
+        draft = cx.execute(
+            "SELECT * FROM memory_card_drafts WHERE id=? AND chat_id=?", (draft_id, chat_id)
+        ).fetchone()
+        if not draft:
+            raise ValueError("没有找到这条待确认记忆")
+        if draft["action"] != "create":
+            raise ValueError("暂不支持这种记忆变更")
+        row = {
+            "id": new_id(), "chat_id": chat_id,
+            "content": str(chosen["content"]).strip()[:1200],
+            "memory_type": str(chosen["memory_type"])[:40],
+            "topics_json": json.dumps(chosen.get("topics") or [], ensure_ascii=False),
+            "importance": str(chosen["importance"])[:20],
+            "retention": str(chosen["retention"])[:20],
+            "valid_until": chosen.get("valid_until") or None,
+            "surface_scope": "chat_only", "status": "active",
+            "source_segment_id": draft["source_segment_id"],
+            "source_start_rowid": int(draft["source_start_rowid"]),
+            "source_end_rowid": int(draft["source_end_rowid"]),
+            "made": now, "updated": now,
+        }
+        cx.execute(
+            """INSERT INTO memory_cards
+               (id,chat_id,content,memory_type,topics_json,importance,retention,valid_until,
+                surface_scope,status,source_segment_id,source_start_rowid,source_end_rowid,made,updated)
+               VALUES (:id,:chat_id,:content,:memory_type,:topics_json,:importance,:retention,
+                       :valid_until,:surface_scope,:status,:source_segment_id,:source_start_rowid,
+                       :source_end_rowid,:made,:updated)""",
+            row,
+        )
+        cx.execute("DELETE FROM memory_card_drafts WHERE id=?", (draft_id,))
+    return memory_card_get(chat_id, row["id"])
+
+
+def memory_card_draft_discard(chat_id: str, draft_id: str) -> bool:
+    with conn() as cx:
+        cur = cx.execute(
+            "DELETE FROM memory_card_drafts WHERE id=? AND chat_id=?", (draft_id, chat_id)
+        )
+    return cur.rowcount > 0
+
+
+def memory_card_update(chat_id: str, card_id: str, chosen: dict) -> dict:
+    now = int(time.time())
+    with conn() as cx:
+        cur = cx.execute(
+            """UPDATE memory_cards SET content=?,memory_type=?,topics_json=?,importance=?,
+               retention=?,valid_until=?,status=?,updated=? WHERE id=? AND chat_id=?""",
+            (
+                str(chosen["content"]).strip()[:1200], str(chosen["memory_type"])[:40],
+                json.dumps(chosen.get("topics") or [], ensure_ascii=False),
+                str(chosen["importance"])[:20], str(chosen["retention"])[:20],
+                chosen.get("valid_until") or None, str(chosen.get("status") or "active")[:20],
+                now, card_id, chat_id,
+            ),
+        )
+    if not cur.rowcount:
+        raise ValueError("没有找到这张记忆卡片")
+    return memory_card_get(chat_id, card_id)
+
+
+def memory_card_archive(chat_id: str, card_id: str) -> bool:
+    with conn() as cx:
+        cur = cx.execute(
+            "UPDATE memory_cards SET status='archived',updated=? WHERE id=? AND chat_id=?",
+            (int(time.time()), card_id, chat_id),
+        )
+    return cur.rowcount > 0
 
 
 def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -> dict:
