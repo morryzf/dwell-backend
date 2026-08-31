@@ -282,6 +282,26 @@ CREATE TABLE IF NOT EXISTS memory_card_state (
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
 );
 
+-- 记录每次真正送进模型上下文的卡片快照。之后即使卡片被编辑或归档，
+-- 控制台仍能准确说明那一轮 AI 当时看见了什么。
+CREATE TABLE IF NOT EXISTS memory_card_uses (
+    id                  TEXT PRIMARY KEY,
+    chat_id             TEXT NOT NULL,
+    card_id             TEXT NOT NULL,
+    response_message_id TEXT NOT NULL,
+    content_snapshot    TEXT NOT NULL,
+    metadata_json       TEXT NOT NULL DEFAULT '{}',
+    query_excerpt       TEXT NOT NULL DEFAULT '',
+    score               REAL NOT NULL DEFAULT 0,
+    used_at             INTEGER NOT NULL,
+    UNIQUE(response_message_id, card_id),
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (card_id) REFERENCES memory_cards(id) ON DELETE CASCADE,
+    FOREIGN KEY (response_message_id) REFERENCES messages(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_memory_card_uses_chat
+ON memory_card_uses(chat_id, used_at DESC);
+
 -- AI 回复的旧版本。重新生成或手动编辑时先存一份，当前 messages 表始终只保留
 -- 后续上下文真正会读到的那一版。
 CREATE TABLE IF NOT EXISTS message_versions (
@@ -1612,6 +1632,79 @@ def memory_card_archive(chat_id: str, card_id: str) -> bool:
             (int(time.time()), card_id, chat_id),
         )
     return cur.rowcount > 0
+
+
+def memory_card_injection_enabled(chat_id: str) -> bool:
+    return setting_get(f"memory_cards_enabled:{chat_id}", "1") != "0"
+
+
+def memory_card_injection_set(chat_id: str, enabled: bool) -> None:
+    setting_set(f"memory_cards_enabled:{chat_id}", "1" if enabled else "0")
+
+
+def memory_card_usage_record(
+    chat_id: str, response_message_id: str, query: str, cards: list[dict]
+) -> None:
+    """Replace the usage audit for one response with the exact selected snapshots."""
+    now = int(time.time())
+    with conn() as cx:
+        cx.execute(
+            "DELETE FROM memory_card_uses WHERE response_message_id=? AND chat_id=?",
+            (response_message_id, chat_id),
+        )
+        for card in cards[:5]:
+            metadata = {
+                "memory_type": card.get("memory_type"),
+                "topics": card.get("topics") or [],
+                "importance": card.get("importance"),
+                "retention": card.get("retention"),
+                "valid_until": card.get("valid_until"),
+                "source_start_rowid": card.get("source_start_rowid") or 0,
+                "source_end_rowid": card.get("source_end_rowid") or 0,
+            }
+            cx.execute(
+                """INSERT INTO memory_card_uses
+                   (id,chat_id,card_id,response_message_id,content_snapshot,metadata_json,
+                    query_excerpt,score,used_at) VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    new_id(), chat_id, card["id"], response_message_id,
+                    str(card.get("content") or "")[:1200],
+                    json.dumps(metadata, ensure_ascii=False), str(query or "")[-500:],
+                    float(card.get("selection_score") or 0), now,
+                ),
+            )
+
+
+def memory_card_last_injection(chat_id: str) -> dict | None:
+    with conn() as cx:
+        latest = cx.execute(
+            """SELECT response_message_id,MAX(used_at) AS used_at
+               FROM memory_card_uses WHERE chat_id=? GROUP BY response_message_id
+               ORDER BY used_at DESC LIMIT 1""",
+            (chat_id,),
+        ).fetchone()
+        if not latest:
+            return None
+        rows = cx.execute(
+            """SELECT card_id,content_snapshot,metadata_json,score,used_at
+               FROM memory_card_uses WHERE chat_id=? AND response_message_id=?
+               ORDER BY score DESC,rowid ASC""",
+            (chat_id, latest["response_message_id"]),
+        ).fetchall()
+    items = []
+    for row in rows:
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            metadata = {}
+        items.append({
+            "id": row["card_id"], "content": row["content_snapshot"],
+            **metadata, "selection_score": float(row["score"]),
+        })
+    return {
+        "response_message_id": latest["response_message_id"],
+        "used_at": int(latest["used_at"]), "items": items,
+    }
 
 
 def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -> dict:

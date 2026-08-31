@@ -57,6 +57,39 @@ class MemoryCardDatabaseTest(unittest.TestCase):
             len(db.memory_card_list(self.chat["id"], include_archived=True)), 1
         )
 
+    def test_records_the_exact_cards_used_for_a_response(self):
+        proposal = {
+            "content": "她现在住在上海。",
+            "memory_type": "stable_fact",
+            "topics": ["place"],
+            "importance": "normal",
+            "retention": "long_term",
+            "valid_until": None,
+            "source_segment_id": self.segment["id"],
+        }
+        db.memory_card_stage(self.chat["id"], [proposal])
+        draft = db.memory_card_draft_list(self.chat["id"])[0]
+        card = db.memory_card_draft_accept(self.chat["id"], draft["id"], draft)
+        response = db.message_add(self.chat["id"], "assistant", "")
+
+        db.memory_card_usage_record(
+            self.chat["id"], response["id"], "上海天气", [{**card, "selection_score": 3.5}]
+        )
+        # Later edits do not rewrite what the model saw in the earlier turn.
+        db.memory_card_update(
+            self.chat["id"], card["id"], {**card, "content": "她已经搬家。"}
+        )
+
+        used = db.memory_card_last_injection(self.chat["id"])
+        self.assertEqual(used["response_message_id"], response["id"])
+        self.assertEqual(used["items"][0]["content"], "她现在住在上海。")
+        self.assertEqual(used["items"][0]["topics"], ["place"])
+
+    def test_memory_card_injection_can_be_disabled_per_chat(self):
+        self.assertTrue(db.memory_card_injection_enabled(self.chat["id"]))
+        db.memory_card_injection_set(self.chat["id"], False)
+        self.assertFalse(db.memory_card_injection_enabled(self.chat["id"]))
+
 
 if __name__ == "__main__":
     unittest.main()
