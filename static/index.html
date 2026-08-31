@@ -1271,7 +1271,10 @@ html[data-theme="dark"] .composer {
   .nk-note-text { font-size: 15px; line-height: 1.75; white-space: pre-wrap; }
 
   /* Cloudy's study is a place, not another settings dashboard. */
-  #nookSheet.room .sheet { background: #1a0d10 url('assets/study/cloudy-study-backdrop-v2.jpg') center top / auto 100dvh no-repeat; color: #eadfda; }
+  #nookSheet.room .sheet { color: #eadfda; background-color: #1a0d10 !important;
+    background-image: url('assets/study/cloudy-study-backdrop-v2.jpg') !important;
+    background-position: center top !important; background-size: auto 100dvh !important; background-repeat: no-repeat !important;
+    border: 0 !important; outline: 0; box-shadow: none !important; }
   #nookSheet.room .grabber { background: rgba(235,220,213,.24); }
   #nookSheet.room .head { position: relative; z-index: 2; color: #eadfda;
     background: linear-gradient(180deg, rgba(18,12,15,.52), rgba(18,12,15,.08)); border-bottom-color: transparent; }
@@ -1359,7 +1362,7 @@ html[data-theme="dark"] .composer {
   .nk-room-panel .nk-settings option { color: #1d1013; }
   .nk-room-panel .nk-settings .save { color: #211014; background: #ddd0c7; }
   @media (orientation:portrait) {
-    .nk-room { padding-top: clamp(104px,18vh,148px); }
+    .nk-room { padding-top: clamp(12px,2vh,24px); }
     .nk-cabinet { box-sizing: border-box; width: 86%; margin-inline: auto; }
   }
   @media (max-width:420px) { .nk-cabinet { padding-inline: 9px; } .nk-shelf-tier { gap: 7px; } .nk-detail-hero { grid-template-columns: 92px 1fr; gap: 16px; } }
@@ -6457,6 +6460,13 @@ function nkHead(title, sub) {
 function nkRoomMode(on) {
   document.getElementById('nookSheet').classList.toggle('room', !!on);
 }
+function nkSetBack(inside) {
+  const icon = nkBackBtn.querySelector('.ic'); if (!icon) return;
+  icon.dataset.i = inside ? 'chevL' : 'x';
+  nkBackBtn.title = inside ? '返回书房' : '关闭书房';
+  nkBackBtn.setAttribute('aria-label', nkBackBtn.title);
+  fillIcons(nkBackBtn);
+}
 
 function nkCover(book, detail) {
   const cover = document.createElement(detail ? 'div' : 'button');
@@ -6486,6 +6496,7 @@ function nkRoomShell(panel, roomObject) {
 }
 
 async function loadShelf() {
+  nkSetBack(false);
   nkSlug = ''; nkChapters = []; nkView = 'shelf'; nkDetailId = '';
   nkTocBtn.style.display = 'none';
   nkNote('正在开门…');
@@ -6538,6 +6549,7 @@ async function loadShelf() {
 }
 
 async function renderBookDetail(bookId) {
+  nkSetBack(true);
   nkView = 'detail'; nkDetailId = bookId; nkSlug = ''; nkTocBtn.style.display = 'none'; nkNote('正在抽出这本书…');
   let books, prog;
   try { [books, prog] = await Promise.all([nkGet('books'), nkGet('progress')]); }
@@ -6579,6 +6591,7 @@ async function renderBookDetail(bookId) {
 }
 
 async function renderCollection() {
+  nkSetBack(true);
   nkView = 'collection'; nkDetailId = ''; nkTocBtn.style.display = 'none'; nkNote('正在打开收藏…');
   let books; try { books = await nkGet('books'); } catch (e) { return nkNote('收藏这会儿打不开'); }
   const items = (books || []).filter(b => b.collected); const panel = document.createElement('div'); panel.className = 'nk-room-panel';
@@ -6603,6 +6616,7 @@ async function renderCollection() {
 }
 
 async function renderStudySettings() {
+  nkSetBack(true);
   nkView = 'settings'; nkDetailId = ''; nkTocBtn.style.display = 'none'; nkNote('正在打开阅读安排…');
   let settings, chats, modelCatalog, books;
   try { [settings, chats, modelCatalog, books] = await Promise.all([nkGet('settings'), fetch('api/chats?scope=live',{cache:'no-store'}).then(r=>r.json()), fetch('api/model-catalog',{cache:'no-store'}).then(r=>r.json()), nkGet('books')]); }
@@ -6630,6 +6644,7 @@ async function renderStudySettings() {
 }
 
 async function renderReadingNotes(bookId) {
+  nkSetBack(true);
   nkSlug = ''; nkView = 'notes'; nkDetailId = bookId || ''; nkRoomMode(false); nkTocBtn.style.display = 'none'; nkNote('正在翻读书笔记…');
   let d;
   try { d = await nkGet('reading-notes'); } catch (e) { return nkNote('读书笔记这会儿打不开'); }
@@ -6651,6 +6666,7 @@ async function renderReadingNotes(bookId) {
 }
 
 async function renderStudyShares(bookId) {
+  nkSetBack(true);
   nkSlug = ''; nkView = 'shares'; nkDetailId = bookId || ''; nkRoomMode(false); nkTocBtn.style.display = 'none'; nkNote('正在翻分享本…');
   let d;
   try { d = await nkGet('shares'); } catch (e) { return nkNote('分享本这会儿打不开'); }
@@ -6693,6 +6709,7 @@ async function renderStudyShares(bookId) {
 }
 
 async function openChapter(slug, idx) {
+  nkSetBack(true);
   nkView = 'chapter'; nkDetailId = slug; nkRoomMode(false);
   nkNote('翻过去…');
   let d;
