@@ -17,14 +17,17 @@ class MemoryConsoleStaticTest(unittest.TestCase):
         for route in (
             "/memory-cards?include_archived=true",
             "/memory-cards/generate",
+            "/memory-cards/injection",
             "/memory-card-drafts/",
             "/memory-cards/",
         ):
             self.assertIn(route, self.html)
 
-    def test_console_keeps_phase_two_safety_message(self):
-        self.assertIn("目前记忆卡不会带入聊天", self.html)
-        self.assertIn("第三阶段开启检索后才会按需使用", self.html)
+    def test_console_explains_and_controls_phase_three_injection(self):
+        self.assertIn("按需记忆已开启", self.html)
+        self.assertIn("隐藏、归档和过期内容会自动排除", self.html)
+        self.assertIn("暂停按需记忆", self.html)
+        self.assertIn("最近一次带入", self.html)
 
 
 if __name__ == "__main__":
