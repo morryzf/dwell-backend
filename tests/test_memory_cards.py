@@ -39,7 +39,7 @@ class MemoryCardDatabaseTest(unittest.TestCase):
         self.assertEqual(db.memory_card_stage(self.chat["id"], [proposal]), 0)
 
         draft = db.memory_card_draft_list(self.chat["id"])[0]
-        self.assertEqual(draft["content"], "我记得：她现在住在上海。")
+        self.assertEqual(draft["content"], "她现在住在上海。")
         chosen = {**draft, "importance": "high"}
         card = db.memory_card_draft_accept(self.chat["id"], draft["id"], chosen)
 
@@ -83,7 +83,7 @@ class MemoryCardDatabaseTest(unittest.TestCase):
 
         used = db.memory_card_last_injection(self.chat["id"])
         self.assertEqual(used["response_message_id"], response["id"])
-        self.assertEqual(used["items"][0]["content"], "我记得：她现在住在上海。")
+        self.assertEqual(used["items"][0]["content"], "她现在住在上海。")
         self.assertEqual(used["items"][0]["topics"], ["place"])
 
     def test_memory_card_injection_can_be_disabled_per_chat(self):
@@ -95,6 +95,35 @@ class MemoryCardDatabaseTest(unittest.TestCase):
         self.assertEqual(db.memory_card_unprocessed_segments(self.chat["id"]), [self.segment])
         db.memory_card_segment_mark(self.chat["id"], self.segment["id"], 0)
         self.assertEqual(db.memory_card_unprocessed_segments(self.chat["id"]), [])
+
+    def test_removes_forced_prefix_once_without_rewriting_future_edits(self):
+        proposal = {
+            "content": "我记得：她喜欢秋天散步。",
+            "memory_type": "preference",
+            "topics": ["daily_life"],
+            "importance": "normal",
+            "retention": "long_term",
+            "valid_until": None,
+            "source_segment_id": self.segment["id"],
+        }
+        db.memory_card_stage(self.chat["id"], [proposal])
+        draft = db.memory_card_draft_list(self.chat["id"])[0]
+        card = db.memory_card_draft_accept(self.chat["id"], draft["id"], draft)
+        with db.conn() as cx:
+            cx.execute("DELETE FROM settings WHERE key='memory_remove_forced_prefix_v1'")
+
+        db.init_db()
+        cleaned = db.memory_card_get(self.chat["id"], card["id"])
+        self.assertEqual(cleaned["content"], "她喜欢秋天散步。")
+
+        edited = db.memory_card_update(
+            self.chat["id"], card["id"], {**cleaned, "content": "我记得：这是我主动写的。"}
+        )
+        db.init_db()
+        self.assertEqual(
+            db.memory_card_get(self.chat["id"], card["id"])["content"],
+            edited["content"],
+        )
 
 
 if __name__ == "__main__":

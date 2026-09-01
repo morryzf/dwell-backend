@@ -17,8 +17,6 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
-from .memory_retrieval import cloudy_memory_voice, cloudy_summary_voice
-
 DB_PATH = os.environ.get("DWELL_DB", "./data/dwell.db")
 
 # 中国时区。服务器多半跑 UTC，凡是"今天是几号"的判断全走这个函数。
@@ -439,28 +437,24 @@ def init_db():
             cx.execute("ALTER TABLE messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'chat'")
         if "display_split" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN display_split INTEGER NOT NULL DEFAULT 0")
-        # 旧版卡片是第三人称档案腔。升级时统一改成 Cloudy 自己的记忆口吻。
-        for table in ("memory_cards", "memory_card_drafts"):
-            for row in cx.execute(f"SELECT id,content FROM {table}").fetchall():
-                content = cloudy_memory_voice(row["content"])
-                if content != row["content"]:
-                    cx.execute(f"UPDATE {table} SET content=? WHERE id=?", (content, row["id"]))
-        for table, key in (
-            ("chat_memory_state", "chat_id"),
-            ("chat_memory_drafts", "chat_id"),
-            ("chat_memory_segments", "id"),
-        ):
-            column = "content" if table == "chat_memory_segments" else "overview"
-            rows = cx.execute(
-                f"SELECT {key},{column} AS overview FROM {table}"
-            ).fetchall()
-            for row in rows:
-                overview = cloudy_summary_voice(row["overview"])
-                if overview != row["overview"]:
-                    cx.execute(
-                        f"UPDATE {table} SET {column}=? WHERE {key}=?",
-                        (overview, row[key]),
-                    )
+        # #82 曾在保存时强制补“我记得：”。只清理一次这段前缀，绝不改正文；
+        # 清理完成后，用户以后主动写下同样的开头也会原样保留。
+        cleanup_key = "memory_remove_forced_prefix_v1"
+        cleaned = cx.execute("SELECT 1 FROM settings WHERE key=?", (cleanup_key,)).fetchone()
+        if not cleaned:
+            forced_prefix = re.compile(r"^我记得：\s*")
+            for table in ("memory_cards", "memory_card_drafts"):
+                for row in cx.execute(f"SELECT id,content FROM {table}").fetchall():
+                    content = forced_prefix.sub("", str(row["content"]), count=1)
+                    if content != row["content"]:
+                        cx.execute(
+                            f"UPDATE {table} SET content=? WHERE id=?",
+                            (content, row["id"]),
+                        )
+            cx.execute(
+                "INSERT INTO settings (key,value) VALUES (?,?)",
+                (cleanup_key, "1"),
+            )
         # 已经产出过卡片或候选卡片的旧分段，不再重复调用模型。
         cx.execute(
             """INSERT OR IGNORE INTO memory_card_segment_runs
@@ -1568,7 +1562,7 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
             ).fetchall()
         }
         for proposal in proposals[:40]:
-            content = cloudy_memory_voice(proposal.get("content"))[:1200]
+            content = str(proposal.get("content") or "").strip()[:1200]
             fingerprint = re.sub(r"\s+", "", content).casefold()
             if not content or fingerprint in existing:
                 continue
@@ -1623,7 +1617,7 @@ def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
             raise ValueError("暂不支持这种记忆变更")
         row = {
             "id": new_id(), "chat_id": chat_id,
-            "content": cloudy_memory_voice(chosen["content"])[:1200],
+            "content": str(chosen["content"]).strip()[:1200],
             "memory_type": str(chosen["memory_type"])[:40],
             "topics_json": json.dumps(chosen.get("topics") or [], ensure_ascii=False),
             "importance": str(chosen["importance"])[:20],
@@ -1663,7 +1657,7 @@ def memory_card_update(chat_id: str, card_id: str, chosen: dict) -> dict:
             """UPDATE memory_cards SET content=?,memory_type=?,topics_json=?,importance=?,
                retention=?,valid_until=?,status=?,updated=? WHERE id=? AND chat_id=?""",
             (
-                cloudy_memory_voice(chosen["content"])[:1200], str(chosen["memory_type"])[:40],
+                str(chosen["content"]).strip()[:1200], str(chosen["memory_type"])[:40],
                 json.dumps(chosen.get("topics") or [], ensure_ascii=False),
                 str(chosen["importance"])[:20], str(chosen["retention"])[:20],
                 chosen.get("valid_until") or None, str(chosen.get("status") or "active")[:20],
