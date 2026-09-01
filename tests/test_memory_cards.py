@@ -39,6 +39,7 @@ class MemoryCardDatabaseTest(unittest.TestCase):
         self.assertEqual(db.memory_card_stage(self.chat["id"], [proposal]), 0)
 
         draft = db.memory_card_draft_list(self.chat["id"])[0]
+        self.assertEqual(draft["content"], "我记得：她现在住在上海。")
         chosen = {**draft, "importance": "high"}
         card = db.memory_card_draft_accept(self.chat["id"], draft["id"], chosen)
 
@@ -82,13 +83,18 @@ class MemoryCardDatabaseTest(unittest.TestCase):
 
         used = db.memory_card_last_injection(self.chat["id"])
         self.assertEqual(used["response_message_id"], response["id"])
-        self.assertEqual(used["items"][0]["content"], "她现在住在上海。")
+        self.assertEqual(used["items"][0]["content"], "我记得：她现在住在上海。")
         self.assertEqual(used["items"][0]["topics"], ["place"])
 
     def test_memory_card_injection_can_be_disabled_per_chat(self):
         self.assertTrue(db.memory_card_injection_enabled(self.chat["id"]))
         db.memory_card_injection_set(self.chat["id"], False)
         self.assertFalse(db.memory_card_injection_enabled(self.chat["id"]))
+
+    def test_each_segment_is_only_offered_for_generation_once(self):
+        self.assertEqual(db.memory_card_unprocessed_segments(self.chat["id"]), [self.segment])
+        db.memory_card_segment_mark(self.chat["id"], self.segment["id"], 0)
+        self.assertEqual(db.memory_card_unprocessed_segments(self.chat["id"]), [])
 
 
 if __name__ == "__main__":

@@ -39,6 +39,18 @@ COMMON_CJK_GRAMS = {
 }
 
 
+def cloudy_memory_voice(content: object) -> str:
+    """把卡片统一写成 Cloudy 自己在回忆，而不是第三人称档案。"""
+    text = re.sub(r"\s+", " ", str(content or "")).strip()
+    if not text:
+        return ""
+    text = text.replace("AI伴侣", "我").replace("Cloudy", "我")
+    text = text.replace("用户", "她")
+    if text.startswith(("我", "我们", "她跟我", "她告诉我", "她对我", "她和我")):
+        return text
+    return f"我记得：{text}"
+
+
 def _normalized(text: object) -> str:
     return re.sub(r"\s+", "", str(text or "").casefold())
 

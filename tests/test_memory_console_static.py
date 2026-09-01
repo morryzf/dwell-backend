@@ -29,6 +29,10 @@ class MemoryConsoleStaticTest(unittest.TestCase):
         self.assertIn("暂停按需记忆", self.html)
         self.assertIn("最近一次带入", self.html)
 
+    def test_manual_generation_only_checks_new_segments(self):
+        self.assertIn("整理新的分段", self.html)
+        self.assertIn("尚未处理的新分段", self.html)
+
 
 if __name__ == "__main__":
     unittest.main()
