@@ -12,6 +12,8 @@ class MemoryChatIntegrationTest(unittest.TestCase):
 
     def test_main_module_parses_and_wires_selection_before_history(self):
         ast.parse(self.source)
+        self.assertIn("MEMORY_TAIL_MESSAGES = 80", self.source)
+        self.assertIn("MEMORY_UPDATE_MIN_MESSAGES = 50", self.source)
         self.assertIn("select_memory_cards(", self.source)
         self.assertIn("db.memory_card_usage_record(", self.source)
         self.assertIn("memory_message + memory_card_message + [", self.source)
