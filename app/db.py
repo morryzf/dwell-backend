@@ -17,6 +17,8 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
+from .memory_retrieval import cloudy_memory_voice, cloudy_summary_voice
+
 DB_PATH = os.environ.get("DWELL_DB", "./data/dwell.db")
 
 # 中国时区。服务器多半跑 UTC，凡是"今天是几号"的判断全走这个函数。
@@ -282,6 +284,18 @@ CREATE TABLE IF NOT EXISTS memory_card_state (
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
 );
 
+-- 每个分段只生成一次候选卡片。即使某段没有值得留下的卡片，也会记录已检查。
+CREATE TABLE IF NOT EXISTS memory_card_segment_runs (
+    segment_id      TEXT PRIMARY KEY,
+    chat_id         TEXT NOT NULL,
+    candidate_count INTEGER NOT NULL DEFAULT 0,
+    processed_at    INTEGER NOT NULL,
+    FOREIGN KEY (segment_id) REFERENCES chat_memory_segments(id) ON DELETE CASCADE,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_memory_card_segment_runs_chat
+ON memory_card_segment_runs(chat_id, processed_at DESC);
+
 -- 记录每次真正送进模型上下文的卡片快照。之后即使卡片被编辑或归档，
 -- 控制台仍能准确说明那一轮 AI 当时看见了什么。
 CREATE TABLE IF NOT EXISTS memory_card_uses (
@@ -425,6 +439,42 @@ def init_db():
             cx.execute("ALTER TABLE messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'chat'")
         if "display_split" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN display_split INTEGER NOT NULL DEFAULT 0")
+        # 旧版卡片是第三人称档案腔。升级时统一改成 Cloudy 自己的记忆口吻。
+        for table in ("memory_cards", "memory_card_drafts"):
+            for row in cx.execute(f"SELECT id,content FROM {table}").fetchall():
+                content = cloudy_memory_voice(row["content"])
+                if content != row["content"]:
+                    cx.execute(f"UPDATE {table} SET content=? WHERE id=?", (content, row["id"]))
+        for table, key in (
+            ("chat_memory_state", "chat_id"),
+            ("chat_memory_drafts", "chat_id"),
+            ("chat_memory_segments", "id"),
+        ):
+            column = "content" if table == "chat_memory_segments" else "overview"
+            rows = cx.execute(
+                f"SELECT {key},{column} AS overview FROM {table}"
+            ).fetchall()
+            for row in rows:
+                overview = cloudy_summary_voice(row["overview"])
+                if overview != row["overview"]:
+                    cx.execute(
+                        f"UPDATE {table} SET {column}=? WHERE {key}=?",
+                        (overview, row[key]),
+                    )
+        # 已经产出过卡片或候选卡片的旧分段，不再重复调用模型。
+        cx.execute(
+            """INSERT OR IGNORE INTO memory_card_segment_runs
+               (segment_id,chat_id,candidate_count,processed_at)
+               SELECT source_segment_id,chat_id,COUNT(*),?
+               FROM (
+                   SELECT source_segment_id,chat_id FROM memory_cards
+                   WHERE source_segment_id IS NOT NULL
+                   UNION ALL
+                   SELECT source_segment_id,chat_id FROM memory_card_drafts
+                   WHERE source_segment_id IS NOT NULL
+               ) GROUP BY source_segment_id,chat_id""",
+            (int(time.time()),),
+        )
 
 
 # ---------------------------------------------------------------- 日记
@@ -1518,7 +1568,7 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
             ).fetchall()
         }
         for proposal in proposals[:40]:
-            content = str(proposal.get("content") or "").strip()[:1200]
+            content = cloudy_memory_voice(proposal.get("content"))[:1200]
             fingerprint = re.sub(r"\s+", "", content).casefold()
             if not content or fingerprint in existing:
                 continue
@@ -1573,7 +1623,7 @@ def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
             raise ValueError("暂不支持这种记忆变更")
         row = {
             "id": new_id(), "chat_id": chat_id,
-            "content": str(chosen["content"]).strip()[:1200],
+            "content": cloudy_memory_voice(chosen["content"])[:1200],
             "memory_type": str(chosen["memory_type"])[:40],
             "topics_json": json.dumps(chosen.get("topics") or [], ensure_ascii=False),
             "importance": str(chosen["importance"])[:20],
@@ -1613,7 +1663,7 @@ def memory_card_update(chat_id: str, card_id: str, chosen: dict) -> dict:
             """UPDATE memory_cards SET content=?,memory_type=?,topics_json=?,importance=?,
                retention=?,valid_until=?,status=?,updated=? WHERE id=? AND chat_id=?""",
             (
-                str(chosen["content"]).strip()[:1200], str(chosen["memory_type"])[:40],
+                cloudy_memory_voice(chosen["content"])[:1200], str(chosen["memory_type"])[:40],
                 json.dumps(chosen.get("topics") or [], ensure_ascii=False),
                 str(chosen["importance"])[:20], str(chosen["retention"])[:20],
                 chosen.get("valid_until") or None, str(chosen.get("status") or "active")[:20],
@@ -1623,6 +1673,39 @@ def memory_card_update(chat_id: str, card_id: str, chosen: dict) -> dict:
     if not cur.rowcount:
         raise ValueError("没有找到这张记忆卡片")
     return memory_card_get(chat_id, card_id)
+
+
+def memory_card_unprocessed_segments(chat_id: str) -> list[dict]:
+    """返回还没生成过候选卡片的分段，供旧数据补整理。"""
+    with conn() as cx:
+        rows = cx.execute(
+            """SELECT segment.* FROM chat_memory_segments AS segment
+               LEFT JOIN memory_card_segment_runs AS run ON run.segment_id=segment.id
+               WHERE segment.chat_id=? AND run.segment_id IS NULL
+               ORDER BY segment.start_rowid ASC""",
+            (chat_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def memory_card_segment_mark(
+    chat_id: str, segment_id: str, candidate_count: int = 0
+) -> None:
+    with conn() as cx:
+        segment = cx.execute(
+            "SELECT 1 FROM chat_memory_segments WHERE id=? AND chat_id=?",
+            (segment_id, chat_id),
+        ).fetchone()
+        if not segment:
+            raise ValueError("没有找到这段长期上下文")
+        cx.execute(
+            """INSERT INTO memory_card_segment_runs
+               (segment_id,chat_id,candidate_count,processed_at) VALUES (?,?,?,?)
+               ON CONFLICT(segment_id) DO UPDATE SET
+               candidate_count=excluded.candidate_count,
+               processed_at=excluded.processed_at""",
+            (segment_id, chat_id, max(0, int(candidate_count)), int(time.time())),
+        )
 
 
 def memory_card_archive(chat_id: str, card_id: str) -> bool:
