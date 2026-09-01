@@ -3153,7 +3153,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     <div class="grabber"></div>
     <div class="head">
       <button class="hbtn" data-close="think"><span class="ic" data-i="x"></span></button>
-      <div class="ht">Thought process</div>
+      <div class="ht">thinking</div>
       <div class="hspace"></div>
     </div>
     <div class="body"><div class="thinkbody" id="thinkBodyEl"></div></div>
@@ -3448,7 +3448,7 @@ function ensureThink() {
   const r = row();
   const line = document.createElement('button');
   line.className = 'toolline';
-  line.innerHTML = '<span class="spin"></span><span class="lbl">Thought process</span><span class="chev">›</span>';
+  line.innerHTML = '<span class="spin"></span><span class="lbl">thinking</span><span class="chev">›</span>';
   r.appendChild(line);
   const buf = { text: '', lineEl: line, paused: false };
   thinkStore.push(buf);
@@ -4251,6 +4251,11 @@ function renderSaid(msgs) {
     if (m.kind === 'me') { endThink(); addMe(m.text, m); }
     else if (m.kind === 'gu') {
       if (m.origin === 'heartbeat') addProactiveDivider(m.id);
+      if (m.thinking) {
+        endThink();
+        appendThink(m.thinking);
+        closeThink();
+      }
       for (const tool of (m.tools || [])) {
         let input = {};
         try { input = JSON.parse(tool.arguments || '{}'); } catch (e) {}
@@ -4303,6 +4308,7 @@ async function loadSaid(focusMessageId = '') {
     if (version !== historyLoadVersion) return 0;
     const msgs = d.msgs || [];
     log.innerHTML = '';
+    thinkStore.length = 0;
     guEl = null; turnThink = null; curGroup = null;
     earliestSeq = null; olderBtn = null;
     renderSaid(msgs);
@@ -5291,6 +5297,7 @@ async function openSearchChatHit(hit) {
     if (pollAbort) pollAbort.abort();
     polling = false; cursor = Number.MAX_SAFE_INTEGER;
     log.innerHTML = '';
+    thinkStore.length = 0;
     guEl = null; turnThink = null; curGroup = null;
     earliestSeq = null; olderBtn = null;
     setTitle(chat.name);
@@ -7598,7 +7605,7 @@ function gongThink(row, think) {
   row._think?.remove();
   const line = document.createElement('button');
   line.className = 'toolline gthink';
-  line.innerHTML = '<span class="lbl">Thought process</span><span class="chev">›</span>';
+  line.innerHTML = '<span class="lbl">thinking</span><span class="chev">›</span>';
   line.prepend(icEl('clock', 15));
   thinkStore.push({ text: think, lineEl: line, paused: true });
   const idx = thinkStore.length - 1;
@@ -8060,12 +8067,12 @@ function renderMessageStyleSettings() {
   const body = document.getElementById('messageStyleBody');
   body.innerHTML = '<div class="msg-style-preview" data-mode="' + messageStyleTab + '">'
     + '<div class="msg-preview-me">这是我的消息。</div>'
-    + '<div class="msg-preview-think"><span>💡</span><b>思考中</b><span class="arr">›</span></div>'
+    + '<div class="msg-preview-think"><span>💡</span><b>thinking</b><span class="arr">›</span></div>'
     + '<div class="msg-preview-cloudy">这是 Cloudy 的回复。</div></div>'
     + '<div class="msg-style-tabs"><button class="msg-style-tab' + (messageStyleTab === 'light' ? ' on' : '') + '" data-style-tab="light">浅色模式</button>'
     + '<button class="msg-style-tab' + (messageStyleTab === 'dark' ? ' on' : '') + '" data-style-tab="dark">深色模式</button></div>'
     + '<div class="ap-section" id="messageStyleControls"></div>'
-    + '<div class="msg-style-note">两套样式会跟随当前浅色或深色模式自动切换，并共同用于双方消息、思考过程与工具调用提示。</div>';
+    + '<div class="msg-style-note">两套样式会跟随当前浅色或深色模式自动切换，并共同用于双方消息、thinking 与工具调用提示。</div>';
   body.querySelectorAll('[data-style-tab]').forEach(btn => btn.onclick = () => {
     messageStyleTab = btn.dataset.styleTab;
     renderMessageStyleSettings();
@@ -8804,6 +8811,7 @@ const EFFORTS = [
 ];
 let curModel = '';       // 真跑着的（init 报的）
 let curEffort = 'high';
+let curShowThinking = true;
 const pill = document.getElementById('modelPill');
 
 function sameModel(cur, id) {
@@ -8892,6 +8900,12 @@ function renderModelSheet() {
     effRow.innerHTML = '<span>Effort</span><span class="val">' + (EFFORTS.find(e => e.id === curEffort)?.name || 'High') + '</span><span class="chev">›</span>';
     effRow.onclick = () => { modelView = 'effort'; renderModelSheet(); };
     g2.appendChild(effRow);
+    const thinkingRow = document.createElement('button');
+    thinkingRow.className = 'grow';
+    thinkingRow.setAttribute('aria-pressed', curShowThinking ? 'true' : 'false');
+    thinkingRow.innerHTML = '<span>thinking</span><span class="sw' + (curShowThinking ? ' on' : '') + '"></span>';
+    thinkingRow.onclick = () => setThinkingVisibility(!curShowThinking);
+    g2.appendChild(thinkingRow);
     modelBody.appendChild(g2);
     const gap2 = document.createElement('div');
     gap2.className = 'group-label';
@@ -8959,11 +8973,27 @@ async function pickEffort(e) {
     });
   } catch { note('（没调上，再试一次）', 'err'); }
 }
+async function setThinkingVisibility(show) {
+  try {
+    const response = await fetch('api/model', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ show_thinking: !!show })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || '没有保存');
+    curShowThinking = data.show_thinking !== false;
+    renderModelSheet();
+    await loadSaid();
+  } catch (e) {
+    note('（thinking 设置没存上：' + e.message + '）', 'err');
+  }
+}
 
 (async () => {
   try {
     const d = await (await fetch('api/model')).json();
     curEffort = d.effort || 'high';
+    curShowThinking = d.show_thinking !== false;
     currentProviderId = d.provider_id || '';
     setModelPill(d.model || '');
   } catch { setModelPill(''); }
