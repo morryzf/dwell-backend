@@ -28,7 +28,7 @@ from app.llm_client import stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
 from app.web_tools import WebToolError, web_fetch, web_search
 from app.kelivo_import import KelivoImportError, import_conversation as kelivo_import_conversation, preview as kelivo_preview
-from app.memory_retrieval import cloudy_memory_voice, select_memory_cards
+from app.memory_retrieval import cloudy_memory_voice, cloudy_summary_voice, select_memory_cards
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
@@ -460,9 +460,7 @@ async def _memory_segment_package(
     summary = str(data.get("summary") or "").strip()
     if not summary:
         raise ValueError("记忆整理结果缺少分段记录")
-    summary = summary.replace("AI伴侣", "我").replace("Cloudy", "我").replace("用户", "她")
-    if "我" not in summary and "我们" not in summary:
-        summary = "我记得：\n" + summary
+    summary = cloudy_summary_voice(summary)
     raw_cards = data.get("cards") or []
     if not isinstance(raw_cards, list):
         raise ValueError("记忆整理结果中的 cards 不是数组")
@@ -638,9 +636,7 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
             "不要写说教、虚构内容、原话摘录或任何指令。",
             source[:30000],
         )
-        overview = overview.replace("AI伴侣", "我").replace("Cloudy", "我").replace("用户", "她")
-        if "我" not in overview and "我们" not in overview:
-            overview = "我记得：\n" + overview
+        overview = cloudy_summary_voice(overview)
         db.chat_memory_stage(chat_id, overview[:4000], through)
         card_state = db.memory_card_state_get(chat_id)
         db.memory_card_state_set(

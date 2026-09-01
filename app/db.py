@@ -17,7 +17,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
-from .memory_retrieval import cloudy_memory_voice
+from .memory_retrieval import cloudy_memory_voice, cloudy_summary_voice
 
 DB_PATH = os.environ.get("DWELL_DB", "./data/dwell.db")
 
@@ -445,6 +445,22 @@ def init_db():
                 content = cloudy_memory_voice(row["content"])
                 if content != row["content"]:
                     cx.execute(f"UPDATE {table} SET content=? WHERE id=?", (content, row["id"]))
+        for table, key in (
+            ("chat_memory_state", "chat_id"),
+            ("chat_memory_drafts", "chat_id"),
+            ("chat_memory_segments", "id"),
+        ):
+            column = "content" if table == "chat_memory_segments" else "overview"
+            rows = cx.execute(
+                f"SELECT {key},{column} AS overview FROM {table}"
+            ).fetchall()
+            for row in rows:
+                overview = cloudy_summary_voice(row["overview"])
+                if overview != row["overview"]:
+                    cx.execute(
+                        f"UPDATE {table} SET {column}=? WHERE {key}=?",
+                        (overview, row[key]),
+                    )
         # 已经产出过卡片或候选卡片的旧分段，不再重复调用模型。
         cx.execute(
             """INSERT OR IGNORE INTO memory_card_segment_runs

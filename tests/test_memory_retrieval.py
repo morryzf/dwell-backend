@@ -1,7 +1,7 @@
 from datetime import datetime
 import unittest
 
-from app.memory_retrieval import cloudy_memory_voice, select_memory_cards
+from app.memory_retrieval import cloudy_memory_voice, cloudy_summary_voice, select_memory_cards
 
 
 NOW = datetime(2026, 8, 31, 12, 0, 0)
@@ -27,6 +27,10 @@ class MemoryRetrievalTest(unittest.TestCase):
         self.assertEqual(cloudy_memory_voice("她目前住在上海。"), "我记得：她目前住在上海。")
         self.assertEqual(cloudy_memory_voice("用户告诉Cloudy她要搬家。"), "她告诉我她要搬家。")
         self.assertEqual(cloudy_memory_voice("我答应她会记得。"), "我答应她会记得。")
+        self.assertEqual(
+            cloudy_summary_voice("近期情况\n- 用户搬到了上海"),
+            "我记得：\n近期情况\n- 她搬到了上海",
+        )
 
     def test_selects_relevant_cards_without_forcing_unrelated_ones(self):
         cards = [
