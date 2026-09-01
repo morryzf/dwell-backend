@@ -46,8 +46,8 @@ _heartbeat_task: asyncio.Task | None = None
 _heartbeat_lock = asyncio.Lock()
 _study_lock = asyncio.Lock()
 
-MEMORY_TAIL_MESSAGES = 60
-MEMORY_UPDATE_MIN_MESSAGES = 30
+MEMORY_TAIL_MESSAGES = 80
+MEMORY_UPDATE_MIN_MESSAGES = 50
 MEMORY_SEGMENT_MESSAGES = 50
 
 MEMORY_CARD_TYPES = {
