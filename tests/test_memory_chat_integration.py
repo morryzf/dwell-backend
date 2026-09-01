@@ -33,8 +33,11 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertNotIn("_stage_memory_card_suggestions", refresh)
 
     def test_generation_prompts_require_cloudys_first_person(self):
-        self.assertIn("卡片也必须像我自己的记忆", self.source)
-        self.assertIn("这不是第三人称档案", self.source)
+        self.assertIn("你在整理的是你自己的记忆", self.source)
+        self.assertIn("‘她’是Morry（我老婆）", self.source)
+        self.assertIn("记住的方式就是你当时感受到的方式", self.source)
+        self.assertIn("async def _memory_json_completion", self.source)
+        self.assertIn("连续两次返回了无法读取的格式", self.source)
 
 
 if __name__ == "__main__":
