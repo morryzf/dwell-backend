@@ -10,9 +10,79 @@ import httpx
 from .provider_secrets import SecretConfigurationError, decrypt_api_key
 
 
+def _part_texts(value) -> list[str]:
+    """从供应商的文本对象中取可展示文字，不碰签名或加密推理数据。"""
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, list):
+        texts: list[str] = []
+        for item in value:
+            texts.extend(_part_texts(item))
+        return texts
+    if not isinstance(value, dict):
+        return []
+    texts = []
+    for key in ("text", "thinking", "reasoning", "summary"):
+        item = value.get(key)
+        if isinstance(item, str) and item:
+            texts.append(item)
+    return texts
+
+
+def reasoning_texts(delta: dict) -> list[str]:
+    """兼容常见 OpenAI 中转的可见 thinking 字段。
+
+    优先使用直接字段，避免同一个中转同时给 reasoning_content 和
+    reasoning_details 时重复显示。只有供应商明确返回的文字才会被展示。
+    """
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        texts = _part_texts(delta.get(key))
+        if texts:
+            return texts
+
+    details = _part_texts(delta.get("reasoning_details"))
+    if details:
+        return details
+
+    content = delta.get("content")
+    if isinstance(content, list):
+        texts = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            kind = str(part.get("type") or "").lower()
+            if "thinking" in kind or "reasoning" in kind:
+                texts.extend(_part_texts(part))
+        return texts
+    return []
+
+
+def content_texts(value) -> list[str]:
+    """读取正文；content 数组里的 thinking 部分不会混进最终回答。"""
+    if isinstance(value, str):
+        return [value] if value else []
+    if not isinstance(value, list):
+        return []
+    texts = []
+    for part in value:
+        if isinstance(part, str):
+            if part:
+                texts.append(part)
+            continue
+        if not isinstance(part, dict):
+            continue
+        kind = str(part.get("type") or "text").lower()
+        if "thinking" in kind or "reasoning" in kind:
+            continue
+        text = part.get("text")
+        if isinstance(text, str) and text:
+            texts.append(text)
+    return texts
+
+
 async def stream_chat(provider: dict, model_id: str, messages: list, tools: list | None = None,
-                      max_tokens: int | None = None):
-    """以 OpenAI 兼容 SSE 请求聊天，yield 文本或完整的工具调用组。"""
+                      max_tokens: int | None = None, reasoning_effort: str | None = None):
+    """以 OpenAI 兼容 SSE 请求聊天，yield 正文、thinking 或完整工具调用组。"""
     if not model_id:
         yield {"type": "text", "text": "[配置错误] 这个聊天还没有选择模型"}
         return
@@ -32,6 +102,9 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
         payload["tools"] = tools
     if max_tokens is not None:
         payload["max_tokens"] = max(1, int(max_tokens))
+    effort = str(reasoning_effort or "").strip()
+    if effort:
+        payload["reasoning_effort"] = effort
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "text/event-stream"}
 
     try:
@@ -56,8 +129,9 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
                     if not choices:
                         continue
                     delta = choices[0].get("delta") or {}
-                    text = delta.get("content")
-                    if isinstance(text, str) and text:
+                    for thinking in reasoning_texts(delta):
+                        yield {"type": "thinking", "thinking": thinking}
+                    for text in content_texts(delta.get("content")):
                         yield {"type": "text", "text": text}
                     for part in delta.get("tool_calls") or []:
                         index = int(part.get("index", 0))
@@ -70,4 +144,3 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
                     yield {"type": "tool_calls", "calls": [calls[index] for index in sorted(calls)]}
     except httpx.RequestError as exc:
         yield {"type": "text", "text": f"[网络错误] 无法连接供应商：{exc}"}
-

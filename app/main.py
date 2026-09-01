@@ -870,7 +870,10 @@ async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
     for round_no in range(4):
         parts: list[str] = []
         calls: list[dict] = []
-        async for event in stream_chat(provider, selection["model_id"], messages, tools or None):
+        async for event in stream_chat(
+            provider, selection["model_id"], messages, tools or None,
+            reasoning_effort=selection.get("reasoning_effort"),
+        ):
             if event.get("type") == "text":
                 parts.append(str(event.get("text") or ""))
             elif event.get("type") == "tool_calls":
@@ -1775,6 +1778,7 @@ async def model_get():
         # model/effort 保留给原 dwell 前端的读取逻辑；新增字段供新的设置界面使用。
         "model": selection["model_id"],
         "effort": selection["reasoning_effort"],
+        "show_thinking": bool(selection.get("show_thinking", 1)),
         "provider_id": selection["provider_id"],
         "chat_id": chat_id,
         "providers": providers,
@@ -2147,6 +2151,7 @@ async def model_set(request: Request):
     provider_id = str(payload.get("provider_id", current["provider_id"]) or "").strip()
     model_id = str(payload.get("model", payload.get("model_id", current["model_id"])) or "").strip()[:200]
     effort = str(payload.get("effort", payload.get("reasoning_effort", current["reasoning_effort"])) or "").strip()[:30]
+    show_thinking = bool(payload.get("show_thinking", current.get("show_thinking", 1)))
     if provider_id:
         provider = db.provider_get(provider_id)
         if not provider or not provider["enabled"]:
@@ -2155,8 +2160,11 @@ async def model_set(request: Request):
         raise HTTPException(400, "请选择模型")
     if model_id and not provider_id:
         raise HTTPException(400, "请先选择供应商")
-    db.chat_model_set(chat_id, provider_id, model_id, effort)
-    return {"ok": True, "provider_id": provider_id, "model": model_id, "effort": effort}
+    db.chat_model_set(chat_id, provider_id, model_id, effort, show_thinking)
+    return {
+        "ok": True, "provider_id": provider_id, "model": model_id,
+        "effort": effort, "show_thinking": show_thinking,
+    }
 
 
 @app.get("/api/wake", dependencies=authed)
@@ -2857,6 +2865,7 @@ async def messages_edit(message_id: str, request: Request):
         raise HTTPException(400, "消息不能是空的")
     if message["role"] == "assistant" and message["content"] != content:
         db.message_version_add(message_id, message["content"], "edited")
+        db.message_thinking_update(message_id, "")
     db.message_update(message_id, content)
     format_edits = 0
     format_learned = False
@@ -2947,6 +2956,7 @@ async def messages_regenerate(message_id: str):
     if message["content"]:
         db.message_version_add(message_id, message["content"], "regenerated")
     db.message_update(message_id, "")
+    db.message_thinking_update(message_id, "")
     _emit(chat_id, {"type": "system", "subtype": "regenerating", "message_id": message_id})
     task = asyncio.create_task(_run_ai_reply(chat_id, message_id))
     _running_tasks[chat_id] = task
@@ -3052,6 +3062,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                         proactive_watch: bool = False, device_time: dict | None = None,
                         attachments: list[dict] | None = None):
     """调用当前聊天所选供应商，边收边发事件给前端。"""
+    # 新生成或重新生成都从空 thinking 开始，避免旧推理错配到新回答。
+    db.message_thinking_update(msg_id, "")
     history = db.message_list(chat_id, limit=100)
     instructions = [
         {"role": "system", "content": item["content"]}
@@ -3177,10 +3189,31 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             messages[index] = {**messages[index], "content": content}
             break
     buf = []
+    thinking_buf: list[str] = []
     split_marker = "<dwell-split>"
     natural_split = _REPLY_SPLIT_RE
     split_pending = ""
     current_message_id = msg_id
+
+    def append_stream_thinking(text: str):
+        if not show_thinking or not text:
+            return
+        thinking_buf.append(text)
+        full_thinking = "".join(thinking_buf)
+        db.message_thinking_update(msg_id, full_thinking)
+        _emit(chat_id, {
+            "type": "stream_event",
+            "event": {"delta": {"type": "thinking_delta", "thinking": text}},
+        })
+
+    def assistant_parts(text: str) -> list[dict]:
+        parts = []
+        thinking = "".join(thinking_buf).strip()
+        if thinking:
+            parts.append({"type": "thinking", "thinking": thinking})
+        if text:
+            parts.append({"type": "text", "text": text})
+        return parts
 
     def append_stream_text(text: str):
         nonlocal buf
@@ -3249,6 +3282,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             break
 
     selection = db.chat_model_get(chat_id)
+    show_thinking = bool(selection.get("show_thinking", 1))
     provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
     try:
         if not provider or not provider["enabled"]:
@@ -3272,8 +3306,13 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
 
         for round_no in range(8):
             calls = []
-            async for event in stream_chat(provider, selection["model_id"], messages, tools or None):
-                if event["type"] == "text":
+            async for event in stream_chat(
+                provider, selection["model_id"], messages, tools or None,
+                reasoning_effort=selection.get("reasoning_effort"),
+            ):
+                if event["type"] == "thinking":
+                    append_stream_thinking(str(event.get("thinking") or ""))
+                elif event["type"] == "text":
                     chunk = event["text"]
                     consume_stream_chunk(chunk)
                 elif event["type"] == "tool_calls":
@@ -3338,21 +3377,19 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             db.message_update(current_message_id, full)
         _emit(chat_id, {
             "type": "assistant",
-            "message": {
-                "content": [{"type": "text", "text": full}] if full else []
-            }
+            "message": {"content": assistant_parts(full)}
         })
         _emit(chat_id, {"type": "result", "is_error": False})
         # 已启用长期上下文的聊天，只有足够多消息离开近期窗口后才额外整理一次。
         _queue_long_context_refresh(chat_id)
     except asyncio.CancelledError:
-        if buf:
-            db.message_update(current_message_id, "".join(buf) + "\n[已停止]")
+        if buf or thinking_buf:
+            stopped_text = "".join(buf) + ("\n[已停止]" if buf else "")
+            if stopped_text:
+                db.message_update(current_message_id, stopped_text)
             _emit(chat_id, {
                 "type": "assistant",
-                "message": {
-                    "content": [{"type": "text", "text": "".join(buf) + "\n[已停止]"}]
-                }
+                "message": {"content": assistant_parts(stopped_text)}
             })
         _emit(chat_id, {"type": "system", "subtype": "stopped"})
         raise
@@ -3361,7 +3398,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         db.message_update(current_message_id, text)
         _emit(chat_id, {
             "type": "assistant",
-            "message": {"content": [{"type": "text", "text": text}]},
+            "message": {"content": assistant_parts(text)},
         })
         _emit(chat_id, {"type": "result", "is_error": True})
     finally:

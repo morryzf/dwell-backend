@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS messages (
     chat_id TEXT NOT NULL,
     role    TEXT NOT NULL CHECK (role IN ('user','assistant','system')),
     content TEXT NOT NULL,
+    thinking TEXT NOT NULL DEFAULT '',
     made    INTEGER NOT NULL,
     origin  TEXT NOT NULL DEFAULT 'chat',
     display_split INTEGER NOT NULL DEFAULT 0,
@@ -432,11 +433,15 @@ def init_db():
             cx.execute("ALTER TABLE chats ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''")
         if "split_replies" not in cols:
             cx.execute("ALTER TABLE chats ADD COLUMN split_replies INTEGER NOT NULL DEFAULT 0")
+        if "show_thinking" not in cols:
+            cx.execute("ALTER TABLE chats ADD COLUMN show_thinking INTEGER NOT NULL DEFAULT 1")
         message_cols = {r["name"] for r in cx.execute("PRAGMA table_info(messages)").fetchall()}
         if "origin" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'chat'")
         if "display_split" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN display_split INTEGER NOT NULL DEFAULT 0")
+        if "thinking" not in message_cols:
+            cx.execute("ALTER TABLE messages ADD COLUMN thinking TEXT NOT NULL DEFAULT ''")
         # #82 曾在保存时强制补“我记得：”。只清理一次这段前缀，绝不改正文；
         # 清理完成后，用户以后主动写下同样的开头也会原样保留。
         cleanup_key = "memory_remove_forced_prefix_v1"
@@ -988,19 +993,23 @@ def chat_branch_from_message(source_chat_id: str, message_id: str) -> dict | Non
         base_name = (source["name"] or "对话").strip() or "对话"
         branch = {"id": new_id(), "name": base_name[:max(1, 60 - len(suffix))] + suffix,
                   "made": int(time.time()), "provider_id": source["provider_id"],
-                  "model_id": source["model_id"], "reasoning_effort": source["reasoning_effort"]}
-        cx.execute("""INSERT INTO chats (id,name,made,archived,provider_id,model_id,reasoning_effort)
-                      VALUES (:id,:name,:made,0,:provider_id,:model_id,:reasoning_effort)""", branch)
+                  "model_id": source["model_id"], "reasoning_effort": source["reasoning_effort"],
+                  "show_thinking": source["show_thinking"]}
+        cx.execute("""INSERT INTO chats
+                      (id,name,made,archived,provider_id,model_id,reasoning_effort,show_thinking)
+                      VALUES
+                      (:id,:name,:made,0,:provider_id,:model_id,:reasoning_effort,:show_thinking)""", branch)
         rows = cx.execute("SELECT rowid,* FROM messages WHERE chat_id=? AND rowid<=? ORDER BY rowid ASC",
                           (source_chat_id, pivot["rowid"])).fetchall()
         id_map: dict[str, str] = {}
         for row in rows:
             fresh = new_id(); id_map[row["id"]] = fresh
             cx.execute(
-                """INSERT INTO messages (id,chat_id,role,content,made,origin,display_split)
-                   VALUES (?,?,?,?,?,?,?)""",
-                (fresh, branch["id"], row["role"], row["content"], row["made"],
-                 row["origin"], row["display_split"]),
+                """INSERT INTO messages
+                   (id,chat_id,role,content,thinking,made,origin,display_split)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (fresh, branch["id"], row["role"], row["content"], row["thinking"],
+                 row["made"], row["origin"], row["display_split"]),
             )
         for old_id, fresh in id_map.items():
             versions = cx.execute("SELECT content,reason,made FROM message_versions WHERE message_id=? ORDER BY rowid ASC", (old_id,)).fetchall()
@@ -1030,14 +1039,17 @@ def chat_branch_from_message(source_chat_id: str, message_id: str) -> dict | Non
 def chat_model_get(chat_id: str) -> dict:
     with conn() as cx:
         row = cx.execute(
-            "SELECT provider_id, model_id, reasoning_effort FROM chats WHERE id=?",
+            "SELECT provider_id, model_id, reasoning_effort, show_thinking FROM chats WHERE id=?",
             (chat_id,),
         ).fetchone()
-    return dict(row) if row else {"provider_id": "", "model_id": "", "reasoning_effort": ""}
+    return dict(row) if row else {
+        "provider_id": "", "model_id": "", "reasoning_effort": "", "show_thinking": 1,
+    }
 
 
 def chat_model_set(chat_id: str, provider_id: str | None = None,
-                   model_id: str | None = None, reasoning_effort: str | None = None) -> bool:
+                   model_id: str | None = None, reasoning_effort: str | None = None,
+                   show_thinking: bool | None = None) -> bool:
     current = chat_model_get(chat_id)
     if not chat_get(chat_id):
         return False
@@ -1045,16 +1057,16 @@ def chat_model_set(chat_id: str, provider_id: str | None = None,
         "provider_id": current["provider_id"] if provider_id is None else provider_id,
         "model_id": current["model_id"] if model_id is None else model_id,
         "reasoning_effort": current["reasoning_effort"] if reasoning_effort is None else reasoning_effort,
+        "show_thinking": current["show_thinking"] if show_thinking is None else (1 if show_thinking else 0),
         "id": chat_id,
     }
     with conn() as cx:
         cx.execute(
             "UPDATE chats SET provider_id=:provider_id, model_id=:model_id, "
-            "reasoning_effort=:reasoning_effort WHERE id=:id",
+            "reasoning_effort=:reasoning_effort, show_thinking=:show_thinking WHERE id=:id",
             values,
         )
     return True
-
 
 def chat_split_replies_get(chat_id: str) -> bool:
     with conn() as cx:
@@ -1098,14 +1110,17 @@ def message_add(chat_id: str, role: str, content: str, made: int | None = None,
         "chat_id": chat_id,
         "role": role,
         "content": content,
+        "thinking": "",
         "made": int(made if made is not None else time.time()),
         "origin": origin if origin in {"chat", "heartbeat"} else "chat",
         "display_split": 0,
     }
     with conn() as cx:
         cx.execute(
-            """INSERT INTO messages (id,chat_id,role,content,made,origin,display_split)
-               VALUES (:id,:chat_id,:role,:content,:made,:origin,:display_split)""",
+            """INSERT INTO messages
+               (id,chat_id,role,content,thinking,made,origin,display_split)
+               VALUES
+               (:id,:chat_id,:role,:content,:thinking,:made,:origin,:display_split)""",
             row,
         )
     return row
@@ -1786,6 +1801,7 @@ def memory_card_last_injection(chat_id: str) -> dict | None:
 
 def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -> dict:
     rows = message_list(chat_id, limit, before)
+    show_thinking = bool(chat_model_get(chat_id).get("show_thinking", 1))
     assistant_ids = [row["id"] for row in rows if row["role"] == "assistant"]
     images_by_message = message_attachments([row["id"] for row in rows])
     tools_by_message: dict[str, list[dict]] = {}
@@ -1809,6 +1825,7 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
             "role": role,
             "text": r["content"],
             "content": r["content"],
+            "thinking": r["thinking"] if role == "assistant" and show_thinking else "",
             "at": r["made"],
             "origin": r["origin"],
             "display_split": bool(r["display_split"]),
@@ -2108,6 +2125,15 @@ def message_since(chat_id: str, since: int, limit: int = 200) -> list:
 def message_update(msg_id: str, content: str) -> bool:
     with conn() as cx:
         cur = cx.execute("UPDATE messages SET content=? WHERE id=?", (content, msg_id))
+    return cur.rowcount > 0
+
+
+def message_thinking_update(msg_id: str, thinking: str) -> bool:
+    with conn() as cx:
+        cur = cx.execute(
+            "UPDATE messages SET thinking=? WHERE id=?",
+            (thinking[:200_000], msg_id),
+        )
     return cur.rowcount > 0
 
 
