@@ -348,13 +348,15 @@ CREATE TABLE IF NOT EXISTS settings (
 
 -- 模型供应商。密钥密文由 provider_store 加解密，绝不返回给浏览器。
 CREATE TABLE IF NOT EXISTS provider_profiles (
-    id             TEXT PRIMARY KEY,
-    name           TEXT NOT NULL,
-    base_url       TEXT NOT NULL,
-    api_key_box    TEXT NOT NULL DEFAULT '',
-    enabled        INTEGER NOT NULL DEFAULT 1,
-    made           INTEGER NOT NULL,
-    updated        INTEGER NOT NULL
+    id               TEXT PRIMARY KEY,
+    name             TEXT NOT NULL,
+    base_url         TEXT NOT NULL,
+    api_key_box      TEXT NOT NULL DEFAULT '',
+    provider_type    TEXT NOT NULL DEFAULT 'generic',
+    prompt_cache_ttl TEXT NOT NULL DEFAULT 'off',
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    made             INTEGER NOT NULL,
+    updated          INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ix_provider_profiles_name ON provider_profiles(name);
 
@@ -436,6 +438,19 @@ def init_db():
             cx.execute("ALTER TABLE chats ADD COLUMN split_replies INTEGER NOT NULL DEFAULT 0")
         if "show_thinking" not in cols:
             cx.execute("ALTER TABLE chats ADD COLUMN show_thinking INTEGER NOT NULL DEFAULT 1")
+        provider_cols = {
+            r["name"] for r in cx.execute("PRAGMA table_info(provider_profiles)").fetchall()
+        }
+        if "provider_type" not in provider_cols:
+            cx.execute(
+                "ALTER TABLE provider_profiles ADD COLUMN provider_type "
+                "TEXT NOT NULL DEFAULT 'generic'"
+            )
+        if "prompt_cache_ttl" not in provider_cols:
+            cx.execute(
+                "ALTER TABLE provider_profiles ADD COLUMN prompt_cache_ttl "
+                "TEXT NOT NULL DEFAULT 'off'"
+            )
         message_cols = {r["name"] for r in cx.execute("PRAGMA table_info(messages)").fetchall()}
         if "origin" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'chat'")
@@ -1919,11 +1934,17 @@ def setting_set(key: str, value: str) -> None:
 def provider_list() -> list:
     with conn() as cx:
         rows = cx.execute(
-            "SELECT id,name,base_url,enabled,made,updated,api_key_box FROM provider_profiles "
-            "ORDER BY made ASC"
+            "SELECT id,name,base_url,provider_type,prompt_cache_ttl,"
+            "enabled,made,updated,api_key_box FROM provider_profiles ORDER BY made ASC"
         ).fetchall()
-    return [{**{k: r[k] for k in ("id", "name", "base_url", "enabled", "made", "updated")},
-             "has_key": bool(r["api_key_box"])} for r in rows]
+    public_keys = (
+        "id", "name", "base_url", "provider_type", "prompt_cache_ttl",
+        "enabled", "made", "updated",
+    )
+    return [
+        {**{key: row[key] for key in public_keys}, "has_key": bool(row["api_key_box"])}
+        for row in rows
+    ]
 
 
 def provider_get(provider_id: str) -> dict | None:
@@ -1933,18 +1954,30 @@ def provider_get(provider_id: str) -> dict | None:
 
 
 def provider_upsert(provider_id: str, name: str, base_url: str, api_key_box: str | None,
-                    enabled: bool = True) -> dict:
+                    enabled: bool = True, provider_type: str = "generic",
+                    prompt_cache_ttl: str = "off") -> dict:
     now = int(time.time())
     row = provider_get(provider_id) if provider_id else None
     provider_id = provider_id or new_id()
     box = row["api_key_box"] if row and api_key_box is None else (api_key_box or "")
+    provider_type = provider_type if provider_type in {"generic", "openrouter"} else "generic"
+    prompt_cache_ttl = (
+        prompt_cache_ttl
+        if provider_type == "openrouter" and prompt_cache_ttl in {"off", "5m", "1h"}
+        else "off"
+    )
     with conn() as cx:
         cx.execute(
-            "INSERT INTO provider_profiles (id,name,base_url,api_key_box,enabled,made,updated) "
-            "VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "INSERT INTO provider_profiles "
+            "(id,name,base_url,api_key_box,provider_type,prompt_cache_ttl,enabled,made,updated) "
+            "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
             "name=excluded.name,base_url=excluded.base_url,api_key_box=excluded.api_key_box,"
+            "provider_type=excluded.provider_type,prompt_cache_ttl=excluded.prompt_cache_ttl,"
             "enabled=excluded.enabled,updated=excluded.updated",
-            (provider_id, name, base_url, box, 1 if enabled else 0, now, now),
+            (
+                provider_id, name, base_url, box, provider_type, prompt_cache_ttl,
+                1 if enabled else 0, now, now,
+            ),
         )
     return provider_get(provider_id) or {}
 
