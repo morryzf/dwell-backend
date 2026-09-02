@@ -1354,6 +1354,26 @@ def chat_memory_segments(chat_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+CHAT_MEMORY_VERSION_LIMIT = 10
+
+
+def _chat_memory_prune_versions(
+    cx: sqlite3.Connection, chat_id: str, keep: int = CHAT_MEMORY_VERSION_LIMIT
+) -> None:
+    """每个聊天只保留最近的摘要版本，避免历史无限增长。"""
+    rows = cx.execute(
+        """SELECT id FROM chat_memory_versions
+           WHERE chat_id=? ORDER BY made DESC, rowid DESC""",
+        (chat_id,),
+    ).fetchall()
+    stale = rows[max(1, int(keep)):]
+    if stale:
+        cx.executemany(
+            "DELETE FROM chat_memory_versions WHERE id=?",
+            [(row["id"],) for row in stale],
+        )
+
+
 def _chat_memory_archive(cx: sqlite3.Connection, current: dict, reason: str) -> None:
     overview = str(current.get("overview") or "").strip()
     if not overview:
@@ -1366,6 +1386,7 @@ def _chat_memory_archive(cx: sqlite3.Connection, current: dict, reason: str) -> 
             reason[:80], int(time.time()),
         ),
     )
+    _chat_memory_prune_versions(cx, current["chat_id"])
 
 
 def chat_memory_stage(chat_id: str, overview: str, through_rowid: int) -> None:
@@ -1441,12 +1462,15 @@ def chat_memory_save_overview(chat_id: str, overview: str) -> None:
         )
 
 
-def chat_memory_versions(chat_id: str, limit: int = 12) -> list[dict]:
+def chat_memory_versions(
+    chat_id: str, limit: int = CHAT_MEMORY_VERSION_LIMIT
+) -> list[dict]:
     with conn() as cx:
+        _chat_memory_prune_versions(cx, chat_id)
         rows = cx.execute(
             """SELECT id,overview,through_rowid,reason,made FROM chat_memory_versions
-               WHERE chat_id=? ORDER BY made DESC LIMIT ?""",
-            (chat_id, max(1, min(int(limit), 50))),
+               WHERE chat_id=? ORDER BY made DESC, rowid DESC LIMIT ?""",
+            (chat_id, max(1, min(int(limit), CHAT_MEMORY_VERSION_LIMIT))),
         ).fetchall()
     return [dict(row) for row in rows]
 
