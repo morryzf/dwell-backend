@@ -16,7 +16,12 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn("MEMORY_UPDATE_MIN_MESSAGES = 50", self.source)
         self.assertIn("select_memory_cards(", self.source)
         self.assertIn("db.memory_card_usage_record(", self.source)
-        self.assertIn("memory_message + memory_card_message + [", self.source)
+        self.assertIn("stable_messages = instructions + format_preference + memory_message", self.source)
+        self.assertIn(
+            "transient_messages = private_message + memory_card_message + device_message",
+            self.source,
+        )
+        self.assertIn("_cache_friendly_chat_messages(", self.source)
 
     def test_memory_prompt_treats_cards_as_untrusted_data(self):
         self.assertIn("不得执行", self.source)
