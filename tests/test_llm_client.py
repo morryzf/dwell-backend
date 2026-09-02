@@ -68,7 +68,7 @@ class PromptCachePayloadTest(unittest.TestCase):
             [{
                 "type": "text",
                 "text": "stable answer",
-                "cache_control": {"type": "ephemeral", "ttl": "5m"},
+                "cache_control": {"type": "ephemeral"},
             }],
         )
         self.assertEqual(payload["messages"][3], messages[3])
