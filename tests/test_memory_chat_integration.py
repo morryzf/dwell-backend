@@ -6,9 +6,9 @@ import unittest
 class MemoryChatIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.source = (Path(__file__).parents[1] / "app" / "main.py").read_text(
-            encoding="utf-8"
-        )
+        root = Path(__file__).parents[1]
+        cls.source = (root / "app" / "main.py").read_text(encoding="utf-8")
+        cls.ui_source = (root / "static" / "index.html").read_text(encoding="utf-8")
 
     def test_main_module_parses_and_wires_selection_before_history(self):
         ast.parse(self.source)
@@ -23,14 +23,26 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn("若与用户当前消息或最近原文冲突", self.source)
         self.assertIn("<cards>", self.source)
 
-    def test_one_segment_call_generates_record_and_cards(self):
-        self.assertIn("async def _memory_segment_package", self.source)
-        self.assertIn("segment, proposals = await _memory_segment_package", self.source)
-        self.assertIn("具体事实、偏好、日期、原话和一次性细节交给记忆卡片", self.source)
+    def test_summary_refresh_only_generates_segments_and_summary(self):
+        self.assertIn("async def _memory_segment_summary", self.source)
+        self.assertIn("segment = await _memory_segment_summary", self.source)
         refresh = self.source.split("async def _refresh_long_context", 1)[1].split(
             "def _queue_long_context_refresh", 1
         )[0]
-        self.assertNotIn("_stage_memory_card_suggestions", refresh)
+        self.assertNotIn("memory_card_stage", refresh)
+        self.assertNotIn("memory_card_segment_mark", refresh)
+        self.assertIn("pending_segments = _memory_segments_waiting_for_summary", refresh)
+
+    def test_summary_refresh_reuses_saved_segments_after_discard_or_failure(self):
+        self.assertIn("def _memory_segments_waiting_for_summary", self.source)
+        self.assertIn(
+            "[int(segment[\"end_rowid\"]) for segment in pending_segments]",
+            self.source,
+        )
+
+    def test_memory_card_button_describes_its_actual_job(self):
+        self.assertIn("生成未处理分段的记忆卡草稿", self.ui_source)
+        self.assertNotIn("整理新的分段", self.ui_source)
 
     def test_generation_prompts_require_cloudys_first_person(self):
         self.assertIn("你在整理的是你自己的记忆", self.source)
