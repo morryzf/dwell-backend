@@ -202,10 +202,10 @@ def _cacheable_messages(messages: list, ttl: str) -> list:
             part = content[index]
             if not isinstance(part, dict) or part.get("type") != "text" or not part.get("text"):
                 continue
-            content[index] = {
-                **part,
-                "cache_control": {"type": "ephemeral", "ttl": ttl},
-            }
+            cache_control = {"type": "ephemeral"}
+            if ttl == "1h":
+                cache_control["ttl"] = "1h"
+            content[index] = {**part, "cache_control": cache_control}
             return prepared
     return prepared
 
