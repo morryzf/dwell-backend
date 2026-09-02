@@ -30,7 +30,7 @@ class MemoryConsoleStaticTest(unittest.TestCase):
         self.assertIn("最近一次带入", self.html)
 
     def test_manual_generation_only_checks_new_segments(self):
-        self.assertIn("整理新的分段", self.html)
+        self.assertIn("生成未处理分段的记忆卡草稿", self.html)
         self.assertIn("尚未处理的新分段", self.html)
 
 
