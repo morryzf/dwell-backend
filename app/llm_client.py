@@ -87,8 +87,16 @@ def _token_count(value) -> int:
         return 0
 
 
+def _nonnegative_float(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number >= 0 else None
+
+
 def _usage_dict(raw) -> dict:
-    """Normalize common OpenAI/Anthropic-compatible usage payloads."""
+    """Normalize token, prompt-cache, and cost metrics without estimating them."""
     if not isinstance(raw, dict):
         return {}
     input_tokens = _token_count(raw.get("prompt_tokens", raw.get("input_tokens")))
@@ -96,10 +104,24 @@ def _usage_dict(raw) -> dict:
     total_tokens = _token_count(raw.get("total_tokens")) or input_tokens + output_tokens
     input_details = raw.get("prompt_tokens_details") or raw.get("input_tokens_details") or {}
     output_details = raw.get("completion_tokens_details") or raw.get("output_tokens_details") or {}
+    cache_creation = raw.get("cache_creation") or {}
     cached_tokens = _token_count(
         (input_details.get("cached_tokens") if isinstance(input_details, dict) else 0)
         or raw.get("cache_read_input_tokens")
         or raw.get("cached_tokens")
+    )
+    cache_write_tokens = _token_count(
+        (input_details.get("cache_write_tokens") if isinstance(input_details, dict) else 0)
+        or raw.get("cache_creation_input_tokens")
+        or raw.get("cache_write_tokens")
+    )
+    cache_write_5m_tokens = _token_count(
+        cache_creation.get("ephemeral_5m_input_tokens")
+        if isinstance(cache_creation, dict) else 0
+    )
+    cache_write_1h_tokens = _token_count(
+        cache_creation.get("ephemeral_1h_input_tokens")
+        if isinstance(cache_creation, dict) else 0
     )
     reasoning_tokens = _token_count(
         (output_details.get("reasoning_tokens") if isinstance(output_details, dict) else 0)
@@ -107,13 +129,54 @@ def _usage_dict(raw) -> dict:
     )
     if total_tokens <= 0:
         return {}
-    return {
+
+    usage = {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "cached_tokens": cached_tokens,
+        "cache_write_tokens": cache_write_tokens,
+        "cache_write_5m_tokens": cache_write_5m_tokens,
+        "cache_write_1h_tokens": cache_write_1h_tokens,
         "reasoning_tokens": reasoning_tokens,
     }
+    cost = _nonnegative_float(raw.get("cost"))
+    cost_details = raw.get("cost_details") or {}
+    upstream_cost = _nonnegative_float(
+        cost_details.get("upstream_inference_cost")
+        if isinstance(cost_details, dict) else None
+    )
+    if cost is not None:
+        usage["cost"] = cost
+    if upstream_cost is not None:
+        usage["upstream_cost"] = upstream_cost
+    return usage
+
+
+def build_chat_payload(model_id: str, messages: list, tools: list | None = None,
+                       max_tokens: int | None = None,
+                       reasoning_effort: str | None = None) -> dict:
+    """Build the provider-neutral request body in one place.
+
+    Prompt caching remains deliberately disabled here. Provider-specific cache
+    controls will be added only after this stable request boundary is covered
+    by tests and can be enabled without changing generic providers.
+    """
+    payload = {
+        "model": model_id,
+        "messages": messages,
+        "stream": True,
+        # OpenAI-compatible providers normally send usage in a final empty-choices chunk.
+        "stream_options": {"include_usage": True},
+    }
+    if tools:
+        payload["tools"] = tools
+    if max_tokens is not None:
+        payload["max_tokens"] = max(1, int(max_tokens))
+    effort = str(reasoning_effort or "").strip()
+    if effort:
+        payload["reasoning_effort"] = effort
+    return payload
 
 
 async def stream_chat(provider: dict, model_id: str, messages: list, tools: list | None = None,
@@ -133,20 +196,10 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
         return
 
     url = provider["base_url"].rstrip("/") + "/chat/completions"
-    payload = {
-        "model": model_id,
-        "messages": messages,
-        "stream": True,
-        # OpenAI-compatible providers normally send usage in a final empty-choices chunk.
-        "stream_options": {"include_usage": True},
-    }
-    if tools:
-        payload["tools"] = tools
-    if max_tokens is not None:
-        payload["max_tokens"] = max(1, int(max_tokens))
-    effort = str(reasoning_effort or "").strip()
-    if effort:
-        payload["reasoning_effort"] = effort
+    payload = build_chat_payload(
+        model_id, messages, tools, max_tokens=max_tokens,
+        reasoning_effort=reasoning_effort,
+    )
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "text/event-stream"}
 
     try:
