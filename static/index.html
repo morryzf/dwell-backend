@@ -2568,25 +2568,35 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   .chat-action:active { filter: brightness(.91); }
   .drawer-foot { gap: 10px; }
 
-  /* User-tunable message glass. One shared style per light/dark appearance. */
-  #log .gu, #log .bubble {
-    color: var(--msg-text, #514a4f) !important;
-    background: var(--msg-bg, rgba(248,242,245,.46)) !important;
-    border: var(--msg-border-width, 1px) solid var(--msg-border, rgba(255,255,255,.42)) !important;
-    border-radius: var(--msg-radius, 18px) !important;
-    -webkit-backdrop-filter: blur(var(--msg-blur, 16px)) saturate(1.45);
-    backdrop-filter: blur(var(--msg-blur, 16px)) saturate(1.45);
+  /* User-tunable message glass. My messages and Cloudy's messages keep
+     separate light/dark profiles; thinking follows Cloudy's profile. */
+  #log .bubble {
+    color: var(--msg-me-text, #514a4f) !important;
+    background: var(--msg-me-bg, rgba(248,242,245,.46)) !important;
+    border: var(--msg-me-border-width, 1px) solid var(--msg-me-border, rgba(255,255,255,.42)) !important;
+    border-radius: var(--msg-me-radius, 18px) !important;
+    -webkit-backdrop-filter: blur(var(--msg-me-blur, 16px)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-me-blur, 16px)) saturate(1.45);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 6px 20px rgba(72,54,64,.075) !important;
+  }
+  #log .gu {
+    color: var(--msg-cloudy-text, #514a4f) !important;
+    background: var(--msg-cloudy-bg, rgba(248,242,245,.46)) !important;
+    border: var(--msg-cloudy-border-width, 1px) solid var(--msg-cloudy-border, rgba(255,255,255,.42)) !important;
+    border-radius: var(--msg-cloudy-radius, 18px) !important;
+    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 6px 20px rgba(72,54,64,.075) !important;
   }
   #log .row:not(.me) > .toolline {
     width: 100%; padding: 7px 11px; box-sizing: border-box;
     justify-content: flex-start; text-align: left; font-size: 12.5px; line-height: 1.35;
-    color: var(--msg-text, #514a4f);
-    background: var(--msg-bg, rgba(248,242,245,.46));
-    border: var(--msg-border-width, 1px) solid var(--msg-border, rgba(255,255,255,.42));
-    border-radius: var(--msg-radius, 18px);
-    -webkit-backdrop-filter: blur(var(--msg-blur, 16px)) saturate(1.45);
-    backdrop-filter: blur(var(--msg-blur, 16px)) saturate(1.45);
+    color: var(--msg-cloudy-text, #514a4f);
+    background: var(--msg-cloudy-bg, rgba(248,242,245,.46));
+    border: var(--msg-cloudy-border-width, 1px) solid var(--msg-cloudy-border, rgba(255,255,255,.42));
+    border-radius: var(--msg-cloudy-radius, 18px);
+    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 5px 16px rgba(72,54,64,.06);
   }
   #log .row:not(.me) > .toolline .lbl,
@@ -2595,9 +2605,9 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   #log .row:not(.me) > .toolline .lbl { text-align: left; }
 
   .msg-style-preview {
-    position: sticky; z-index: 3; top: -1px; min-height: 148px; padding: 11px 12px;
+    position: sticky; z-index: 3; top: -1px; min-height: 160px; padding: 16px 13px 13px;
     border-radius: 20px; overflow: hidden; box-sizing: border-box;
-    display: flex; flex-direction: column; gap: 7px; justify-content: center;
+    display: flex; flex-direction: column; gap: 9px; justify-content: center;
     background-color: var(--msg-preview-base, #faf9f5);
     background-image: linear-gradient(180deg, var(--msg-preview-mask-top), var(--msg-preview-mask-bottom)), var(--chat-bg-image), linear-gradient(145deg, #eee8eb, #d8cbd1);
     background-size: cover; background-position: center;
@@ -2607,21 +2617,67 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   .msg-style-preview[data-mode="light"] { --msg-preview-base: #faf9f5; --msg-preview-mask-top: rgba(250,249,245,.44); --msg-preview-mask-bottom: rgba(250,249,245,.64); }
   .msg-style-preview[data-mode="dark"] { --msg-preview-base: #262624; --msg-preview-mask-top: rgba(38,38,36,.44); --msg-preview-mask-bottom: rgba(38,38,36,.64); }
   .msg-preview-cloudy, .msg-preview-me, .msg-preview-think {
-    max-width: 82%; padding: 6px 10px; box-sizing: border-box; font-size: 12.5px;
+    max-width: 82%; padding: 7px 11px; box-sizing: border-box; font-size: 12.5px;
   }
-  .msg-preview-cloudy, .msg-preview-me, .msg-preview-think {
-    color: var(--msg-text); background: var(--msg-bg);
-    border: var(--msg-border-width) solid var(--msg-border); border-radius: var(--msg-radius);
-    -webkit-backdrop-filter: blur(var(--msg-blur)) saturate(1.45);
-    backdrop-filter: blur(var(--msg-blur)) saturate(1.45);
+  .msg-preview-cloudy {
+    align-self: flex-start; position: relative; text-align: left;
+    color: var(--msg-cloudy-text); background: var(--msg-cloudy-bg);
+    border: var(--msg-cloudy-border-width) solid var(--msg-cloudy-border); border-radius: var(--msg-cloudy-radius);
+    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-cloudy-blur)) saturate(1.45);
   }
-  .msg-preview-cloudy, .msg-preview-think { align-self: flex-start; }
-  .msg-preview-me { align-self: flex-end; }
-  .msg-preview-think { width: 100%; max-width: 100%; display: flex; align-items: center; gap: 7px; text-align: left; }
+  .msg-preview-me {
+    align-self: flex-end; position: relative; text-align: left;
+    color: var(--msg-me-text); background: var(--msg-me-bg);
+    border: var(--msg-me-border-width) solid var(--msg-me-border); border-radius: var(--msg-me-radius);
+    -webkit-backdrop-filter: blur(var(--msg-me-blur)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-me-blur)) saturate(1.45);
+  }
+  .msg-preview-target {
+    cursor: pointer; transition: transform 150ms ease, box-shadow 180ms ease;
+  }
+  .msg-preview-target:active { transform: scale(.97); }
+  .msg-preview-target.editing {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 76%, white), 0 6px 18px rgba(88,57,72,.12);
+  }
+  .msg-preview-badge {
+    position: absolute; top: -12px; padding: 1px 7px; border-radius: 999px;
+    color: #fff; background: color-mix(in srgb, var(--accent) 84%, #8c6274);
+    font-size: 9px; line-height: 1.7; white-space: nowrap; box-shadow: 0 2px 7px rgba(79,50,64,.18);
+  }
+  .msg-preview-me .msg-preview-badge { right: 8px; }
+  .msg-preview-cloudy .msg-preview-badge { left: 8px; }
+  .msg-preview-think {
+    width: 100%; max-width: 100%; align-self: flex-start; display: flex; align-items: center; gap: 7px; text-align: left;
+    color: var(--msg-cloudy-text); background: var(--msg-cloudy-bg);
+    border: var(--msg-cloudy-border-width) solid var(--msg-cloudy-border); border-radius: var(--msg-cloudy-radius);
+    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-cloudy-blur)) saturate(1.45);
+  }
   .msg-preview-think .arr { margin-left: auto; opacity: .62; }
-  .msg-style-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin: 9px 0; padding: 3px; border-radius: 14px; background: color-mix(in srgb, var(--panel) 58%, transparent); }
-  .msg-style-tab { min-height: 36px; border-radius: 11px; color: var(--dim); font-size: 13px; }
-  .msg-style-tab.on { color: var(--text); background: color-mix(in srgb, var(--card) 72%, transparent); box-shadow: 0 2px 10px rgba(70,54,63,.08); font-weight: 650; }
+  .msg-style-tabs, .msg-style-role-tabs {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin: 9px 0; padding: 3px;
+    border-radius: 14px; background: color-mix(in srgb, var(--panel) 58%, transparent);
+  }
+  .msg-style-role-tabs { margin-bottom: 6px; }
+  .msg-style-tabs { margin-top: 6px; }
+  .msg-style-tab, .msg-style-role-tab {
+    min-height: 36px; border-radius: 11px; color: var(--dim); font-size: 13px;
+    transition: transform 150ms ease, background-color 180ms ease, color 180ms ease;
+  }
+  .msg-style-tab:active, .msg-style-role-tab:active, .msg-style-copy:active, .msg-style-reset-choice:active { transform: scale(.97); }
+  .msg-style-tab.on, .msg-style-role-tab.on {
+    color: var(--text); background: color-mix(in srgb, var(--card) 72%, transparent);
+    box-shadow: 0 2px 10px rgba(70,54,63,.08); font-weight: 650;
+  }
+  .msg-style-actions { display: flex; margin: 3px 0 9px; }
+  .msg-style-copy {
+    width: 100%; min-height: 37px; padding: 7px 12px; border-radius: 12px;
+    color: color-mix(in srgb, var(--text) 78%, var(--accent)); font-size: 12px; font-weight: 620;
+    background: color-mix(in srgb, var(--card) 64%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+    transition: transform 150ms ease;
+  }
   .msg-style-control { min-height: 46px; padding: 7px 0; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
   .msg-style-control:last-child { border-bottom: 0; }
   .msg-style-control-head { min-width: 98px; display: flex; align-items: center; gap: 5px; }
@@ -2633,6 +2689,26 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   .msg-style-color::-webkit-color-swatch { border: 0; border-radius: 50%; }
   .msg-style-color::-moz-color-swatch { border: 0; border-radius: 50%; }
   .msg-style-note { margin: 9px 2px 2px; color: var(--dim); font-size: 11px; line-height: 1.45; }
+  .msg-style-reset-menu[hidden] { display: none; }
+  .msg-style-reset-menu {
+    position: absolute; z-index: 12; inset: 0; display: flex; align-items: flex-end; padding: 16px;
+    background: rgba(35,28,32,.28); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  }
+  .msg-style-reset-card {
+    width: 100%; padding: 15px; border-radius: 20px;
+    color: var(--text); background: color-mix(in srgb, var(--card) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+    box-shadow: 0 14px 40px rgba(35,23,29,.22);
+  }
+  .msg-style-reset-card h2 { margin: 0 0 3px; font-size: 17px; }
+  .msg-style-reset-card p { margin: 0 0 11px; color: var(--dim); font-size: 12px; }
+  .msg-style-reset-choices { display: grid; gap: 7px; }
+  .msg-style-reset-choice {
+    min-height: 40px; padding: 8px 11px; border-radius: 12px; text-align: left;
+    background: color-mix(in srgb, var(--panel) 58%, transparent); transition: transform 150ms ease;
+  }
+  .msg-style-reset-choice.danger { color: var(--red); }
+  .msg-style-reset-cancel { margin-top: 8px; text-align: center; color: var(--dim); }
 
   .hb-title { padding-bottom: 2px; }
   .hb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
@@ -8084,15 +8160,25 @@ document.getElementById('backgroundRow').onclick = () => { sheets.background.cla
 applyChatBackgroundOverlay(chatBackgroundOverlay());
 updateBackgroundRow();
 
-/* 浅色 / 深色各一套消息玻璃样式，所有消息和思考工具条共同使用。 */
+/* 我的消息与 Cloudy 的消息各有浅色 / 深色两套玻璃样式。
+   thinking 和工具调用是 Cloudy 的输出，因此跟随 Cloudy 的样式。 */
 const MESSAGE_STYLE_KEY = 'dwellMessageStyle';
+const MESSAGE_STYLE_ROLES = ['me', 'cloudy'];
+const MESSAGE_STYLE_MODES = ['light', 'dark'];
 const MESSAGE_STYLE_DEFAULTS = {
-  light: { blur: 16, background: '#f6e8ee', backgroundOpacity: 48, border: '#ffffff', borderOpacity: 38, borderWidth: 1, text: '#514a4f', radius: 18 },
-  dark: { blur: 16, background: '#4f4148', backgroundOpacity: 62, border: '#f2c9dc', borderOpacity: 18, borderWidth: 1, text: '#f7edf2', radius: 18 }
+  me: {
+    light: { blur: 16, background: '#f6e8ee', backgroundOpacity: 48, border: '#ffffff', borderOpacity: 38, borderWidth: 1, text: '#514a4f', radius: 18 },
+    dark: { blur: 16, background: '#4f4148', backgroundOpacity: 62, border: '#f2c9dc', borderOpacity: 18, borderWidth: 1, text: '#f7edf2', radius: 18 }
+  },
+  cloudy: {
+    light: { blur: 16, background: '#f6e8ee', backgroundOpacity: 48, border: '#ffffff', borderOpacity: 38, borderWidth: 1, text: '#514a4f', radius: 18 },
+    dark: { blur: 16, background: '#4f4148', backgroundOpacity: 62, border: '#f2c9dc', borderOpacity: 18, borderWidth: 1, text: '#f7edf2', radius: 18 }
+  }
 };
 const MESSAGE_STYLE_LIMITS = {
   blur: [0, 30], backgroundOpacity: [0, 100], borderOpacity: [0, 100], borderWidth: [0, 3], radius: [4, 32]
 };
+let messageStyleRole = 'me';
 let messageStyleTab = 'light';
 
 function clampMessageStyleNumber(key, value, fallback) {
@@ -8104,25 +8190,38 @@ function clampMessageStyleNumber(key, value, fallback) {
 function safeMessageColor(value, fallback) {
   return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : fallback;
 }
+function normalizeMessageStyle(raw, base) {
+  raw = raw && typeof raw === 'object' ? raw : {};
+  return {
+    blur: clampMessageStyleNumber('blur', raw.blur, base.blur),
+    background: safeMessageColor(raw.background, base.background),
+    backgroundOpacity: clampMessageStyleNumber('backgroundOpacity', raw.backgroundOpacity, base.backgroundOpacity),
+    border: safeMessageColor(raw.border, base.border),
+    borderOpacity: clampMessageStyleNumber('borderOpacity', raw.borderOpacity, base.borderOpacity),
+    borderWidth: clampMessageStyleNumber('borderWidth', raw.borderWidth, base.borderWidth),
+    text: safeMessageColor(raw.text, base.text),
+    radius: clampMessageStyleNumber('radius', raw.radius, base.radius)
+  };
+}
+function cloneMessageStyle(value) {
+  return {
+    blur: value.blur, background: value.background, backgroundOpacity: value.backgroundOpacity,
+    border: value.border, borderOpacity: value.borderOpacity, borderWidth: value.borderWidth,
+    text: value.text, radius: value.radius
+  };
+}
 function readMessageStyles() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(MESSAGE_STYLE_KEY) || '{}') || {}; } catch (e) {}
-  const out = {};
-  ['light', 'dark'].forEach(mode => {
-    const base = MESSAGE_STYLE_DEFAULTS[mode];
-    /* The old Cloudy/My format is intentionally retired; only reuse its light
-       values once so existing users do not lose a carefully chosen glass. */
-    const raw = saved[mode] || (mode === 'light' ? saved.cloudy : null) || {};
-    out[mode] = {
-      blur: clampMessageStyleNumber('blur', raw.blur, base.blur),
-      background: safeMessageColor(raw.background, base.background),
-      backgroundOpacity: clampMessageStyleNumber('backgroundOpacity', raw.backgroundOpacity, base.backgroundOpacity),
-      border: safeMessageColor(raw.border, base.border),
-      borderOpacity: clampMessageStyleNumber('borderOpacity', raw.borderOpacity, base.borderOpacity),
-      borderWidth: clampMessageStyleNumber('borderWidth', raw.borderWidth, base.borderWidth),
-      text: safeMessageColor(raw.text, base.text),
-      radius: clampMessageStyleNumber('radius', raw.radius, base.radius)
-    };
+  const out = { me: {}, cloudy: {} };
+  MESSAGE_STYLE_ROLES.forEach(role => {
+    MESSAGE_STYLE_MODES.forEach(mode => {
+      const nested = saved[role] && saved[role][mode];
+      const shared = saved[mode];
+      const retiredFlatRole = mode === 'light' && saved[role] && !saved[role].light && !saved[role].dark ? saved[role] : null;
+      const raw = nested || shared || retiredFlatRole || {};
+      out[role][mode] = normalizeMessageStyle(raw, MESSAGE_STYLE_DEFAULTS[role][mode]);
+    });
   });
   return out;
 }
@@ -8137,16 +8236,18 @@ function effectiveMessageStyleMode() {
   if (explicit === 'light' || explicit === 'dark') return explicit;
   return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
-function writeMessageStyle(style, values) {
-  style.setProperty('--msg-blur', values.blur + 'px');
-  style.setProperty('--msg-bg', rgbaFromHex(values.background, values.backgroundOpacity));
-  style.setProperty('--msg-border', rgbaFromHex(values.border, values.borderOpacity));
-  style.setProperty('--msg-border-width', values.borderWidth + 'px');
-  style.setProperty('--msg-text', values.text);
-  style.setProperty('--msg-radius', values.radius + 'px');
+function writeMessageRoleStyle(style, role, values) {
+  const prefix = '--msg-' + role + '-';
+  style.setProperty(prefix + 'blur', values.blur + 'px');
+  style.setProperty(prefix + 'bg', rgbaFromHex(values.background, values.backgroundOpacity));
+  style.setProperty(prefix + 'border', rgbaFromHex(values.border, values.borderOpacity));
+  style.setProperty(prefix + 'border-width', values.borderWidth + 'px');
+  style.setProperty(prefix + 'text', values.text);
+  style.setProperty(prefix + 'radius', values.radius + 'px');
 }
 function applyMessageStyles() {
-  writeMessageStyle(document.documentElement.style, messageStyleState[effectiveMessageStyleMode()]);
+  const mode = effectiveMessageStyleMode();
+  MESSAGE_STYLE_ROLES.forEach(role => writeMessageRoleStyle(document.documentElement.style, role, messageStyleState[role][mode]));
 }
 function saveMessageStyles() {
   try { localStorage.setItem(MESSAGE_STYLE_KEY, JSON.stringify(messageStyleState)); } catch (e) {}
@@ -8168,22 +8269,41 @@ const MESSAGE_STYLE_CONTROLS = [
 ];
 function renderMessageStyleSettings() {
   const body = document.getElementById('messageStyleBody');
+  const roleLabel = messageStyleRole === 'me' ? '我的消息' : 'Cloudy 的消息';
+  const otherRole = messageStyleRole === 'me' ? 'cloudy' : 'me';
+  const otherLabel = otherRole === 'me' ? '我的消息' : 'Cloudy';
+  const modeLabel = messageStyleTab === 'light' ? '浅色' : '深色';
   body.innerHTML = '<div class="msg-style-preview" data-mode="' + messageStyleTab + '">'
-    + '<div class="msg-preview-me">这是我的消息。</div>'
+    + '<button type="button" class="msg-preview-me msg-preview-target' + (messageStyleRole === 'me' ? ' editing' : '') + '" data-style-role="me">这是我的消息。' + (messageStyleRole === 'me' ? '<span class="msg-preview-badge">正在编辑</span>' : '') + '</button>'
     + '<div class="msg-preview-think"><span>💡</span><b>thinking</b><span class="arr">›</span></div>'
-    + '<div class="msg-preview-cloudy">这是 Cloudy 的回复。</div></div>'
-    + '<div class="msg-style-tabs"><button class="msg-style-tab' + (messageStyleTab === 'light' ? ' on' : '') + '" data-style-tab="light">浅色模式</button>'
+    + '<button type="button" class="msg-preview-cloudy msg-preview-target' + (messageStyleRole === 'cloudy' ? ' editing' : '') + '" data-style-role="cloudy">这是 Cloudy 的回复。' + (messageStyleRole === 'cloudy' ? '<span class="msg-preview-badge">正在编辑</span>' : '') + '</button></div>'
+    + '<div class="msg-style-role-tabs" aria-label="选择要编辑的消息"><button class="msg-style-role-tab' + (messageStyleRole === 'me' ? ' on' : '') + '" data-style-role="me">我的消息</button>'
+    + '<button class="msg-style-role-tab' + (messageStyleRole === 'cloudy' ? ' on' : '') + '" data-style-role="cloudy">Cloudy 的消息</button></div>'
+    + '<div class="msg-style-tabs" aria-label="选择明暗模式"><button class="msg-style-tab' + (messageStyleTab === 'light' ? ' on' : '') + '" data-style-tab="light">浅色模式</button>'
     + '<button class="msg-style-tab' + (messageStyleTab === 'dark' ? ' on' : '') + '" data-style-tab="dark">深色模式</button></div>'
+    + '<div class="msg-style-actions"><button type="button" class="msg-style-copy" id="messageStyleCopy">把' + roleLabel + '的' + modeLabel + '样式复制给' + otherLabel + '</button></div>'
     + '<div class="ap-section" id="messageStyleControls"></div>'
-    + '<div class="msg-style-note">两套样式会跟随当前浅色或深色模式自动切换，并共同用于双方消息、thinking 与工具调用提示。</div>';
+    + '<div class="msg-style-note">双方消息可以分别调整。thinking 与工具调用属于 Cloudy 的输出，会跟随 Cloudy 的消息样式。</div>'
+    + '<div class="msg-style-reset-menu" id="messageStyleResetMenu" hidden><div class="msg-style-reset-card"><h2>重置哪些样式？</h2><p>只会恢复这里的外观，不会影响消息内容。</p><div class="msg-style-reset-choices">'
+    + '<button class="msg-style-reset-choice" data-reset-scope="current">重置当前：' + roleLabel + ' · ' + modeLabel + '</button>'
+    + '<button class="msg-style-reset-choice" data-reset-scope="role">重置' + roleLabel + '的浅色和深色</button>'
+    + '<button class="msg-style-reset-choice danger" data-reset-scope="all">重置双方的全部消息样式</button></div>'
+    + '<button class="msg-style-reset-choice msg-style-reset-cancel" data-reset-scope="cancel">取消</button></div></div>';
+
+  const preview = body.querySelector('.msg-style-preview');
+  MESSAGE_STYLE_ROLES.forEach(role => writeMessageRoleStyle(preview.style, role, messageStyleState[role][messageStyleTab]));
+
+  body.querySelectorAll('[data-style-role]').forEach(btn => btn.onclick = () => {
+    messageStyleRole = btn.dataset.styleRole;
+    renderMessageStyleSettings();
+  });
   body.querySelectorAll('[data-style-tab]').forEach(btn => btn.onclick = () => {
     messageStyleTab = btn.dataset.styleTab;
     renderMessageStyleSettings();
   });
+
   const controls = body.querySelector('#messageStyleControls');
-  const current = messageStyleState[messageStyleTab];
-  const preview = body.querySelector('.msg-style-preview');
-  writeMessageStyle(preview.style, current);
+  const current = messageStyleState[messageStyleRole][messageStyleTab];
   MESSAGE_STYLE_CONTROLS.forEach(spec => {
     const wrap = document.createElement('div');
     wrap.className = 'msg-style-control';
@@ -8200,15 +8320,44 @@ function renderMessageStyleSettings() {
     }
     input.addEventListener('input', () => {
       current[spec.key] = spec.type === 'color' ? input.value : Number(input.value);
-      writeMessageStyle(preview.style, current);
+      writeMessageRoleStyle(preview.style, messageStyleRole, current);
       applyMessageStyles(); saveMessageStyles();
     });
     controls.appendChild(wrap);
   });
-  document.getElementById('messageStyleReset').onclick = () => {
-    messageStyleState[messageStyleTab] = { ...MESSAGE_STYLE_DEFAULTS[messageStyleTab] };
-    applyMessageStyles(); saveMessageStyles(); renderMessageStyleSettings();
+
+  body.querySelector('#messageStyleCopy').onclick = () => {
+    messageStyleState[otherRole][messageStyleTab] = cloneMessageStyle(current);
+    writeMessageRoleStyle(preview.style, otherRole, messageStyleState[otherRole][messageStyleTab]);
+    applyMessageStyles(); saveMessageStyles();
+    const copy = body.querySelector('#messageStyleCopy');
+    copy.textContent = '已经复制给' + otherLabel;
+    setTimeout(() => {
+      if (copy.isConnected) copy.textContent = '把' + roleLabel + '的' + modeLabel + '样式复制给' + otherLabel;
+    }, 900);
   };
+
+  const resetMenu = body.querySelector('#messageStyleResetMenu');
+  document.getElementById('messageStyleReset').onclick = () => { resetMenu.hidden = false; };
+  resetMenu.onclick = event => {
+    if (event.target === resetMenu) resetMenu.hidden = true;
+  };
+  resetMenu.querySelectorAll('[data-reset-scope]').forEach(btn => btn.onclick = () => {
+    const scope = btn.dataset.resetScope;
+    if (scope === 'cancel') { resetMenu.hidden = true; return; }
+    if (scope === 'current') {
+      messageStyleState[messageStyleRole][messageStyleTab] = cloneMessageStyle(MESSAGE_STYLE_DEFAULTS[messageStyleRole][messageStyleTab]);
+    } else if (scope === 'role') {
+      MESSAGE_STYLE_MODES.forEach(mode => {
+        messageStyleState[messageStyleRole][mode] = cloneMessageStyle(MESSAGE_STYLE_DEFAULTS[messageStyleRole][mode]);
+      });
+    } else if (scope === 'all') {
+      MESSAGE_STYLE_ROLES.forEach(role => MESSAGE_STYLE_MODES.forEach(mode => {
+        messageStyleState[role][mode] = cloneMessageStyle(MESSAGE_STYLE_DEFAULTS[role][mode]);
+      }));
+    }
+    applyMessageStyles(); saveMessageStyles(); renderMessageStyleSettings();
+  });
 }
 document.getElementById('messageStyleRow').onclick = () => {
   sheets.messageStyle.classList.add('open');
