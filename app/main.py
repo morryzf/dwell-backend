@@ -3059,6 +3059,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     """调用当前聊天所选供应商，边收边发事件给前端。"""
     # 新生成或重新生成都从空 thinking 开始，避免旧推理错配到新回答。
     db.message_thinking_update(msg_id, "")
+    db.message_usage_update(msg_id, {})
     history = db.message_list(chat_id, limit=100)
     instructions = [
         {"role": "system", "content": item["content"]}
@@ -3189,6 +3190,15 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     natural_split = _REPLY_SPLIT_RE
     split_pending = ""
     current_message_id = msg_id
+    reply_started = time.perf_counter()
+    model_duration_ms = 0
+    usage_totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cached_tokens": 0,
+        "reasoning_tokens": 0,
+    }
 
     def append_stream_thinking(text: str):
         if not show_thinking or not text:
@@ -3301,6 +3311,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
 
         for round_no in range(8):
             calls = []
+            round_usage = {}
+            round_started = time.perf_counter()
             async for event in stream_chat(
                 provider, selection["model_id"], messages, tools or None,
                 reasoning_effort=selection.get("reasoning_effort"),
@@ -3312,6 +3324,11 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     consume_stream_chunk(chunk)
                 elif event["type"] == "tool_calls":
                     calls.extend(event["calls"])
+                elif event["type"] == "usage":
+                    round_usage = event.get("usage") or {}
+            model_duration_ms += max(1, int((time.perf_counter() - round_started) * 1000))
+            for key in usage_totals:
+                usage_totals[key] += max(0, int(round_usage.get(key) or 0))
             if not calls:
                 break
 
@@ -3370,6 +3387,15 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         full = "".join(buf).strip()
         if full:
             db.message_update(current_message_id, full)
+        if usage_totals["total_tokens"] > 0:
+            duration_ms = max(1, int((time.perf_counter() - reply_started) * 1000))
+            usage_totals["duration_ms"] = duration_ms
+            usage_totals["model_duration_ms"] = model_duration_ms
+            usage_totals["tokens_per_second"] = round(
+                usage_totals["output_tokens"] / max(model_duration_ms / 1000, 0.001), 1
+            )
+            # Split replies persist as several messages; usage belongs only to the last bubble.
+            db.message_usage_update(current_message_id, usage_totals)
         _emit(chat_id, {
             "type": "assistant",
             "message": {"content": assistant_parts(full)}

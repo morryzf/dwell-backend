@@ -80,6 +80,42 @@ def content_texts(value) -> list[str]:
     return texts
 
 
+def _token_count(value) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _usage_dict(raw) -> dict:
+    """Normalize common OpenAI/Anthropic-compatible usage payloads."""
+    if not isinstance(raw, dict):
+        return {}
+    input_tokens = _token_count(raw.get("prompt_tokens", raw.get("input_tokens")))
+    output_tokens = _token_count(raw.get("completion_tokens", raw.get("output_tokens")))
+    total_tokens = _token_count(raw.get("total_tokens")) or input_tokens + output_tokens
+    input_details = raw.get("prompt_tokens_details") or raw.get("input_tokens_details") or {}
+    output_details = raw.get("completion_tokens_details") or raw.get("output_tokens_details") or {}
+    cached_tokens = _token_count(
+        (input_details.get("cached_tokens") if isinstance(input_details, dict) else 0)
+        or raw.get("cache_read_input_tokens")
+        or raw.get("cached_tokens")
+    )
+    reasoning_tokens = _token_count(
+        (output_details.get("reasoning_tokens") if isinstance(output_details, dict) else 0)
+        or raw.get("reasoning_tokens")
+    )
+    if total_tokens <= 0:
+        return {}
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "cached_tokens": cached_tokens,
+        "reasoning_tokens": reasoning_tokens,
+    }
+
+
 async def stream_chat(provider: dict, model_id: str, messages: list, tools: list | None = None,
                       max_tokens: int | None = None, reasoning_effort: str | None = None):
     """以 OpenAI 兼容 SSE 请求聊天，yield 正文、thinking 或完整工具调用组。"""
@@ -97,7 +133,13 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
         return
 
     url = provider["base_url"].rstrip("/") + "/chat/completions"
-    payload = {"model": model_id, "messages": messages, "stream": True}
+    payload = {
+        "model": model_id,
+        "messages": messages,
+        "stream": True,
+        # OpenAI-compatible providers normally send usage in a final empty-choices chunk.
+        "stream_options": {"include_usage": True},
+    }
     if tools:
         payload["tools"] = tools
     if max_tokens is not None:
@@ -115,6 +157,7 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
                     yield {"type": "text", "text": f"[供应商错误 {resp.status_code}] {body}"}
                     return
                 calls: dict[int, dict] = {}
+                usage = {}
                 async for line in resp.aiter_lines():
                     if not line or not line.startswith("data:"):
                         continue
@@ -125,6 +168,9 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
                         chunk = json.loads(data)
                     except json.JSONDecodeError:
                         continue
+                    normalized_usage = _usage_dict(chunk.get("usage"))
+                    if normalized_usage:
+                        usage = normalized_usage
                     choices = chunk.get("choices") or []
                     if not choices:
                         continue
@@ -142,5 +188,7 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
                         call["arguments"] += str(fn.get("arguments") or "")
                 if calls:
                     yield {"type": "tool_calls", "calls": [calls[index] for index in sorted(calls)]}
+                if usage:
+                    yield {"type": "usage", "usage": usage}
     except httpx.RequestError as exc:
         yield {"type": "text", "text": f"[网络错误] 无法连接供应商：{exc}"}
