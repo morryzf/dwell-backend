@@ -2605,6 +2605,7 @@ async def long_context_get(chat_id: str):
     state["tail_messages"] = MEMORY_TAIL_MESSAGES
     state["update_threshold"] = MEMORY_UPDATE_MIN_MESSAGES
     state["versions"] = db.chat_memory_versions(chat_id)
+    state["version_count"] = len(state["versions"])
     return {"ok": True, **state}
 
 
@@ -2671,6 +2672,7 @@ async def long_context_restore(chat_id: str, request: Request):
         raise HTTPException(404, str(exc)) from exc
     state = db.chat_memory_get(chat_id)
     state["versions"] = db.chat_memory_versions(chat_id)
+    state["version_count"] = len(state["versions"])
     return {"ok": True, **state}
 
 
