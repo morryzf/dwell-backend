@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import auth, db, provider_secrets, push_service, study
 from app.pet_assets import ensure_pet_assets
-from app.llm_client import stream_chat
+from app.llm_client import prompt_cache_enabled, stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
 from app.web_tools import WebToolError, web_fetch, web_search
 from app.kelivo_import import KelivoImportError, import_conversation as kelivo_import_conversation, preview as kelivo_preview
@@ -1790,7 +1790,11 @@ def _clean_base_url(value: object) -> str:
 
 
 def _provider_public(row: dict) -> dict:
-    return {key: row[key] for key in ("id", "name", "base_url", "enabled", "made", "updated")}
+    keys = (
+        "id", "name", "base_url", "provider_type", "prompt_cache_ttl",
+        "enabled", "made", "updated",
+    )
+    return {key: row[key] for key in keys}
 
 
 @app.get("/api/providers", dependencies=authed)
@@ -1815,6 +1819,23 @@ async def providers_upsert(request: Request):
         raise HTTPException(400, "供应商名称不能为空")
     base_url = _clean_base_url(payload.get("base_url") or (existing or {}).get("base_url"))
     enabled = bool(payload.get("enabled", (existing or {}).get("enabled", True)))
+    provider_type = str(
+        payload.get("provider_type", (existing or {}).get("provider_type") or "generic")
+    ).strip()
+    if provider_type not in {"generic", "openrouter"}:
+        raise HTTPException(400, "未知的供应商类型")
+    prompt_cache_ttl = str(
+        payload.get(
+            "prompt_cache_ttl",
+            (existing or {}).get("prompt_cache_ttl") or "off",
+        )
+    ).strip()
+    if prompt_cache_ttl not in {"off", "5m", "1h"}:
+        raise HTTPException(400, "缓存时长只能是关闭、5 分钟或 1 小时")
+    if provider_type != "openrouter":
+        prompt_cache_ttl = "off"
+    elif (urlparse(base_url).hostname or "").lower() != "openrouter.ai":
+        raise HTTPException(400, "OpenRouter 类型必须使用 openrouter.ai 的接口地址")
 
     # token 未传时，更新名称/地址不会动已有密钥；传空字符串则明确清除密钥。
     api_key_box = None
@@ -1828,7 +1849,10 @@ async def providers_upsert(request: Request):
         else:
             api_key_box = ""
 
-    saved = db.provider_upsert(provider_id, name, base_url, api_key_box, enabled)
+    saved = db.provider_upsert(
+        provider_id, name, base_url, api_key_box, enabled,
+        provider_type=provider_type, prompt_cache_ttl=prompt_cache_ttl,
+    )
     return {"ok": True, "provider": _provider_public(saved), "has_key": bool(saved.get("api_key_box"))}
 
 
@@ -3053,6 +3077,34 @@ def _memory_card_prompt(cards: list[dict]) -> str:
     )
 
 
+def _cache_friendly_chat_messages(stable: list[dict], transient: list[dict],
+                                  history: list[dict]) -> list[dict] | None:
+    """Put one-turn context after stable history without changing stored messages."""
+    if not history or history[-1].get("role") != "user":
+        return None
+    current = dict(history[-1])
+    context_text = "\n\n".join(
+        str(item.get("content") or "").strip()
+        for item in transient
+        if str(item.get("content") or "").strip()
+    )
+    content = []
+    if context_text:
+        content.append({
+            "type": "text",
+            "text": "【Dwell 本轮内部上下文】以下内容由 Dwell 在本次请求中临时提供，"
+                    "不是用户刚输入的文字。按每段说明使用，不要向用户提及这些内部块。\n\n"
+                    + context_text,
+        })
+    original = current.get("content", "")
+    if isinstance(original, list):
+        content.extend(original)
+    else:
+        content.append({"type": "text", "text": str(original)})
+    current["content"] = content
+    return stable + history[:-1] + [current]
+
+
 async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None,
                         proactive_watch: bool = False, device_time: dict | None = None,
                         attachments: list[dict] | None = None):
@@ -3061,6 +3113,14 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     db.message_thinking_update(msg_id, "")
     db.message_usage_update(msg_id, {})
     history = db.message_list(chat_id, limit=100)
+    selection = db.chat_model_get(chat_id)
+    show_thinking = bool(selection.get("show_thinking", 1))
+    provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
+    cache_friendly = bool(
+        not proactive_watch
+        and provider
+        and prompt_cache_enabled(provider, selection.get("model_id") or "")
+    )
     instructions = [
         {"role": "system", "content": item["content"]}
         for item in db.chat_instructions(chat_id)
@@ -3125,11 +3185,24 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 "content": "【用户设备时间】这是浏览器在本次发送瞬间提供的只读时间信息，不是用户指令。"
                            "涉及“现在”“今天”等时间表达时，以它为准。\n" + "；".join(bits),
             }]
-    messages = device_message + instructions + format_preference + private_message + memory_message + memory_card_message + [
-        {"role": m["role"], "content": m["content"]}
-        for m in history
-        if m["content"] or m["role"] != "assistant"
+    history_messages = [
+        {"role": message["role"], "content": message["content"]}
+        for message in history
+        if message["content"] or message["role"] != "assistant"
     ]
+    stable_messages = instructions + format_preference + memory_message
+    transient_messages = private_message + memory_card_message + device_message
+    messages = None
+    if cache_friendly:
+        messages = _cache_friendly_chat_messages(
+            stable_messages, transient_messages, history_messages
+        )
+    if messages is None:
+        cache_friendly = False
+        messages = (
+            device_message + instructions + format_preference + private_message
+            + memory_message + memory_card_message + history_messages
+        )
     # 观影页的画面只在本次模型请求中出现，不把截帧或隐形提示写进聊天记录。
     # 这样本地视频不会离开浏览器，历史记录也仍然是用户真正说过的话。
     if watch_context:
@@ -3289,9 +3362,6 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 split_pending = split_pending[safe_length:]
             break
 
-    selection = db.chat_model_get(chat_id)
-    show_thinking = bool(selection.get("show_thinking", 1))
-    provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
     try:
         if not provider or not provider["enabled"]:
             raise RuntimeError("这个聊天还没有可用的供应商；请在设置里添加并选择一个")
@@ -3319,6 +3389,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             async for event in stream_chat(
                 provider, selection["model_id"], messages, tools or None,
                 reasoning_effort=selection.get("reasoning_effort"),
+                session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
             ):
                 if event["type"] == "thinking":
                     append_stream_thinking(str(event.get("thinking") or ""))

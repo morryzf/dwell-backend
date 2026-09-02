@@ -3,7 +3,9 @@
 这是普通聊天的模型通道；heartbeat 只应负责定时唤醒，不应成为每次对话的必经网关。
 """
 
+import copy
 import json
+from urllib.parse import urlparse
 
 import httpx
 
@@ -153,24 +155,94 @@ def _usage_dict(raw) -> dict:
     return usage
 
 
+def prompt_cache_ttl(provider: dict | None, model_id: str,
+                     session_id: str | None = None) -> str:
+    """Return an explicit OpenRouter Claude cache TTL, or an empty string."""
+    if not provider or not session_id:
+        return ""
+    if str(provider.get("provider_type") or "") != "openrouter":
+        return ""
+    if str(provider.get("prompt_cache_ttl") or "off") not in {"5m", "1h"}:
+        return ""
+    host = (urlparse(str(provider.get("base_url") or "")).hostname or "").lower()
+    if host != "openrouter.ai":
+        return ""
+    if not str(model_id or "").lower().startswith("anthropic/"):
+        return ""
+    return str(provider["prompt_cache_ttl"])
+
+
+def prompt_cache_enabled(provider: dict | None, model_id: str) -> bool:
+    """Whether ordinary chat may opt into explicit prompt caching."""
+    return bool(prompt_cache_ttl(provider, model_id, session_id="configured"))
+
+
+def _cacheable_messages(messages: list, ttl: str) -> list:
+    """Copy messages, normalize assistant text blocks, and mark one stable anchor."""
+    prepared = copy.deepcopy(messages)
+    for message in prepared:
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and content:
+            message["content"] = [{"type": "text", "text": content}]
+        elif isinstance(content, list):
+            message["content"] = [
+                {"type": "text", "text": part} if isinstance(part, str) else part
+                for part in content
+            ]
+
+    for message in reversed(prepared):
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for index in range(len(content) - 1, -1, -1):
+            part = content[index]
+            if not isinstance(part, dict) or part.get("type") != "text" or not part.get("text"):
+                continue
+            cache_control = {"type": "ephemeral"}
+            if ttl == "1h":
+                cache_control["ttl"] = "1h"
+            content[index] = {**part, "cache_control": cache_control}
+            return prepared
+    return prepared
+
+
+def _cacheable_tools(tools: list | None) -> list | None:
+    if not tools:
+        return tools
+    prepared = copy.deepcopy(tools)
+    return sorted(
+        prepared,
+        key=lambda tool: str((tool.get("function") or {}).get("name") or ""),
+    )
+
+
 def build_chat_payload(model_id: str, messages: list, tools: list | None = None,
                        max_tokens: int | None = None,
-                       reasoning_effort: str | None = None) -> dict:
-    """Build the provider-neutral request body in one place.
+                       reasoning_effort: str | None = None,
+                       provider: dict | None = None,
+                       session_id: str | None = None) -> dict:
+    """Build one request, adding guarded OpenRouter cache fields when configured.
 
-    Prompt caching remains deliberately disabled here. Provider-specific cache
-    controls will be added only after this stable request boundary is covered
-    by tests and can be enabled without changing generic providers.
+    Generic providers retain the exact provider-neutral request shape.
     """
+    ttl = prompt_cache_ttl(provider, model_id, session_id)
+    request_messages = _cacheable_messages(messages, ttl) if ttl else messages
+    request_tools = _cacheable_tools(tools) if ttl else tools
     payload = {
         "model": model_id,
-        "messages": messages,
+        "messages": request_messages,
         "stream": True,
         # OpenAI-compatible providers normally send usage in a final empty-choices chunk.
         "stream_options": {"include_usage": True},
     }
-    if tools:
-        payload["tools"] = tools
+    if request_tools:
+        payload["tools"] = request_tools
+    if ttl:
+        payload["session_id"] = str(session_id)[:256]
     if max_tokens is not None:
         payload["max_tokens"] = max(1, int(max_tokens))
     effort = str(reasoning_effort or "").strip()
@@ -180,7 +252,8 @@ def build_chat_payload(model_id: str, messages: list, tools: list | None = None,
 
 
 async def stream_chat(provider: dict, model_id: str, messages: list, tools: list | None = None,
-                      max_tokens: int | None = None, reasoning_effort: str | None = None):
+                      max_tokens: int | None = None, reasoning_effort: str | None = None,
+                      session_id: str | None = None):
     """以 OpenAI 兼容 SSE 请求聊天，yield 正文、thinking 或完整工具调用组。"""
     if not model_id:
         yield {"type": "text", "text": "[配置错误] 这个聊天还没有选择模型"}
@@ -198,7 +271,7 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
     url = provider["base_url"].rstrip("/") + "/chat/completions"
     payload = build_chat_payload(
         model_id, messages, tools, max_tokens=max_tokens,
-        reasoning_effort=reasoning_effort,
+        reasoning_effort=reasoning_effort, provider=provider, session_id=session_id,
     )
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "text/event-stream"}
 

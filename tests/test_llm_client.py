@@ -1,6 +1,6 @@
 import unittest
 
-from app.llm_client import _usage_dict, build_chat_payload
+from app.llm_client import _usage_dict, build_chat_payload, prompt_cache_enabled
 
 
 class ChatPayloadTest(unittest.TestCase):
@@ -32,6 +32,85 @@ class ChatPayloadTest(unittest.TestCase):
         self.assertNotIn("tools", payload)
         self.assertNotIn("max_tokens", payload)
         self.assertNotIn("reasoning_effort", payload)
+
+
+class PromptCachePayloadTest(unittest.TestCase):
+    def setUp(self):
+        self.provider = {
+            "provider_type": "openrouter",
+            "prompt_cache_ttl": "5m",
+            "base_url": "https://openrouter.ai/api/v1",
+        }
+
+    def test_marks_last_stable_assistant_and_keeps_original_messages_untouched(self):
+        messages = [
+            {"role": "system", "content": "stable instructions"},
+            {"role": "user", "content": "earlier question"},
+            {"role": "assistant", "content": "stable answer"},
+            {"role": "user", "content": "current question"},
+        ]
+        tools = [
+            {"type": "function", "function": {"name": "Zulu"}},
+            {"type": "function", "function": {"name": "Alpha"}},
+        ]
+
+        payload = build_chat_payload(
+            "anthropic/claude-sonnet-4",
+            messages,
+            tools,
+            provider=self.provider,
+            session_id="dwell-chat:test",
+        )
+
+        self.assertEqual(messages[2]["content"], "stable answer")
+        self.assertEqual(
+            payload["messages"][2]["content"],
+            [{
+                "type": "text",
+                "text": "stable answer",
+                "cache_control": {"type": "ephemeral"},
+            }],
+        )
+        self.assertEqual(payload["messages"][3], messages[3])
+        self.assertEqual(
+            [tool["function"]["name"] for tool in payload["tools"]],
+            ["Alpha", "Zulu"],
+        )
+        self.assertEqual(payload["session_id"], "dwell-chat:test")
+        self.assertNotIn("cache_control", payload)
+
+    def test_supports_one_hour_breakpoint_without_old_beta_header(self):
+        provider = {**self.provider, "prompt_cache_ttl": "1h"}
+        payload = build_chat_payload(
+            "anthropic/claude-opus-4",
+            [{"role": "assistant", "content": "anchor"}],
+            provider=provider,
+            session_id="dwell-chat:test",
+        )
+
+        marker = payload["messages"][0]["content"][0]["cache_control"]
+        self.assertEqual(marker, {"type": "ephemeral", "ttl": "1h"})
+
+    def test_cache_guards_leave_other_requests_provider_neutral(self):
+        cases = [
+            ({**self.provider, "provider_type": "generic"}, "anthropic/claude-sonnet-4", "chat"),
+            ({**self.provider, "base_url": "https://relay.example/v1"}, "anthropic/claude-sonnet-4", "chat"),
+            (self.provider, "google/gemini-2.5-pro", "chat"),
+            (self.provider, "anthropic/claude-sonnet-4", None),
+        ]
+        for provider, model, session_id in cases:
+            with self.subTest(provider=provider, model=model, session_id=session_id):
+                payload = build_chat_payload(
+                    model,
+                    [{"role": "assistant", "content": "answer"}],
+                    provider=provider,
+                    session_id=session_id,
+                )
+                self.assertNotIn("session_id", payload)
+                self.assertEqual(payload["messages"][0]["content"], "answer")
+
+        self.assertTrue(prompt_cache_enabled(self.provider, "anthropic/claude-sonnet-4"))
+        self.assertFalse(prompt_cache_enabled(self.provider, "openai/gpt-5"))
 
 
 class UsageNormalizationTest(unittest.TestCase):

@@ -730,6 +730,8 @@ html[data-theme="dark"] .composer {
   .ap-section-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
   .ap-lb { display: block; margin: 15px 2px 6px; color: var(--dim); font-size: 13.5px; font-weight: 600; }
   .ap-section .ap-lb:first-of-type { margin-top: 12px; }
+  .ap-cache-options[hidden] { display: none; }
+  .ap-cache-help { margin: 7px 2px 0; color: var(--dim); font-size: 12.5px; line-height: 1.55; }
   .ap-in {
     display: block; width: 100%; min-height: 43px; padding: 9px 11px;
     border: 1px solid var(--line); border-radius: 11px; outline: 0;
@@ -8159,6 +8161,12 @@ async function loadApi() {
     + `<div class="ap-lb">名称</div><input class="ap-in" id="apName" placeholder="例如：聚梦 AG">`
     + `<div class="ap-lb">接口地址</div>`
     + `<input class="ap-in" id="apBase" placeholder="https://api.jumengai.net/v1">`
+    + `<div class="ap-lb">连接类型</div><select class="ap-in" id="apProviderType">`
+    + `<option value="generic">通用 OpenAI 兼容</option><option value="openrouter">OpenRouter</option></select>`
+    + `<div class="ap-cache-options" id="apCacheOptions" hidden>`
+    + `<div class="ap-lb">Claude 提示缓存</div><select class="ap-in" id="apCacheTtl">`
+    + `<option value="off">关闭</option><option value="5m">5 分钟（推荐）</option><option value="1h">1 小时</option></select>`
+    + `<div class="ap-cache-help">只对 anthropic/ 开头的 Claude 模型生效。5 分钟适合普通聊天；1 小时适合频繁聊天或主动功能。</div></div>`
     + `<div class="ap-lb">令牌</div>`
     + `<input class="ap-in" id="apTok" type="password" placeholder="已保存时留空；输入空值不会读取旧密钥">`
     + `<div class="ap-btns single"><button class="ap-b go" id="apSave">保存供应商</button></div>`
@@ -8170,17 +8178,38 @@ async function loadApi() {
 
   const msg = document.getElementById('apMsg');
   const profile = document.getElementById('apProfile');
+  const providerType = document.getElementById('apProviderType');
+  const cacheOptions = document.getElementById('apCacheOptions');
+  const cacheTtl = document.getElementById('apCacheTtl');
+  const syncProviderType = (userChanged = false) => {
+    const openrouter = providerType.value === 'openrouter';
+    cacheOptions.hidden = !openrouter;
+    if (!openrouter) cacheTtl.value = 'off';
+    if (openrouter && userChanged) {
+      if (!document.getElementById('apBase').value.trim()) {
+        document.getElementById('apBase').value = 'https://openrouter.ai/api/v1';
+      }
+      if (cacheTtl.value === 'off') cacheTtl.value = '5m';
+    }
+  };
   const fill = () => {
     const p = profiles.find(x => x.id === profile.value);
     document.getElementById('apName').value = p ? p.name : '';
     document.getElementById('apBase').value = p ? p.base_url : '';
+    providerType.value = p ? (p.provider_type || 'generic') : 'generic';
+    cacheTtl.value = p ? (p.prompt_cache_ttl || 'off') : 'off';
     document.getElementById('apTok').placeholder = p && p.has_key ? '已保存 · 不换就留空' : '粘贴 API 密钥';
+    syncProviderType();
   };
-  profile.onchange = fill; fill();
+  profile.onchange = fill;
+  providerType.onchange = () => syncProviderType(true);
+  fill();
   const vals = () => ({
     id: profile.value,
     name: document.getElementById('apName').value.trim(),
     base_url: document.getElementById('apBase').value.trim(),
+    provider_type: providerType.value,
+    prompt_cache_ttl: providerType.value === 'openrouter' ? cacheTtl.value : 'off',
     token: document.getElementById('apTok').value.trim(),
   });
   const say = (t, bad) => { msg.textContent = t; msg.className = 'ap-msg on' + (bad ? ' bad' : ''); };
