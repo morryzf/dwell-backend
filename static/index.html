@@ -2814,6 +2814,72 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   @media (max-width: 520px) { .mc-form-grid { grid-template-columns: 1fr; } .mc-toolbar { align-items: stretch; flex-direction: column; } .mc-toolbar select { width: 100%; max-width: none; } }
   @media (prefers-reduced-motion: reduce) { .mc-tab, .mc-btn { transition-duration: 0.01ms; } }
 </style>
+<style>
+  /* Compact process summary + provider-reported usage (PR token-process-summary). */
+  .process-band {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    max-width: 100%;
+  }
+  .process-band .toolline {
+    width: auto; min-height: 30px; max-width: min(72vw, 360px);
+    padding: 5px 9px; box-sizing: border-box; border-radius: 999px;
+    gap: 5px; justify-content: flex-start; text-align: left;
+    color: color-mix(in srgb, var(--msg-cloudy-text, #514a4f) 78%, var(--dim));
+    background: color-mix(in srgb, var(--msg-cloudy-bg, rgba(248,242,245,.46)) 72%, transparent);
+    border: 1px solid color-mix(in srgb, var(--msg-cloudy-border, rgba(255,255,255,.42)) 72%, transparent);
+    -webkit-backdrop-filter: blur(12px) saturate(1.25);
+    backdrop-filter: blur(12px) saturate(1.25);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 3px 10px rgba(72,54,64,.045);
+    font-size: 11.5px; line-height: 1.2;
+    transition: opacity 150ms ease, transform 150ms ease, background 150ms ease;
+  }
+  .process-band .toolline:active { opacity: .76; transform: scale(.97); }
+  .process-band .toolline .lbl { flex: 0 1 auto; }
+  .process-band .toolline .lbl,
+  .process-band .toolline .lbl b,
+  .process-band .toolline .chev { color: inherit; font-size: inherit; }
+  .process-band .toolline .chev { opacity: .58; margin-left: 1px; }
+  .process-band .toolline .ic { width: 13px !important; height: 13px !important; opacity: .76; }
+  .process-band .toolline .spin {
+    width: 11px; height: 11px; border-width: 1.5px;
+  }
+  .row.has-usage { padding-bottom: 20px; }
+  .row.has-usage.actions-on { padding-bottom: 30px; }
+  .msg-usage {
+    position: absolute; right: 3px; bottom: 1px; z-index: 2;
+    border: 0; padding: 3px 2px; background: transparent;
+    color: var(--dim); font: inherit; font-size: 10.5px; line-height: 1;
+    letter-spacing: .01em; opacity: .66; cursor: pointer;
+    transition: opacity 150ms ease, transform 150ms ease;
+  }
+  .msg-usage:active { opacity: 1; transform: scale(.97); }
+  .msg-usage-pop {
+    position: absolute; right: 0; bottom: 25px; z-index: 45;
+    width: max-content; min-width: 174px; max-width: min(78vw, 230px);
+    padding: 9px 11px; border-radius: 13px;
+    color: var(--text); background: color-mix(in srgb, var(--panel) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(1.45);
+    backdrop-filter: blur(20px) saturate(1.45);
+    box-shadow: 0 10px 28px rgba(45,35,41,.16), inset 0 1px 0 rgba(255,255,255,.18);
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transform: translateY(4px) scale(.97); transform-origin: bottom right;
+    transition: opacity 160ms ease, transform 160ms ease, visibility 0s linear 160ms;
+  }
+  .msg-usage-pop.on {
+    opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0) scale(1);
+    transition-delay: 0s;
+  }
+  .usage-line {
+    display: grid; grid-template-columns: 16px 1fr; align-items: baseline;
+    gap: 5px; padding: 2px 0; color: var(--dim);
+    font-size: 11.5px; line-height: 1.45; white-space: nowrap;
+  }
+  .usage-line .usage-mark { text-align: center; opacity: .72; }
+  @media (prefers-reduced-motion: reduce) {
+    .process-band .toolline, .msg-usage, .msg-usage-pop { transition: none; }
+  }
+</style>
 </head>
 <body>
 
@@ -3623,9 +3689,21 @@ function addProactiveDivider(messageId) {
 }
 
 const thinkStore = [];
+let processBand = null;    // 一轮回复只占一条紧凑过程栏
 let turnThink = null;      // 本轮唯一的那一段
 let curThinkIdx = -1;      // 弹层里正看着哪段
 const thinkBodyEl = document.getElementById('thinkBodyEl');
+
+function ensureProcessBand() {
+  if (processBand && processBand.isConnected) return processBand;
+  const r = row();
+  const band = document.createElement('div');
+  band.className = 'process-band';
+  r.appendChild(band);
+  processBand = band;
+  guEl = null;
+  return band;
+}
 
 function thinkSpin(buf, on) {
   const line = buf.lineEl;
@@ -3636,7 +3714,7 @@ function thinkSpin(buf, on) {
     sp.className = 'spin';
     old.replaceWith(sp);
   } else {
-    old.replaceWith(icEl('clock', 15));
+    old.replaceWith(icEl('bulb', 13));
   }
 }
 function ensureThink() {
@@ -3648,12 +3726,11 @@ function ensureThink() {
     }
     return turnThink;
   }
-  closeGroup();
-  const r = row();
+  const band = ensureProcessBand();
   const line = document.createElement('button');
-  line.className = 'toolline';
+  line.className = 'toolline thinking-chip';
   line.innerHTML = '<span class="spin"></span><span class="lbl">thinking</span><span class="chev">›</span>';
-  r.appendChild(line);
+  band.appendChild(line);
   const buf = { text: '', lineEl: line, paused: false };
   thinkStore.push(buf);
   const idx = thinkStore.length - 1;
@@ -3687,7 +3764,7 @@ function openThinkSheet(idx) {
 }
 function ensureGu() {
   if (guEl) return guEl;
-  closeThink(); closeGroup();
+  closeThink(); closeGroup(); processBand = null;
   const r = row();
   const d = document.createElement('div');
   d.className = 'gu';
@@ -3823,6 +3900,60 @@ function attachMessageActions(el, message) {
   actions.onclick = event => event.stopPropagation();
   rowEl.appendChild(actions);
 }
+
+function closeUsagePopovers(except) {
+  document.querySelectorAll('.msg-usage-pop.on').forEach(pop => {
+    if (pop !== except) pop.classList.remove('on');
+  });
+}
+function usageNumber(value) {
+  return Math.max(0, Number(value) || 0).toLocaleString();
+}
+function usageSeconds(ms) {
+  const seconds = Math.max(0, Number(ms) || 0) / 1000;
+  return (seconds < 10 ? seconds.toFixed(1) : Math.round(seconds).toLocaleString()) + ' 秒';
+}
+function attachMessageUsage(el, message) {
+  const usage = message && message.usage;
+  const total = Number(usage && usage.total_tokens) || 0;
+  if (!el || !message || message.role !== 'assistant' || total <= 0) return;
+  const rowEl = el.parentElement;
+  if (!rowEl || rowEl.querySelector('.msg-usage')) return;
+  rowEl.classList.add('has-usage');
+  const button = document.createElement('button');
+  button.className = 'msg-usage';
+  button.type = 'button';
+  button.textContent = usageNumber(total) + ' tokens';
+  button.setAttribute('aria-label', '查看本轮 token 用量');
+  button.setAttribute('aria-expanded', 'false');
+  const pop = document.createElement('div');
+  pop.className = 'msg-usage-pop';
+  pop.setAttribute('role', 'status');
+  const cached = Number(usage.cached_tokens) || 0;
+  const inputText = usageNumber(usage.input_tokens) + ' 输入' + (cached > 0 ? '（' + usageNumber(cached) + ' 缓存）' : '');
+  const lines = [
+    ['↑', inputText],
+    ['↓', usageNumber(usage.output_tokens) + ' 输出'],
+    ['ϟ', (Number(usage.tokens_per_second) || 0).toFixed(1) + ' tokens/s'],
+    ['◷', usageSeconds(usage.duration_ms)],
+  ];
+  for (const [mark, value] of lines) {
+    const line = document.createElement('div');
+    line.className = 'usage-line';
+    line.innerHTML = '<span class="usage-mark">' + mark + '</span><span>' + escapeHtml(value) + '</span>';
+    pop.appendChild(line);
+  }
+  button.onclick = event => {
+    event.stopPropagation();
+    const opening = !pop.classList.contains('on');
+    closeUsagePopovers(pop);
+    pop.classList.toggle('on', opening);
+    button.setAttribute('aria-expanded', String(opening));
+  };
+  pop.onclick = event => event.stopPropagation();
+  rowEl.append(button, pop);
+}
+
 function openMessageEditor(message) {
   const body = document.getElementById('editMessageBody');
   body.innerHTML = '<div class="ap-section"><div class="ap-section-title">修改后的内容会成为后续聊天的上下文' + (message.role === 'assistant' ? '，原回复会保存为版本' : '') + '</div><textarea class="ap-in" id="editMessageText" rows="12" maxlength="50000"></textarea><div class="ap-btns single"><button class="ap-b go" id="editMessageSave">保存修改</button></div><div class="ap-msg" id="editMessageMsg"></div></div>';
@@ -3843,7 +3974,7 @@ async function openMessageVersions(message) {
     body.innerHTML = '<div class="gnote">后续上下文只会读取当前版本；旧版本仅供你查看。</div>' + card('当前版本', d.current, null) + (d.versions||[]).map((item,index)=>card('旧版本 ' + (index + 1) + (item.reason==='regenerated'?'（重新生成前）':'（编辑前）'),item.content,item.made)).join('');
   } catch (e) { body.innerHTML = '<div class="gnote">版本记录没拿到：' + escapeHtml(e.message) + '</div>'; }
 }
-document.addEventListener('click', () => closeMessageActions());
+document.addEventListener('click', () => { closeMessageActions(); closeUsagePopovers(); });
 function note(text, cls, sticky) {
   const [t1, t2] = toastSplit(text);
   const el = toast(t1, t2, cls === 'err' ? 'zap' : 'check', sticky);
@@ -4305,10 +4436,8 @@ function groupLabel(ids) {
 
 function renderGroupLine() {
   if (!curGroup) return;
-  const { verb, what, dc } = groupLabel(curGroup.ids);
-  let html = '<b>' + verb + '</b> ' + escapeHtml(what || '');
-  if (dc) html += ' <span class="plus">+' + dc[0] + '</span> <span class="minus">-' + dc[1] + '</span>';
-  curGroup.labelEl.innerHTML = html;
+  const count = curGroup.ids.length;
+  curGroup.labelEl.textContent = count === 1 ? '调用工具' : count + ' 个工具';
 }
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -4320,11 +4449,11 @@ function addToolUse(part) {
   closeThink();
   toolInfo[part.id] = { name: part.name, input: part.input || {}, result: null, isError: false, done: false };
   if (!curGroup) {
-    const r = row();
+    const band = ensureProcessBand();
     const line = document.createElement('button');
-    line.className = 'toolline';
+    line.className = 'toolline tool-chip';
     line.innerHTML = '<span class="spin"></span><span class="lbl"></span><span class="chev">›</span>';
-    r.appendChild(line);
+    band.appendChild(line);
     curGroup = { ids: [], lineEl: line, labelEl: line.querySelector('.lbl'), spinEl: line.querySelector('.spin') };
     const g = curGroup;
     line.onclick = () => openToolSheet(g.ids);
@@ -4477,6 +4606,7 @@ function renderSaid(msgs) {
         renderRich(el);
         if (index === segments.length - 1) appendMessageImages(el, m.images);
         attachMessageActions(el, m);
+        if (index === segments.length - 1) attachMessageUsage(el, m);
         guEl = null;                   // 每段各归各位，编辑时仍指向同一条原消息
       });
     } else if (m.kind === 'think') {
@@ -4513,7 +4643,7 @@ async function loadSaid(focusMessageId = '') {
     const msgs = d.msgs || [];
     log.innerHTML = '';
     thinkStore.length = 0;
-    guEl = null; turnThink = null; curGroup = null;
+    guEl = null; turnThink = null; curGroup = null; processBand = null;
     earliestSeq = null; olderBtn = null;
     renderSaid(msgs);
     healEmptyGu();
@@ -4560,15 +4690,15 @@ async function loadOlder() {
     if (msgs.length) {
       // 现有的画笔全往队尾画。所以：把正在流式的那支笔先收起来，
       // 记住队尾在哪，照常画完，再把新画的整段搬到最前头
-      const stash = [guEl, turnThink, curGroup];
-      guEl = null; turnThink = null; curGroup = null;
+      const stash = [guEl, turnThink, curGroup, processBand];
+      guEl = null; turnThink = null; curGroup = null; processBand = null;
       const mark = log.children.length;
       const oldH = log.scrollHeight, oldTop = log.scrollTop;
       renderSaid(msgs);
       const fresh = Array.from(log.children).slice(mark);
       const anchor = olderBtn.nextSibling;
       for (const el of fresh) log.insertBefore(el, anchor);
-      [guEl, turnThink, curGroup] = stash;
+      [guEl, turnThink, curGroup, processBand] = stash;
       healEmptyGu();
       log.scrollTop = oldTop + (log.scrollHeight - oldH);   // 眼睛停在原来那句上
       earliestSeq = msgs[0].seq;
@@ -4680,7 +4810,7 @@ function handle(d) {
       renderRich(el);
     }
     guEl = null;
-    endThink(); closeGroup(); scroll();
+    endThink(); closeGroup(); processBand = null; scroll();
     return;
   }
 
@@ -4758,7 +4888,7 @@ function handle(d) {
 
   if (d.type === 'result') {
     guEl?.querySelector('.caret')?.remove();
-    guEl = null; endThink(); closeGroup();
+    guEl = null; endThink(); closeGroup(); processBand = null;
     if (regeneratingMessageId) {
       regeneratingMessageId = '';
       loadSaid().then((upto) => { if (upto) cursor = Math.max(cursor, upto); }).catch(() => {});
@@ -4805,7 +4935,7 @@ function handle(d) {
   }
   if (d.type === 'system' && d.subtype === 'stopped') {
     guEl?.querySelector('.caret')?.remove();
-    guEl = null; endThink(); closeGroup();
+    guEl = null; endThink(); closeGroup(); processBand = null;
     setBusy(false); petSet('calm');
     note('（我停下了）');
     return;
