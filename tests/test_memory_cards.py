@@ -96,6 +96,15 @@ class MemoryCardDatabaseTest(unittest.TestCase):
         db.memory_card_segment_mark(self.chat["id"], self.segment["id"], 0)
         self.assertEqual(db.memory_card_unprocessed_segments(self.chat["id"]), [])
 
+    def test_duplicate_segment_range_is_only_offered_once(self):
+        duplicate = db.chat_memory_add_segment(
+            self.chat["id"], 1, 2, "她现在已经住在上海。"
+        )
+        db.memory_card_segment_mark(self.chat["id"], self.segment["id"], 1)
+
+        self.assertNotEqual(duplicate["id"], self.segment["id"])
+        self.assertEqual(db.memory_card_unprocessed_segments(self.chat["id"]), [])
+
     def test_removes_forced_prefix_once_without_rewriting_future_edits(self):
         proposal = {
             "content": "我记得：她喜欢秋天散步。",
