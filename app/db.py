@@ -2184,8 +2184,12 @@ def message_update(msg_id: str, content: str) -> bool:
 
 def message_usage_update(msg_id: str, usage: dict) -> bool:
     """Save provider-reported usage only; callers must not synthesize estimates."""
-    allowed = ("input_tokens", "output_tokens", "total_tokens", "cached_tokens",
-               "reasoning_tokens", "duration_ms", "model_duration_ms", "tokens_per_second")
+    allowed = (
+        "input_tokens", "output_tokens", "total_tokens", "cached_tokens",
+        "cache_write_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens",
+        "reasoning_tokens", "cost", "upstream_cost", "duration_ms",
+        "model_duration_ms", "tokens_per_second",
+    )
     clean = {}
     for key in allowed:
         value = usage.get(key) if isinstance(usage, dict) else None
