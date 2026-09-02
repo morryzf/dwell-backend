@@ -3192,12 +3192,15 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     current_message_id = msg_id
     reply_started = time.perf_counter()
     model_duration_ms = 0
+    token_usage_keys = (
+        "input_tokens", "output_tokens", "total_tokens", "cached_tokens",
+        "cache_write_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens",
+        "reasoning_tokens",
+    )
+    cost_usage_keys = ("cost", "upstream_cost")
     usage_totals = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "total_tokens": 0,
-        "cached_tokens": 0,
-        "reasoning_tokens": 0,
+        **{key: 0 for key in token_usage_keys},
+        **{key: 0.0 for key in cost_usage_keys},
     }
 
     def append_stream_thinking(text: str):
@@ -3327,8 +3330,13 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 elif event["type"] == "usage":
                     round_usage = event.get("usage") or {}
             model_duration_ms += max(1, int((time.perf_counter() - round_started) * 1000))
-            for key in usage_totals:
+            for key in token_usage_keys:
                 usage_totals[key] += max(0, int(round_usage.get(key) or 0))
+            for key in cost_usage_keys:
+                try:
+                    usage_totals[key] += max(0.0, float(round_usage.get(key) or 0))
+                except (TypeError, ValueError):
+                    continue
             if not calls:
                 break
 
@@ -3394,6 +3402,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             usage_totals["tokens_per_second"] = round(
                 usage_totals["output_tokens"] / max(model_duration_ms / 1000, 0.001), 1
             )
+            for key in cost_usage_keys:
+                usage_totals[key] = round(usage_totals[key], 8)
             # Split replies persist as several messages; usage belongs only to the last bubble.
             db.message_usage_update(current_message_id, usage_totals)
         _emit(chat_id, {
