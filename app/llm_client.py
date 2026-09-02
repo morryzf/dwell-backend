@@ -225,11 +225,9 @@ def build_chat_payload(model_id: str, messages: list, tools: list | None = None,
                        reasoning_effort: str | None = None,
                        provider: dict | None = None,
                        session_id: str | None = None) -> dict:
-    """Build the provider-neutral request body in one place.
+    """Build one request, adding guarded OpenRouter cache fields when configured.
 
-    Prompt caching remains deliberately disabled here. Provider-specific cache
-    controls will be added only after this stable request boundary is covered
-    by tests and can be enabled without changing generic providers.
+    Generic providers retain the exact provider-neutral request shape.
     """
     ttl = prompt_cache_ttl(provider, model_id, session_id)
     request_messages = _cacheable_messages(messages, ttl) if ttl else messages
