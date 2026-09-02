@@ -1709,16 +1709,33 @@ def memory_card_update(chat_id: str, card_id: str, chosen: dict) -> dict:
 
 
 def memory_card_unprocessed_segments(chat_id: str) -> list[dict]:
-    """返回还没生成过候选卡片的分段，供旧数据补整理。"""
+    """每个原文范围只返回一次；同范围任一分段处理过就不再重复产卡。"""
     with conn() as cx:
         rows = cx.execute(
             """SELECT segment.* FROM chat_memory_segments AS segment
-               LEFT JOIN memory_card_segment_runs AS run ON run.segment_id=segment.id
-               WHERE segment.chat_id=? AND run.segment_id IS NULL
-               ORDER BY segment.start_rowid ASC""",
+               WHERE segment.chat_id=?
+               ORDER BY segment.start_rowid ASC,segment.end_rowid ASC,segment.rowid ASC""",
             (chat_id,),
         ).fetchall()
-    return [dict(row) for row in rows]
+        processed_rows = cx.execute(
+            """SELECT source.start_rowid,source.end_rowid
+               FROM memory_card_segment_runs AS run
+               JOIN chat_memory_segments AS source ON source.id=run.segment_id
+               WHERE source.chat_id=?""",
+            (chat_id,),
+        ).fetchall()
+    processed_ranges = {
+        (int(row["start_rowid"]), int(row["end_rowid"])) for row in processed_rows
+    }
+    seen_ranges: set[tuple[int, int]] = set()
+    pending = []
+    for row in rows:
+        key = (int(row["start_rowid"]), int(row["end_rowid"]))
+        if key in processed_ranges or key in seen_ranges:
+            continue
+        seen_ranges.add(key)
+        pending.append(dict(row))
+    return pending
 
 
 def memory_card_segment_mark(
