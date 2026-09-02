@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS messages (
     made    INTEGER NOT NULL,
     origin  TEXT NOT NULL DEFAULT 'chat',
     display_split INTEGER NOT NULL DEFAULT 0,
+    usage_json TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS ix_messages_chat ON messages(chat_id, made ASC);
@@ -442,6 +443,8 @@ def init_db():
             cx.execute("ALTER TABLE messages ADD COLUMN display_split INTEGER NOT NULL DEFAULT 0")
         if "thinking" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN thinking TEXT NOT NULL DEFAULT ''")
+        if "usage_json" not in message_cols:
+            cx.execute("ALTER TABLE messages ADD COLUMN usage_json TEXT NOT NULL DEFAULT '{}'")
         # #82 曾在保存时强制补“我记得：”。只清理一次这段前缀，绝不改正文；
         # 清理完成后，用户以后主动写下同样的开头也会原样保留。
         cleanup_key = "memory_remove_forced_prefix_v1"
@@ -1114,13 +1117,14 @@ def message_add(chat_id: str, role: str, content: str, made: int | None = None,
         "made": int(made if made is not None else time.time()),
         "origin": origin if origin in {"chat", "heartbeat"} else "chat",
         "display_split": 0,
+        "usage_json": "{}",
     }
     with conn() as cx:
         cx.execute(
             """INSERT INTO messages
-               (id,chat_id,role,content,thinking,made,origin,display_split)
+               (id,chat_id,role,content,thinking,made,origin,display_split,usage_json)
                VALUES
-               (:id,:chat_id,:role,:content,:thinking,:made,:origin,:display_split)""",
+               (:id,:chat_id,:role,:content,:thinking,:made,:origin,:display_split,:usage_json)""",
             row,
         )
     return row
@@ -1859,6 +1863,14 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
     msgs = []
     for r in rows:
         role = r["role"]
+        usage = {}
+        if role == "assistant":
+            try:
+                parsed_usage = json.loads(r["usage_json"] or "{}")
+                if isinstance(parsed_usage, dict):
+                    usage = parsed_usage
+            except (TypeError, json.JSONDecodeError):
+                usage = {}
         msgs.append({
             "seq": r["rowid"],
             "id": r["id"],
@@ -1870,6 +1882,7 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
             "at": r["made"],
             "origin": r["origin"],
             "display_split": bool(r["display_split"]),
+            "usage": usage,
             "tools": tools_by_message.get(r["id"], []) if role == "assistant" else [],
             "images": images_by_message.get(r["id"], []),
         })
@@ -2166,6 +2179,23 @@ def message_since(chat_id: str, since: int, limit: int = 200) -> list:
 def message_update(msg_id: str, content: str) -> bool:
     with conn() as cx:
         cur = cx.execute("UPDATE messages SET content=? WHERE id=?", (content, msg_id))
+    return cur.rowcount > 0
+
+
+def message_usage_update(msg_id: str, usage: dict) -> bool:
+    """Save provider-reported usage only; callers must not synthesize estimates."""
+    allowed = ("input_tokens", "output_tokens", "total_tokens", "cached_tokens",
+               "reasoning_tokens", "duration_ms", "model_duration_ms", "tokens_per_second")
+    clean = {}
+    for key in allowed:
+        value = usage.get(key) if isinstance(usage, dict) else None
+        if isinstance(value, (int, float)) and value >= 0:
+            clean[key] = round(value, 2) if isinstance(value, float) else value
+    with conn() as cx:
+        cur = cx.execute(
+            "UPDATE messages SET usage_json=? WHERE id=?",
+            (json.dumps(clean, ensure_ascii=False, separators=(",", ":")), msg_id),
+        )
     return cur.rowcount > 0
 
 
