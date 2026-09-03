@@ -95,9 +95,19 @@ class SharedPromptCacheBehaviorTest(unittest.TestCase):
     def test_heartbeat_tool_filter_rejects_mutations_but_keeps_reads(self):
         read = {"function": {"name": "DiarySearch", "description": "Read diary entries"}}
         write = {"function": {"name": "DiaryCreate", "description": "Create an entry"}}
+        toggle = next(
+            tool for tool in main.HOME_TOOLS
+            if tool["function"]["name"] == "DwellTodoToggle"
+        )
+        todo_list = next(
+            tool for tool in main.HOME_TOOLS
+            if tool["function"]["name"] == "DwellTodoList"
+        )
 
         self.assertTrue(main._heartbeat_read_tool(read))
         self.assertFalse(main._heartbeat_read_tool(write))
+        self.assertFalse(main._heartbeat_tool_allowed(toggle, "builtin:home"))
+        self.assertTrue(main._heartbeat_tool_allowed(todo_list, "builtin:home"))
 
 
 if __name__ == "__main__":
