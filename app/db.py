@@ -1985,7 +1985,7 @@ def system_log_clear() -> int:
 
 def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -> dict:
     rows = message_list(chat_id, limit, before)
-    show_thinking = bool(chat_model_get(chat_id).get("show_thinking", 1))
+    # The toggle controls future generation only. Persisted thinking remains part of history.
     assistant_ids = [row["id"] for row in rows if row["role"] == "assistant"]
     images_by_message = message_attachments([row["id"] for row in rows])
     tools_by_message: dict[str, list[dict]] = {}
@@ -2017,7 +2017,7 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
             "role": role,
             "text": r["content"],
             "content": r["content"],
-            "thinking": r["thinking"] if role == "assistant" and show_thinking else "",
+            "thinking": r["thinking"] if role == "assistant" else "",
             "at": r["made"],
             "origin": r["origin"],
             "display_split": bool(r["display_split"]),
