@@ -875,16 +875,35 @@ def _heartbeat_is_repeat(chat_id: str, text: str) -> bool:
     return False
 
 
+HEARTBEAT_READ_HOME_TOOLS = {
+    "DwellTodoList",
+    "DwellDiaryList",
+    "DwellDiaryGet",
+    "DwellDiarySearch",
+    "DwellCalendarList",
+    "DwellQuoteList",
+}
+
+
 def _heartbeat_read_tool(tool: dict) -> bool:
-    """Keep background heartbeats incapable of selecting mutating MCP tools."""
+    """Conservatively recognize read-only third-party MCP tools."""
     function = tool.get("function") or {}
     haystack = f"{function.get('name', '')} {function.get('description', '')}".lower()
     mutating_words = (
         "create", "write", "update", "delete", "remove", "save", "insert",
-        "append", "upsert", "edit", "modify", "set_", "add_", "创建", "写入",
-        "更新", "删除", "保存", "添加", "修改",
+        "append", "upsert", "edit", "modify", "toggle", "complete", "mark",
+        "set_", "add_", "创建", "写入", "更新", "删除", "保存", "添加", "修改",
     )
     return not any(word in haystack for word in mutating_words)
+
+
+def _heartbeat_tool_allowed(tool: dict, server: object) -> bool:
+    name = str((tool.get("function") or {}).get("name") or "")
+    if server in {"builtin:search", "builtin:fetch"}:
+        return True
+    if server == "builtin:home":
+        return name in HEARTBEAT_READ_HOME_TOOLS
+    return bool(server) and _heartbeat_read_tool(tool)
 
 
 async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
@@ -898,7 +917,10 @@ async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
     readable_tools = {
         str((tool.get("function") or {}).get("name") or "")
         for tool in tools
-        if _heartbeat_read_tool(tool)
+        if _heartbeat_tool_allowed(
+            tool,
+            tool_servers.get(str((tool.get("function") or {}).get("name") or "")),
+        )
     }
     cache_friendly = prompt_cache_enabled(provider, selection["model_id"])
 
