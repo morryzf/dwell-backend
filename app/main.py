@@ -49,6 +49,8 @@ _study_lock = asyncio.Lock()
 MEMORY_TAIL_MESSAGES = 80
 MEMORY_UPDATE_MIN_MESSAGES = 50
 MEMORY_SEGMENT_MESSAGES = 50
+CACHE_HISTORY_TARGET_MESSAGES = 100
+CACHE_HISTORY_MAX_MESSAGES = 160
 
 MEMORY_CARD_TYPES = {
     "stable_fact": "稳定事实",
@@ -784,8 +786,36 @@ def _chat_history_messages_from_rows(rows: list[dict]) -> list[dict]:
     ]
 
 
-def _chat_history_messages(chat_id: str, limit: int = 100) -> list[dict]:
-    return _chat_history_messages_from_rows(db.message_list(chat_id, limit=limit))
+def _chat_history_rows(chat_id: str, cache_friendly: bool) -> list[dict]:
+    """Keep a cacheable history head fixed instead of sliding it every turn."""
+    if not cache_friendly:
+        return db.message_list(chat_id, limit=CACHE_HISTORY_TARGET_MESSAGES)
+
+    rows = db.message_list(chat_id, limit=CACHE_HISTORY_MAX_MESSAGES + 1)
+    if not rows:
+        return []
+    setting_key = f"prompt_cache_history_start:{chat_id}"
+    try:
+        start_rowid = max(0, int(db.setting_get(setting_key, "0") or 0))
+    except (TypeError, ValueError):
+        start_rowid = 0
+    anchored = [
+        row for row in rows
+        if start_rowid and int(row.get("rowid") or 0) >= start_rowid
+    ]
+    if anchored and len(anchored) <= CACHE_HISTORY_MAX_MESSAGES:
+        return anchored
+
+    selected = rows[-CACHE_HISTORY_TARGET_MESSAGES:]
+    if selected:
+        db.setting_set(setting_key, str(int(selected[0]["rowid"])))
+    return selected
+
+
+def _chat_history_messages(chat_id: str, cache_friendly: bool = False) -> list[dict]:
+    return _chat_history_messages_from_rows(
+        _chat_history_rows(chat_id, cache_friendly)
+    )
 
 
 async def _chat_tools(chat_id: str) -> tuple[list[dict], dict[str, object]]:
@@ -810,7 +840,8 @@ async def _chat_tools(chat_id: str) -> tuple[list[dict], dict[str, object]]:
     return tools, tool_map
 
 
-def _heartbeat_context(chat_id: str, now: datetime, interval: int) -> list[dict]:
+def _heartbeat_context(chat_id: str, now: datetime, interval: int,
+                       cache_friendly: bool = False) -> list[dict]:
     """Reuse the ordinary chat prefix and keep the changing wake event at the tail."""
     now_ts = int(now.timestamp())
     last_user = db.message_last_made(chat_id, "user")
@@ -831,7 +862,11 @@ def _heartbeat_context(chat_id: str, now: datetime, interval: int) -> list[dict]
             "自然、简短消息正文，不要标题、标签、解释或引号。"
         ),
     }
-    return _chat_stable_messages(chat_id) + _chat_history_messages(chat_id) + [trigger]
+    return (
+        _chat_stable_messages(chat_id)
+        + _chat_history_messages(chat_id, cache_friendly=cache_friendly)
+        + [trigger]
+    )
 
 
 def _heartbeat_elapsed(seconds: int) -> str:
@@ -912,7 +947,10 @@ async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
     if not provider or not provider.get("enabled") or not selection.get("model_id"):
         raise RuntimeError("主动接收消息的聊天还没有可用模型")
 
-    messages = _heartbeat_context(chat_id, now, interval)
+    cache_friendly = prompt_cache_enabled(provider, selection["model_id"])
+    messages = _heartbeat_context(
+        chat_id, now, interval, cache_friendly=cache_friendly
+    )
     tools, tool_servers = await _chat_tools(chat_id)
     readable_tools = {
         str((tool.get("function") or {}).get("name") or "")
@@ -922,7 +960,6 @@ async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
             tool_servers.get(str((tool.get("function") or {}).get("name") or "")),
         )
     }
-    cache_friendly = prompt_cache_enabled(provider, selection["model_id"])
 
     for round_no in range(4):
         parts: list[str] = []
@@ -3227,13 +3264,13 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     # 新生成或重新生成都从空 thinking 开始，避免旧推理错配到新回答。
     db.message_thinking_update(msg_id, "")
     db.message_usage_update(msg_id, {})
-    history = db.message_list(chat_id, limit=100)
     selection = db.chat_model_get(chat_id)
     show_thinking = bool(selection.get("show_thinking", 1))
     provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
     cache_friendly = bool(
         provider and prompt_cache_enabled(provider, selection.get("model_id") or "")
     )
+    history = _chat_history_rows(chat_id, cache_friendly)
     split_replies, instructions, format_preference, memory_message = (
         _chat_stable_message_parts(chat_id)
     )

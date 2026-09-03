@@ -16,9 +16,10 @@ class SharedPromptCacheSourceTest(unittest.TestCase):
     def test_chat_and_heartbeat_share_stable_prefix_builders(self):
         self.assertIn("def _chat_stable_message_parts(", self.source)
         self.assertIn(
-            "return _chat_stable_messages(chat_id) + _chat_history_messages(chat_id) + [trigger]",
+            "_chat_history_messages(chat_id, cache_friendly=cache_friendly)",
             self.source,
         )
+        self.assertIn("_chat_history_rows(chat_id, cache_friendly)", self.source)
         self.assertIn("_chat_history_messages_from_rows(history)", self.source)
         self.assertIn(
             "split_replies, instructions, format_preference, memory_message = (",
@@ -82,11 +83,18 @@ class SharedPromptCacheBehaviorTest(unittest.TestCase):
         now = datetime(2026, 9, 3, 9, 30, tzinfo=timezone.utc)
         with (
             patch.object(main, "_chat_stable_messages", return_value=stable),
-            patch.object(main, "_chat_history_messages", return_value=history),
+            patch.object(
+                main, "_chat_history_messages", return_value=history
+            ) as history_messages,
             patch.object(main.db, "message_last_made", side_effect=[1, 2]),
         ):
-            prepared = main._heartbeat_context("chat-1", now, 120)
+            prepared = main._heartbeat_context(
+                "chat-1", now, 120, cache_friendly=True
+            )
 
+        history_messages.assert_called_once_with(
+            "chat-1", cache_friendly=True
+        )
         self.assertEqual(prepared[:-1], stable + history)
         self.assertEqual(prepared[-1]["role"], "user")
         self.assertIn("2026-09-03 09:30", prepared[-1]["content"])
@@ -108,6 +116,60 @@ class SharedPromptCacheBehaviorTest(unittest.TestCase):
         self.assertFalse(main._heartbeat_read_tool(write))
         self.assertFalse(main._heartbeat_tool_allowed(toggle, "builtin:home"))
         self.assertTrue(main._heartbeat_tool_allowed(todo_list, "builtin:home"))
+
+
+    def test_cache_history_window_keeps_its_original_head(self):
+        initial_rows = [
+            {"rowid": rowid, "role": "user", "content": str(rowid)}
+            for rowid in range(1, 111)
+        ]
+        with (
+            patch.object(main.db, "message_list", return_value=initial_rows) as message_list,
+            patch.object(main.db, "setting_get", return_value="0"),
+            patch.object(main.db, "setting_set") as setting_set,
+        ):
+            selected = main._chat_history_rows("chat-1", cache_friendly=True)
+
+        self.assertEqual([row["rowid"] for row in selected], list(range(11, 111)))
+        message_list.assert_called_once_with(
+            "chat-1", limit=main.CACHE_HISTORY_MAX_MESSAGES + 1
+        )
+        setting_set.assert_called_once_with(
+            "prompt_cache_history_start:chat-1", "11"
+        )
+
+        grown_rows = initial_rows + [
+            {"rowid": rowid, "role": "assistant", "content": str(rowid)}
+            for rowid in range(111, 116)
+        ]
+        with (
+            patch.object(main.db, "message_list", return_value=grown_rows),
+            patch.object(main.db, "setting_get", return_value="11"),
+            patch.object(main.db, "setting_set") as setting_set,
+        ):
+            grown = main._chat_history_rows("chat-1", cache_friendly=True)
+
+        self.assertEqual(grown[0]["rowid"], 11)
+        self.assertEqual(grown[-1]["rowid"], 115)
+        setting_set.assert_not_called()
+
+    def test_cache_history_window_rotates_only_at_the_hard_limit(self):
+        rows = [
+            {"rowid": rowid, "role": "user", "content": str(rowid)}
+            for rowid in range(11, 172)
+        ]
+        with (
+            patch.object(main.db, "message_list", return_value=rows),
+            patch.object(main.db, "setting_get", return_value="11"),
+            patch.object(main.db, "setting_set") as setting_set,
+        ):
+            selected = main._chat_history_rows("chat-1", cache_friendly=True)
+
+        self.assertEqual(len(selected), main.CACHE_HISTORY_TARGET_MESSAGES)
+        self.assertEqual(selected[0]["rowid"], 72)
+        setting_set.assert_called_once_with(
+            "prompt_cache_history_start:chat-1", "72"
+        )
 
 
 if __name__ == "__main__":
