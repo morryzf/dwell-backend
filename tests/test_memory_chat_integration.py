@@ -49,6 +49,21 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn("生成未处理分段的记忆卡草稿", self.ui_source)
         self.assertNotIn("整理新的分段", self.ui_source)
 
+    def test_system_logs_do_not_read_request_content(self):
+        middleware = self.source.split(
+            "async def _system_request_log", 1
+        )[1].split('@app.on_event("startup")', 1)[0]
+        self.assertNotIn("request.body", middleware)
+        self.assertNotIn("request.headers", middleware)
+        self.assertIn("X-Dwell-Request-ID", middleware)
+
+    def test_model_and_memory_tasks_are_logged(self):
+        self.assertIn('"model_request"', self.source)
+        self.assertIn('"memory_task", "summary_refresh"', self.source)
+        self.assertIn('"memory_task", "memory_card_generation"', self.source)
+        self.assertIn("系统日志", self.ui_source)
+        self.assertIn("不保存聊天正文、图片、密钥或请求头", self.ui_source)
+
     def test_generation_prompts_require_cloudys_first_person(self):
         self.assertIn("你在整理的是你自己的记忆", self.source)
         self.assertIn("‘她’是Morry（我老婆）", self.source)

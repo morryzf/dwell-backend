@@ -2815,6 +2815,16 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   }
   @media (max-width: 520px) { .mc-form-grid { grid-template-columns: 1fr; } .mc-toolbar { align-items: stretch; flex-direction: column; } .mc-toolbar select { width: 100%; max-width: none; } }
   @media (prefers-reduced-motion: reduce) { .mc-tab, .mc-btn { transition-duration: 0.01ms; } }
+  .syslog-toolbar { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+  .syslog-list { display:flex; flex-direction:column; gap:10px; }
+  .syslog-item { border:1px solid var(--line); border-radius:14px; padding:12px; background:var(--card); }
+  .syslog-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  .syslog-head strong { flex:1; font-size:14px; }
+  .syslog-state { font-size:11px; padding:2px 7px; border-radius:999px; background:rgba(128,128,128,.12); }
+  .syslog-state.error { color:#b84b4b; background:rgba(184,75,75,.12); }
+  .syslog-meta,.syslog-detail { color:var(--dim); font-size:12px; line-height:1.55; overflow-wrap:anywhere; }
+  .syslog-detail { margin-top:6px; color:#b84b4b; }
+
 </style>
 <style>
   /* Compact process summary + provider-reported usage (PR token-process-summary). */
@@ -3001,9 +3011,23 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>模型供应商<span class="chev">›</span></button>
         <button class="grow" id="mcpRow"><span class="ic" data-i="tool"></span>MCP 工具<span class="chev">›</span></button>
         <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
+        <button class="grow" id="systemLogRow"><span class="ic" data-i="activity"></span>系统日志<span class="chev">›</span></button>
         <button class="grow" id="kelivoImportRow"><span class="ic" data-i="plus"></span>导入 Kelivo 聊天记录<span class="chev">›</span></button>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="sheetWrap page" id="systemLogSheet">
+  <div class="shade" data-close="systemLog"></div>
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="head">
+      <button class="hbtn" data-close="systemLog"><span class="ic" data-i="x"></span></button>
+      <div class="ht">系统日志</div>
+      <button class="hbtn" id="systemLogClear" title="清空日志"><span class="ic" data-i="trash"></span></button>
+    </div>
+    <div class="body" id="systemLogBody"><div class="gnote">正在读取…</div></div>
   </div>
 </div>
 
@@ -5418,6 +5442,7 @@ const sheets = {
   chatInstructions: document.getElementById('chatInstructionsSheet'),
   longContext: document.getElementById('longContextSheet'),
   settings: document.getElementById('settingsSheet'),
+  systemLog: document.getElementById('systemLogSheet'),
   usage: document.getElementById('usageSheet'),
   model: document.getElementById('modelSheet'),
   add: document.getElementById('addSheet'),
@@ -7632,6 +7657,75 @@ Object.entries(sheets).forEach(([k, wrap]) => {
 
 document.getElementById('avatarBtn').onclick = () => { closeDrawer(); sheets.settings.classList.add('open'); };
 document.getElementById('usageRow').onclick = () => { sheets.usage.classList.add('open'); loadUsage(); };
+
+let systemLogCategory = '';
+let systemLogStatus = '';
+function systemLogWhen(timestamp) {
+  if (!timestamp) return '时间未知';
+  return new Date(Number(timestamp) * 1000).toLocaleString('zh-CN', {hour12:false});
+}
+function systemLogAction(item) {
+  const names = {
+    chat_reply:'消息回复', regenerate:'重新生成回复', watch_reply:'观影消息',
+    watch_proactive:'观影主动回复', summary_refresh:'更新摘要',
+    memory_card_generation:'生成记忆卡草稿'
+  };
+  return names[item.action] || item.action || '系统请求';
+}
+async function loadSystemLogs() {
+  const body = document.getElementById('systemLogBody');
+  body.innerHTML = '<div class="gnote">正在读取…</div>';
+  try {
+    const params = new URLSearchParams({limit:'300'});
+    if (systemLogCategory) params.set('category', systemLogCategory);
+    if (systemLogStatus) params.set('status', systemLogStatus);
+    const response = await fetch('api/system-logs?' + params.toString(), {cache:'no-store'});
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || '日志没有读取到');
+    const items = data.items || [];
+    const list = items.map(item => {
+      const stateName = {running:'进行中',success:'成功',error:'失败',cancelled:'已停止'}[item.status] || item.status;
+      const bits = [systemLogWhen(item.made)];
+      if (item.provider) bits.push(item.provider);
+      if (item.model_id) bits.push(item.model_id);
+      if (item.duration_ms !== null && item.duration_ms !== undefined) bits.push(item.duration_ms + ' ms');
+      if (item.status_code) bits.push('HTTP ' + item.status_code);
+      if (item.chat_id) bits.push('聊天 ' + item.chat_id.slice(0,8));
+      return '<article class="syslog-item"><div class="syslog-head"><strong>' +
+        instructionEsc(systemLogAction(item)) + '</strong><span class="syslog-state ' +
+        (item.status === 'error' ? 'error' : '') + '">' + instructionEsc(stateName) +
+        '</span></div><div class="syslog-meta">' + bits.map(instructionEsc).join(' · ') +
+        '</div>' + (item.detail ? '<div class="syslog-detail">' +
+        instructionEsc(item.detail) + '</div>' : '') + '</article>';
+    }).join('');
+    body.innerHTML = '<div class="gnote">仅记录请求信息，不保存聊天正文、图片、密钥或请求头。自动保留最近 7 天，最多 1000 条。</div>' +
+      '<div class="syslog-toolbar"><select class="ap-in" id="systemLogCategory">' +
+      '<option value="">全部类型</option><option value="api_request">界面操作</option>' +
+      '<option value="model_request">消息请求</option><option value="memory_task">记忆任务</option></select>' +
+      '<select class="ap-in" id="systemLogStatus"><option value="">全部状态</option>' +
+      '<option value="running">进行中</option><option value="success">成功</option>' +
+      '<option value="error">失败</option><option value="cancelled">已停止</option></select></div>' +
+      (list ? '<div class="syslog-list">' + list + '</div>' :
+        '<div class="mc-empty"><strong>还没有日志</strong>新的请求会显示在这里。</div>');
+    const category = document.getElementById('systemLogCategory');
+    const status = document.getElementById('systemLogStatus');
+    category.value = systemLogCategory; status.value = systemLogStatus;
+    category.onchange = () => { systemLogCategory = category.value; loadSystemLogs(); };
+    status.onchange = () => { systemLogStatus = status.value; loadSystemLogs(); };
+  } catch (error) {
+    body.innerHTML = '<div class="ap-msg on bad">' + instructionEsc(error.message) + '</div>';
+  }
+}
+document.getElementById('systemLogRow').onclick = () => {
+  sheets.systemLog.classList.add('open');
+  loadSystemLogs();
+};
+document.getElementById('systemLogClear').onclick = async () => {
+  if (!confirm('清空全部系统日志？这不会删除聊天或记忆。')) return;
+  const response = await fetch('api/system-logs', {method:'DELETE'});
+  if (response.ok) loadSystemLogs();
+  else alert('日志没有清空');
+};
 document.getElementById('apiRow').onclick = () => note('（这是备用通道的占位——真到要用的那天，把 API key 给我，我把自己接回来）');
 function setArmed(on) {
   armedFresh = on;

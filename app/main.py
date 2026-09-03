@@ -544,6 +544,12 @@ async def _stage_memory_card_suggestions(
 
 async def _refresh_memory_card_suggestions(chat_id: str) -> None:
     """为已有分段补建候选卡片，供第二阶段控制台手动触发。"""
+    task_started = time.perf_counter()
+    task_log_id = _start_system_log(
+        "memory_task", "memory_card_generation", chat_id=chat_id
+    )
+    task_status = "success"
+    task_detail: object = ""
     try:
         selection, provider, _explicit = _long_context_model(chat_id)
         if not provider or not provider.get("enabled") or not selection.get("model_id"):
@@ -558,8 +564,11 @@ async def _refresh_memory_card_suggestions(chat_id: str) -> None:
             if db.memory_card_state_get(chat_id)["status"] == "error":
                 break
     except Exception as exc:
+        task_status = "error"
+        task_detail = exc
         db.memory_card_state_set(chat_id, "error", str(exc), generated=True)
     finally:
+        _finish_system_log(task_log_id, task_status, task_started, detail=task_detail)
         _memory_card_tasks.pop(chat_id, None)
 
 
@@ -603,6 +612,10 @@ def _memory_segments_waiting_for_summary(
 
 async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
     """把远离近期窗口的消息按段压缩，并更新一份供下一轮注入的总览。"""
+    task_started = time.perf_counter()
+    task_log_id = _start_system_log("memory_task", "summary_refresh", chat_id=chat_id)
+    task_status = "success"
+    task_detail: object = ""
     try:
         if not db.chat_get(chat_id):
             return
@@ -664,8 +677,11 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
         overview = overview.strip()
         db.chat_memory_stage(chat_id, overview[:4000], processed_through)
     except Exception as exc:
+        task_status = "error"
+        task_detail = exc
         db.chat_memory_set_status(chat_id, "error", str(exc), enabled=True)
     finally:
+        _finish_system_log(task_log_id, task_status, task_started, detail=task_detail)
         _memory_tasks.pop(chat_id, None)
 
 
@@ -1307,6 +1323,71 @@ async def _read_json(request: Request) -> dict:
     return data
 
 
+def _safe_log_detail(value: object) -> str:
+    """保留可诊断的错误摘要，同时遮掉常见凭据和网址。"""
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    text = re.sub(
+        r"(?i)(authorization|bearer|api[_ -]?key|token)(\s*[:=]?\s*)\S+",
+        r"\1\2[已隐藏]",
+        text,
+    )
+    text = re.sub(r"https?://\S+", "[网址已隐藏]", text)
+    return text[:500]
+
+
+def _start_system_log(category: str, action: str, **metadata) -> str:
+    """日志故障不能影响聊天本身。"""
+    try:
+        return db.system_log_start(category, action, **metadata)
+    except Exception:
+        return ""
+
+
+def _finish_system_log(
+    log_id: str, status: str, started: float, *, status_code: int | None = None,
+    detail: object = "",
+) -> None:
+    if not log_id:
+        return
+    try:
+        db.system_log_finish(
+            log_id,
+            status,
+            round((time.perf_counter() - started) * 1000),
+            status_code=status_code,
+            detail=_safe_log_detail(detail),
+        )
+    except Exception:
+        pass
+
+
+@app.middleware("http")
+async def _system_request_log(request: Request, call_next):
+    """记录会改变数据的 API 调用；不读取请求正文、请求头或查询参数。"""
+    path = request.url.path
+    method = request.method.upper()
+    should_log = (
+        path.startswith("/api/")
+        and method in {"POST", "PUT", "PATCH", "DELETE"}
+        and path != "/api/system-logs"
+    )
+    if not should_log:
+        return await call_next(request)
+
+    started = time.perf_counter()
+    request_id = uuid.uuid4().hex
+    log_id = _start_system_log("api_request", f"{method} {path}")
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        _finish_system_log(log_id, "error", started, status_code=500, detail=exc)
+        raise
+    status = "success" if response.status_code < 400 else "error"
+    _finish_system_log(log_id, status, started, status_code=response.status_code)
+    response.headers["X-Dwell-Request-ID"] = request_id
+    return response
+
+
 @app.on_event("startup")
 async def _startup():
     global _heartbeat_task
@@ -1525,6 +1606,26 @@ async def me(request: Request):
 
 # 下面所有路由都要登录
 authed = [Depends(auth.require_auth)]
+
+
+@app.get("/api/system-logs", dependencies=authed)
+async def system_logs_get(category: str = "", status: str = "", limit: int = 300):
+    allowed_categories = {"", "api_request", "model_request", "memory_task"}
+    allowed_statuses = {"", "running", "success", "error", "cancelled"}
+    if category not in allowed_categories or status not in allowed_statuses:
+        raise HTTPException(400, "日志筛选条件不正确")
+    return {
+        "ok": True,
+        "items": db.system_log_list(category=category, status=status, limit=limit),
+        "retention_days": 7,
+        "maximum_items": 1000,
+        "stores_content": False,
+    }
+
+
+@app.delete("/api/system-logs", dependencies=authed)
+async def system_logs_delete():
+    return {"ok": True, "deleted": db.system_log_clear()}
 
 
 # ---------------------------------------------------------------- 日记
@@ -3125,7 +3226,7 @@ async def messages_regenerate(message_id: str):
     db.message_update(message_id, "")
     db.message_thinking_update(message_id, "")
     _emit(chat_id, {"type": "system", "subtype": "regenerating", "message_id": message_id})
-    task = asyncio.create_task(_run_ai_reply(chat_id, message_id))
+    task = asyncio.create_task(_run_ai_reply(chat_id, message_id, request_kind="regenerate"))
     _running_tasks[chat_id] = task
     return {"ok": True, "id": message_id}
 
@@ -3259,7 +3360,8 @@ def _cache_friendly_chat_messages(stable: list[dict], transient: list[dict],
 
 async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None,
                         proactive_watch: bool = False, device_time: dict | None = None,
-                        attachments: list[dict] | None = None):
+                        attachments: list[dict] | None = None,
+                        request_kind: str = "chat_reply"):
     """调用当前聊天所选供应商，边收边发事件给前端。"""
     # 新生成或重新生成都从空 thinking 开始，避免旧推理错配到新回答。
     db.message_thinking_update(msg_id, "")
@@ -3267,6 +3369,15 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     selection = db.chat_model_get(chat_id)
     show_thinking = bool(selection.get("show_thinking", 1))
     provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
+    request_started = time.perf_counter()
+    request_log_id = _start_system_log(
+        "model_request",
+        request_kind,
+        chat_id=chat_id,
+        message_id=msg_id,
+        provider=str((provider or {}).get("name") or ""),
+        model_id=str(selection.get("model_id") or ""),
+    )
     cache_friendly = bool(
         provider and prompt_cache_enabled(provider, selection.get("model_id") or "")
     )
@@ -3606,6 +3717,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             "message": {"content": assistant_parts(full)}
         })
         _emit(chat_id, {"type": "result", "is_error": False})
+        _finish_system_log(request_log_id, "success", request_started)
         # 已启用长期上下文的聊天，只有足够多消息离开近期窗口后才额外整理一次。
         _queue_long_context_refresh(chat_id)
     except asyncio.CancelledError:
@@ -3618,8 +3730,10 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 "message": {"content": assistant_parts(stopped_text)}
             })
         _emit(chat_id, {"type": "system", "subtype": "stopped"})
+        _finish_system_log(request_log_id, "cancelled", request_started)
         raise
     except Exception as exc:
+        _finish_system_log(request_log_id, "error", request_started, detail=exc)
         text = f"[配置错误] {exc}"
         db.message_update(current_message_id, text)
         _emit(chat_id, {
@@ -3696,7 +3810,7 @@ async def watch_proactive(request: Request):
     }
     placeholder = db.message_add(chat_id, "assistant", "")
     task = asyncio.create_task(
-        _run_ai_reply(chat_id, placeholder["id"], context, proactive_watch=True)
+        _run_ai_reply(chat_id, placeholder["id"], context, proactive_watch=True, request_kind="watch_proactive")
     )
     _running_tasks[chat_id] = task
     return {"ok": True, "scheduled": True}
@@ -3782,7 +3896,7 @@ async def watch_send(request: Request):
     db.message_add(chat_id, "user", text)
     _emit(chat_id, {"type": "echo", "text": text})
     placeholder = db.message_add(chat_id, "assistant", "")
-    task = asyncio.create_task(_run_ai_reply(chat_id, placeholder["id"], watch_context))
+    task = asyncio.create_task(_run_ai_reply(chat_id, placeholder["id"], watch_context, request_kind="watch_reply"))
     _running_tasks[chat_id] = task
     return {"ok": True, "frames": len(images)}
 
