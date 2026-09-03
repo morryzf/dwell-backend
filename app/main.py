@@ -3210,7 +3210,7 @@ async def messages_regenerate(message_id: str):
     db.message_update(message_id, "")
     db.message_thinking_update(message_id, "")
     _emit(chat_id, {"type": "system", "subtype": "regenerating", "message_id": message_id})
-    task = asyncio.create_task(_run_ai_reply(chat_id, message_id))
+    task = asyncio.create_task(_run_ai_reply(chat_id, message_id, request_kind="regenerate"))
     _running_tasks[chat_id] = task
     return {"ok": True, "id": message_id}
 
@@ -3344,7 +3344,8 @@ def _cache_friendly_chat_messages(stable: list[dict], transient: list[dict],
 
 async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None,
                         proactive_watch: bool = False, device_time: dict | None = None,
-                        attachments: list[dict] | None = None):
+                        attachments: list[dict] | None = None,
+                        request_kind: str = "chat_reply"):
     """调用当前聊天所选供应商，边收边发事件给前端。"""
     # 新生成或重新生成都从空 thinking 开始，避免旧推理错配到新回答。
     db.message_thinking_update(msg_id, "")
@@ -3352,6 +3353,15 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     selection = db.chat_model_get(chat_id)
     show_thinking = bool(selection.get("show_thinking", 1))
     provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
+    request_started = time.perf_counter()
+    request_log_id = _start_system_log(
+        "model_request",
+        request_kind,
+        chat_id=chat_id,
+        message_id=msg_id,
+        provider=str((provider or {}).get("name") or ""),
+        model_id=str(selection.get("model_id") or ""),
+    )
     cache_friendly = bool(
         provider and prompt_cache_enabled(provider, selection.get("model_id") or "")
     )
@@ -3691,6 +3701,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             "message": {"content": assistant_parts(full)}
         })
         _emit(chat_id, {"type": "result", "is_error": False})
+        _finish_system_log(request_log_id, "success", request_started)
         # 已启用长期上下文的聊天，只有足够多消息离开近期窗口后才额外整理一次。
         _queue_long_context_refresh(chat_id)
     except asyncio.CancelledError:
@@ -3703,8 +3714,10 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 "message": {"content": assistant_parts(stopped_text)}
             })
         _emit(chat_id, {"type": "system", "subtype": "stopped"})
+        _finish_system_log(request_log_id, "cancelled", request_started)
         raise
     except Exception as exc:
+        _finish_system_log(request_log_id, "error", request_started, detail=exc)
         text = f"[配置错误] {exc}"
         db.message_update(current_message_id, text)
         _emit(chat_id, {
@@ -3781,7 +3794,7 @@ async def watch_proactive(request: Request):
     }
     placeholder = db.message_add(chat_id, "assistant", "")
     task = asyncio.create_task(
-        _run_ai_reply(chat_id, placeholder["id"], context, proactive_watch=True)
+        _run_ai_reply(chat_id, placeholder["id"], context, proactive_watch=True, request_kind="watch_proactive")
     )
     _running_tasks[chat_id] = task
     return {"ok": True, "scheduled": True}
@@ -3867,7 +3880,7 @@ async def watch_send(request: Request):
     db.message_add(chat_id, "user", text)
     _emit(chat_id, {"type": "echo", "text": text})
     placeholder = db.message_add(chat_id, "assistant", "")
-    task = asyncio.create_task(_run_ai_reply(chat_id, placeholder["id"], watch_context))
+    task = asyncio.create_task(_run_ai_reply(chat_id, placeholder["id"], watch_context, request_kind="watch_reply"))
     _running_tasks[chat_id] = task
     return {"ok": True, "frames": len(images)}
 
