@@ -316,6 +316,25 @@ CREATE TABLE IF NOT EXISTS memory_card_uses (
 CREATE INDEX IF NOT EXISTS ix_memory_card_uses_chat
 ON memory_card_uses(chat_id, used_at DESC);
 
+-- 系统诊断日志。只保存请求元数据，不保存消息正文、图片、密钥或请求头。
+CREATE TABLE IF NOT EXISTS system_logs (
+    id          TEXT PRIMARY KEY,
+    category    TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'running',
+    chat_id     TEXT NOT NULL DEFAULT '',
+    message_id  TEXT NOT NULL DEFAULT '',
+    provider    TEXT NOT NULL DEFAULT '',
+    model_id    TEXT NOT NULL DEFAULT '',
+    duration_ms INTEGER,
+    status_code INTEGER,
+    detail      TEXT NOT NULL DEFAULT '',
+    made        INTEGER NOT NULL,
+    finished_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_system_logs_made
+ON system_logs(made DESC);
+
 -- AI 回复的旧版本。重新生成或手动编辑时先存一份，当前 messages 表始终只保留
 -- 后续上下文真正会读到的那一版。
 CREATE TABLE IF NOT EXISTS message_versions (
@@ -1867,6 +1886,101 @@ def memory_card_last_injection(chat_id: str) -> dict | None:
         "response_message_id": latest["response_message_id"],
         "used_at": int(latest["used_at"]), "items": items,
     }
+
+
+SYSTEM_LOG_RETENTION_SECONDS = 7 * 24 * 60 * 60
+SYSTEM_LOG_MAX_ITEMS = 1000
+
+
+def _system_log_prune(cx: sqlite3.Connection) -> None:
+    cutoff = int(time.time()) - SYSTEM_LOG_RETENTION_SECONDS
+    cx.execute("DELETE FROM system_logs WHERE made<?", (cutoff,))
+    cx.execute(
+        """DELETE FROM system_logs WHERE id IN (
+               SELECT id FROM system_logs
+               ORDER BY made DESC,rowid DESC LIMIT -1 OFFSET ?
+           )""",
+        (SYSTEM_LOG_MAX_ITEMS,),
+    )
+
+
+def system_log_start(
+    category: str,
+    action: str,
+    *,
+    chat_id: str = "",
+    message_id: str = "",
+    provider: str = "",
+    model_id: str = "",
+) -> str:
+    """开始一条诊断记录；正文、图片和认证信息不得传入。"""
+    log_id = new_id()
+    now = int(time.time())
+    with conn() as cx:
+        cx.execute(
+            """INSERT INTO system_logs
+               (id,category,action,status,chat_id,message_id,provider,model_id,made)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                log_id, str(category)[:40], str(action)[:120], "running",
+                str(chat_id)[:80], str(message_id)[:80], str(provider)[:120],
+                str(model_id)[:200], now,
+            ),
+        )
+        _system_log_prune(cx)
+    return log_id
+
+
+def system_log_finish(
+    log_id: str,
+    status: str,
+    duration_ms: int,
+    *,
+    status_code: int | None = None,
+    detail: str = "",
+) -> None:
+    with conn() as cx:
+        cx.execute(
+            """UPDATE system_logs SET status=?,duration_ms=?,status_code=?,detail=?,
+               finished_at=? WHERE id=?""",
+            (
+                str(status)[:30], max(0, int(duration_ms)),
+                int(status_code) if status_code is not None else None,
+                str(detail).replace("\r", " ").replace("\n", " ")[:500],
+                int(time.time()), log_id,
+            ),
+        )
+
+
+def system_log_list(
+    *, category: str = "", status: str = "", limit: int = 300
+) -> list[dict]:
+    clauses = []
+    values: list[object] = []
+    if category:
+        clauses.append("category=?")
+        values.append(str(category))
+    if status:
+        clauses.append("status=?")
+        values.append(str(status))
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    values.append(max(1, min(int(limit), 500)))
+    with conn() as cx:
+        _system_log_prune(cx)
+        rows = cx.execute(
+            """SELECT id,category,action,status,chat_id,message_id,provider,model_id,
+                      duration_ms,status_code,detail,made,finished_at
+               FROM system_logs"""
+            + where + " ORDER BY made DESC,rowid DESC LIMIT ?",
+            values,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def system_log_clear() -> int:
+    with conn() as cx:
+        cur = cx.execute("DELETE FROM system_logs")
+    return cur.rowcount
 
 
 def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -> dict:
