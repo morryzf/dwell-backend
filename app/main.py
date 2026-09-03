@@ -2843,6 +2843,33 @@ async def memory_cards_generate(chat_id: str):
     return {"ok": True, "started": True, "state": db.memory_card_state_get(chat_id)}
 
 
+@app.post("/api/chats/{chat_id}/memory-card-drafts/accept-all", dependencies=authed)
+async def memory_card_drafts_accept_all(chat_id: str):
+    """Adopt every pending card after validating the complete batch."""
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    drafts = db.memory_card_draft_list(chat_id)
+    try:
+        prepared = [
+            (draft["id"], _memory_card_clean(dict(draft)))
+            for draft in drafts
+        ]
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    items = []
+    try:
+        for draft_id, chosen in prepared:
+            items.append(db.memory_card_draft_accept(chat_id, draft_id, chosen))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {
+        "ok": True,
+        "accepted": len(items),
+        "items": items,
+        "state": _memory_card_review_state(chat_id),
+    }
+
+
 @app.post("/api/chats/{chat_id}/memory-card-drafts/{draft_id}/accept", dependencies=authed)
 async def memory_card_draft_accept(chat_id: str, draft_id: str, request: Request):
     if not db.chat_get(chat_id):
@@ -2896,6 +2923,16 @@ async def memory_card_delete(chat_id: str, card_id: str):
     if not db.memory_card_archive(chat_id, card_id):
         raise HTTPException(404, "没有找到这张记忆卡片")
     return {"ok": True, "id": card_id, "archived": True}
+
+
+@app.delete("/api/chats/{chat_id}/memory-cards/{card_id}/permanent", dependencies=authed)
+async def memory_card_delete_permanently(chat_id: str, card_id: str):
+    """Only archived cards may be irreversibly deleted."""
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    if not db.memory_card_delete_permanently(chat_id, card_id):
+        raise HTTPException(404, "没有找到这张已归档的记忆卡片")
+    return {"ok": True, "id": card_id, "deleted": True}
 
 
 @app.post("/api/import/kelivo/preview", dependencies=authed)
