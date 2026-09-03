@@ -1307,6 +1307,71 @@ async def _read_json(request: Request) -> dict:
     return data
 
 
+def _safe_log_detail(value: object) -> str:
+    """保留可诊断的错误摘要，同时遮掉常见凭据和网址。"""
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    text = re.sub(
+        r"(?i)(authorization|bearer|api[_ -]?key|token)(\s*[:=]?\s*)\S+",
+        r"\1\2[已隐藏]",
+        text,
+    )
+    text = re.sub(r"https?://\S+", "[网址已隐藏]", text)
+    return text[:500]
+
+
+def _start_system_log(category: str, action: str, **metadata) -> str:
+    """日志故障不能影响聊天本身。"""
+    try:
+        return db.system_log_start(category, action, **metadata)
+    except Exception:
+        return ""
+
+
+def _finish_system_log(
+    log_id: str, status: str, started: float, *, status_code: int | None = None,
+    detail: object = "",
+) -> None:
+    if not log_id:
+        return
+    try:
+        db.system_log_finish(
+            log_id,
+            status,
+            round((time.perf_counter() - started) * 1000),
+            status_code=status_code,
+            detail=_safe_log_detail(detail),
+        )
+    except Exception:
+        pass
+
+
+@app.middleware("http")
+async def _system_request_log(request: Request, call_next):
+    """记录会改变数据的 API 调用；不读取请求正文、请求头或查询参数。"""
+    path = request.url.path
+    method = request.method.upper()
+    should_log = (
+        path.startswith("/api/")
+        and method in {"POST", "PUT", "PATCH", "DELETE"}
+        and path != "/api/system-logs"
+    )
+    if not should_log:
+        return await call_next(request)
+
+    started = time.perf_counter()
+    request_id = uuid.uuid4().hex
+    log_id = _start_system_log("api_request", f"{method} {path}")
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        _finish_system_log(log_id, "error", started, status_code=500, detail=exc)
+        raise
+    status = "success" if response.status_code < 400 else "error"
+    _finish_system_log(log_id, status, started, status_code=response.status_code)
+    response.headers["X-Dwell-Request-ID"] = request_id
+    return response
+
+
 @app.on_event("startup")
 async def _startup():
     global _heartbeat_task
@@ -1525,6 +1590,26 @@ async def me(request: Request):
 
 # 下面所有路由都要登录
 authed = [Depends(auth.require_auth)]
+
+
+@app.get("/api/system-logs", dependencies=authed)
+async def system_logs_get(category: str = "", status: str = "", limit: int = 300):
+    allowed_categories = {"", "api_request", "model_request", "memory_task"}
+    allowed_statuses = {"", "running", "success", "error", "cancelled"}
+    if category not in allowed_categories or status not in allowed_statuses:
+        raise HTTPException(400, "日志筛选条件不正确")
+    return {
+        "ok": True,
+        "items": db.system_log_list(category=category, status=status, limit=limit),
+        "retention_days": 7,
+        "maximum_items": 1000,
+        "stores_content": False,
+    }
+
+
+@app.delete("/api/system-logs", dependencies=authed)
+async def system_logs_delete():
+    return {"ok": True, "deleted": db.system_log_clear()}
 
 
 # ---------------------------------------------------------------- 日记
