@@ -544,6 +544,12 @@ async def _stage_memory_card_suggestions(
 
 async def _refresh_memory_card_suggestions(chat_id: str) -> None:
     """为已有分段补建候选卡片，供第二阶段控制台手动触发。"""
+    task_started = time.perf_counter()
+    task_log_id = _start_system_log(
+        "memory_task", "memory_card_generation", chat_id=chat_id
+    )
+    task_status = "success"
+    task_detail: object = ""
     try:
         selection, provider, _explicit = _long_context_model(chat_id)
         if not provider or not provider.get("enabled") or not selection.get("model_id"):
@@ -558,8 +564,11 @@ async def _refresh_memory_card_suggestions(chat_id: str) -> None:
             if db.memory_card_state_get(chat_id)["status"] == "error":
                 break
     except Exception as exc:
+        task_status = "error"
+        task_detail = exc
         db.memory_card_state_set(chat_id, "error", str(exc), generated=True)
     finally:
+        _finish_system_log(task_log_id, task_status, task_started, detail=task_detail)
         _memory_card_tasks.pop(chat_id, None)
 
 
@@ -603,6 +612,10 @@ def _memory_segments_waiting_for_summary(
 
 async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
     """把远离近期窗口的消息按段压缩，并更新一份供下一轮注入的总览。"""
+    task_started = time.perf_counter()
+    task_log_id = _start_system_log("memory_task", "summary_refresh", chat_id=chat_id)
+    task_status = "success"
+    task_detail: object = ""
     try:
         if not db.chat_get(chat_id):
             return
@@ -664,8 +677,11 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
         overview = overview.strip()
         db.chat_memory_stage(chat_id, overview[:4000], processed_through)
     except Exception as exc:
+        task_status = "error"
+        task_detail = exc
         db.chat_memory_set_status(chat_id, "error", str(exc), enabled=True)
     finally:
+        _finish_system_log(task_log_id, task_status, task_started, detail=task_detail)
         _memory_tasks.pop(chat_id, None)
 
 
