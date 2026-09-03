@@ -1786,6 +1786,16 @@ def memory_card_archive(chat_id: str, card_id: str) -> bool:
     return cur.rowcount > 0
 
 
+def memory_card_delete_permanently(chat_id: str, card_id: str) -> bool:
+    """Permanently delete an already archived card and its usage audit snapshots."""
+    with conn() as cx:
+        cur = cx.execute(
+            "DELETE FROM memory_cards WHERE id=? AND chat_id=? AND status='archived'",
+            (card_id, chat_id),
+        )
+    return cur.rowcount > 0
+
+
 def memory_card_injection_enabled(chat_id: str) -> bool:
     return setting_get(f"memory_cards_enabled:{chat_id}", "1") != "0"
 
