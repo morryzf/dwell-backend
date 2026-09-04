@@ -2892,6 +2892,38 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     .process-band .toolline, .msg-usage, .msg-usage-pop { transition: none; }
   }
 </style>
+
+<style>
+  /* 专注页：沿用 Dwell 的纸张、墨色和鼠尾草色，不使用上游组件自带卡片。 */
+  #focusSheet .body { padding-bottom: calc(30px + env(safe-area-inset-bottom)); }
+  .focus-hero { padding: 12px 4px 4px; text-align: center; }
+  .focus-hero h1 { margin: 0; font: 600 26px/1.35 var(--serif); letter-spacing: .04em; }
+  .focus-hero .sub { margin-top: 5px; color: var(--dim); font-size: 12px; }
+  .focus-ring {
+    --focus-progress: 0deg; position: relative; width: min(58vw, 230px); aspect-ratio: 1;
+    display: grid; place-items: center; margin: 24px auto 18px; border-radius: 50%;
+    background: conic-gradient(var(--sage) var(--focus-progress), var(--sage-track) 0);
+    box-shadow: 0 16px 44px color-mix(in srgb, var(--sage) 18%, transparent);
+  }
+  .focus-ring::before { position: absolute; inset: 11px; border-radius: inherit; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); content: ""; }
+  .focus-ring-text { position: relative; z-index: 1; display: grid; gap: 5px; text-align: center; }
+  .focus-ring-time { font: 500 clamp(42px, 13vw, 58px)/1 var(--serif); letter-spacing: .02em; }
+  .focus-ring-phase { color: var(--dim); font-size: 12px; letter-spacing: .12em; }
+  .focus-task { width: 100%; padding: 13px 15px; border: 1px solid var(--line); border-radius: 15px; outline: none; background: var(--card); color: var(--text); font: inherit; }
+  .focus-task:focus { border-color: var(--sage); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sage) 15%, transparent); }
+  .focus-actions { display: grid; grid-template-columns: .8fr 1.5fr .8fr; gap: 9px; margin: 11px 0 20px; }
+  .focus-actions button { min-height: 45px; padding: 9px; border: 1px solid var(--line); border-radius: 15px; background: var(--card); font-size: 13px; }
+  .focus-actions .primary { border-color: var(--sage); background: var(--sage); color: #fff; font-weight: 600; }
+  .focus-number-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 12px 14px; }
+  .focus-number-row label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; color: var(--dim); font-size: 12px; }
+  .focus-number-row input { width: 58px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); text-align: center; font: inherit; }
+  .focus-count { margin: 0 0 17px; color: var(--dim); text-align: center; font-size: 12px; }
+  .focus-count b { color: var(--text); font: 600 17px var(--serif); }
+  .focus-local-note { margin: 13px 5px 0; color: var(--dim); font-size: 11px; line-height: 1.75; }
+  .focus-credit { margin-top: 8px; color: var(--dim); font-size: 10px; }
+  .focus-credit a { color: inherit; }
+  @media (max-width: 390px) { .focus-ring { margin-top: 17px; } .focus-actions { margin-bottom: 15px; } }
+</style>
 </head>
 <body>
 
@@ -2973,6 +3005,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
       <button class="item on"><span class="ic" data-i="chat"></span>聊天</button>
       <button class="item" id="navTodo"><span class="ic" data-i="checkSquare"></span>待办</button>
       <button class="item" id="navCal"><span class="ic" data-i="calendar"></span>日历</button>
+      <button class="item" id="navFocus"><span class="ic" data-i="clock"></span>专注</button>
       <button class="item" id="navWall"><span class="ic" data-i="pen"></span>心事簿</button>
       <button class="item" id="navNook"><span class="ic" data-i="bookOpen"></span>书房</button>
       <button class="item" id="navRepo"><span class="ic" data-i="box"></span>仓库</button>
@@ -3028,6 +3061,38 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
       <button class="hbtn" id="systemLogClear" title="清空日志"><span class="ic" data-i="trash"></span></button>
     </div>
     <div class="body" id="systemLogBody"><div class="gnote">正在读取…</div></div>
+  </div>
+</div>
+
+
+<div class="sheetWrap page" id="focusSheet">
+  <div class="shade" data-close="focus"></div>
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="head">
+      <button class="hbtn" data-close="focus"><span class="ic" data-i="x"></span></button>
+      <div class="ht">专注</div><div class="hspace"></div>
+    </div>
+    <div class="body" id="focusBody">
+      <div class="focus-hero"><h1>安静做完这一件事</h1><div class="sub">计时只留在这台设备上</div></div>
+      <div class="focus-ring" id="focusRing" aria-live="polite"><div class="focus-ring-text"><strong class="focus-ring-time" id="focusTime">25:00</strong><span class="focus-ring-phase" id="focusPhase">专注 · 待开始</span></div></div>
+      <div class="focus-count">今天完成了 <b id="focusCount">0</b> 轮</div>
+      <input class="focus-task" id="focusTask" maxlength="120" placeholder="这一轮想做什么？" autocomplete="off">
+      <div class="focus-actions"><button id="focusReset" type="button">重来</button><button class="primary" id="focusMain" type="button">开始专注</button><button id="focusSkip" type="button">换阶段</button></div>
+      <div class="group-label">时长</div>
+      <div class="group focus-number-row">
+        <label>专注 <input id="focusMinutes" type="number" inputmode="numeric" min="1" max="180" aria-label="专注分钟"></label>
+        <label>休息 <input id="breakMinutes" type="number" inputmode="numeric" min="1" max="90" aria-label="休息分钟"></label>
+      </div>
+      <div class="group-label">陪伴</div>
+      <div class="group">
+        <button class="grow" id="focusShareRow" type="button"><span class="ic" data-i="chat"></span>让 Cloudy 知道当前状态<span class="sw" id="focusShareSw"></span></button>
+        <button class="grow" id="focusLockRow" type="button"><span class="ic" data-i="lock"></span>iPhone 单页限制<span class="sw" id="focusLockSw"></span></button>
+        <button class="grow" id="focusGuideBtn" type="button"><span class="ic" data-i="sliders"></span>查看首次设置步骤<span class="chev">›</span></button>
+      </div>
+      <p class="focus-local-note">任务、计时和今日完成数保存在当前浏览器，不上传 Dwell。只有打开“让 Cloudy 知道”后，发送消息时才会把当时的状态临时交给模型；它不会写进聊天正文、摘要或记忆卡。</p>
+      <div class="focus-credit">计时组件源自 <a href="https://github.com/NyraSeithhh/guided-access-pomodoro" target="_blank" rel="noreferrer">Guided Access Pomodoro · NYRA</a>（MIT）</div>
+    </div>
   </div>
 </div>
 
@@ -3430,6 +3495,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
 <input type="file" id="fPhoto" accept="image/*" multiple hidden>
 <input type="file" id="fFile" multiple hidden>
 
+<script src="/vendor/guided-access-pomodoro.js"></script>
 <script>
 
 
@@ -5186,6 +5252,8 @@ async function send() {
   box.style.height = 'auto';
   setBusy(true);
   const payload = { text, device_time: deviceTimeContext() };
+  const focusContext = focusContextForSend();
+  if (focusContext) payload.focus_context = focusContext;
   if (outgoingAttachments.length) payload.attachments = outgoingAttachments;
   attachments = [];
   renderStrip();
@@ -5438,6 +5506,7 @@ const sheets = {
   kelivoImport: document.getElementById('kelivoImportSheet'),
   wakeTarget: document.getElementById('wakeTargetSheet'),
   heartbeat: document.getElementById('heartbeatSheet'),
+  focus: document.getElementById('focusSheet'),
   instructions: document.getElementById('instructionsSheet'),
   chatInstructions: document.getElementById('chatInstructionsSheet'),
   longContext: document.getElementById('longContextSheet'),
@@ -7430,6 +7499,116 @@ function renderPaper(d) {
   newsBody.appendChild(paper);
   newsBody.scrollTop = 0;
 }
+
+
+/* ---------- 专注：本地番茄钟 + 可选的一次性聊天上下文 ---------- */
+const FOCUS_SHARE_KEY = 'dwell.focus.share.v1';
+const focusApi = window.GuidedAccessPomodoro;
+if (focusApi) focusApi.configure({ key: 'dwell.focus.pomodoro.v1', title: '专注' });
+const focusEls = {
+  ring: document.getElementById('focusRing'), time: document.getElementById('focusTime'),
+  phase: document.getElementById('focusPhase'), count: document.getElementById('focusCount'),
+  task: document.getElementById('focusTask'), main: document.getElementById('focusMain'),
+  reset: document.getElementById('focusReset'), skip: document.getElementById('focusSkip'),
+  focusMinutes: document.getElementById('focusMinutes'), breakMinutes: document.getElementById('breakMinutes'),
+  shareRow: document.getElementById('focusShareRow'), shareSw: document.getElementById('focusShareSw'),
+  lockRow: document.getElementById('focusLockRow'), lockSw: document.getElementById('focusLockSw'),
+  guide: document.getElementById('focusGuideBtn'),
+};
+let focusPreviousState = focusApi ? focusApi.load() : null;
+let focusAudioContext = null;
+function focusDayKey(ts) {
+  const date = new Date(ts || Date.now());
+  return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+}
+function focusShareEnabled() {
+  try { return localStorage.getItem(FOCUS_SHARE_KEY) === '1'; } catch (_) { return false; }
+}
+function setFocusShareEnabled(value) {
+  try { localStorage.setItem(FOCUS_SHARE_KEY, value ? '1' : '0'); } catch (_) {}
+  renderFocus();
+}
+function focusContextForSend() {
+  if (!focusApi || !focusShareEnabled()) return null;
+  const state = focusApi.load();
+  return {
+    task: String(state.task || '').slice(0, 120), mode: state.mode, status: state.status,
+    remaining_seconds: Math.max(0, Math.ceil(focusApi.remaining() / 1000)),
+    completed_today: Math.max(0, Number(state.completedByDay?.[focusDayKey()]) || 0),
+    single_app_mode: state.singleAppMode === true,
+  };
+}
+function renderFocus() {
+  if (!focusApi) return;
+  const state = focusApi.load();
+  const remaining = focusApi.remaining();
+  const total = (state.mode === 'break' ? state.breakMinutes : state.focusMinutes) * 60000;
+  const progress = total ? Math.max(0, Math.min(1, 1 - remaining / total)) : 0;
+  focusEls.ring.style.setProperty('--focus-progress', (progress * 360) + 'deg');
+  focusEls.time.textContent = focusApi.format(remaining);
+  const phase = state.mode === 'break' ? '休息' : '专注';
+  const status = state.status === 'running' ? '进行中' : state.status === 'paused' ? '已暂停' : '待开始';
+  focusEls.phase.textContent = phase + ' · ' + status;
+  focusEls.count.textContent = String(Math.max(0, Number(state.completedByDay?.[focusDayKey()]) || 0));
+  if (document.activeElement !== focusEls.task) focusEls.task.value = state.task || '';
+  if (document.activeElement !== focusEls.focusMinutes) focusEls.focusMinutes.value = state.focusMinutes;
+  if (document.activeElement !== focusEls.breakMinutes) focusEls.breakMinutes.value = state.breakMinutes;
+  focusEls.main.textContent = state.status === 'running' ? '暂停一下' : state.status === 'paused' ? '继续' + phase : '开始' + phase;
+  focusEls.shareSw.classList.toggle('on', focusShareEnabled());
+  focusEls.lockSw.classList.toggle('on', state.singleAppMode === true);
+  focusEls.lockRow.title = state.guidedAccessReady ? '开始专注时提醒三击侧边键' : '需要先完成 iPhone 设置';
+}
+function primeFocusAudio() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    if (!focusAudioContext) focusAudioContext = new AudioCtx();
+    if (focusAudioContext.state === 'suspended') focusAudioContext.resume();
+  } catch (_) {}
+}
+function focusCompletionCue() {
+  try {
+    if (navigator.vibrate) navigator.vibrate([160, 80, 220]);
+    if (!focusAudioContext) return;
+    const start = focusAudioContext.currentTime;
+    [0, .18].forEach((delay, index) => {
+      const oscillator = focusAudioContext.createOscillator();
+      const gain = focusAudioContext.createGain();
+      oscillator.frequency.value = index ? 880 : 660;
+      gain.gain.setValueAtTime(.0001, start + delay);
+      gain.gain.exponentialRampToValueAtTime(.12, start + delay + .02);
+      gain.gain.exponentialRampToValueAtTime(.0001, start + delay + .16);
+      oscillator.connect(gain).connect(focusAudioContext.destination);
+      oscillator.start(start + delay); oscillator.stop(start + delay + .18);
+    });
+  } catch (_) {}
+}
+function saveFocusDurations() {
+  if (focusApi) focusApi.setDurations(focusEls.focusMinutes.value, focusEls.breakMinutes.value);
+}
+focusEls.task.addEventListener('input', () => focusApi?.setTask(focusEls.task.value));
+focusEls.main.onclick = () => { if (!focusApi) return; primeFocusAudio(); focusApi.setTask(focusEls.task.value); focusApi.toggle(); };
+focusEls.reset.onclick = () => focusApi?.reset();
+focusEls.skip.onclick = () => focusApi?.skip();
+focusEls.focusMinutes.addEventListener('change', saveFocusDurations);
+focusEls.breakMinutes.addEventListener('change', saveFocusDurations);
+focusEls.shareRow.onclick = () => setFocusShareEnabled(!focusShareEnabled());
+focusEls.lockRow.onclick = () => {
+  if (!focusApi) return;
+  const state = focusApi.load();
+  if (!state.guidedAccessReady) focusApi.showGuide(); else focusApi.setSingleAppMode(!state.singleAppMode);
+};
+focusEls.guide.onclick = () => focusApi?.showGuide();
+document.getElementById('navFocus').onclick = () => { closeDrawer(); sheets.focus.classList.add('open'); renderFocus(); };
+window.addEventListener('guided-access-pomodoro-changed', (event) => {
+  const next = event.detail;
+  if (focusPreviousState?.status === 'running' && focusPreviousState.mode === 'focus' && next?.status === 'idle' && next.mode === 'break') focusCompletionCue();
+  focusPreviousState = next; renderFocus();
+});
+window.addEventListener('storage', (event) => { if (event.key === FOCUS_SHARE_KEY) renderFocus(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) renderFocus(); });
+setInterval(renderFocus, 500);
+renderFocus();
 
 /* ---------- 双人清单 ---------- */
 const todoBody = document.getElementById('todoBody');
