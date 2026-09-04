@@ -39,6 +39,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 TTS_CONFIG_KEY = "tts_config_v1"
 TTS_CACHE_DIR = Path(os.environ.get("DWELL_TTS_CACHE_DIR", "/data/tts-cache"))
 TTS_MAX_TEXT_CHARS = 4500
+TTS_CACHE_MAX_BYTES = int(os.environ.get("DWELL_TTS_CACHE_MAX_BYTES", str(500 * 1024 * 1024)))
 
 # 正在跑的 AI 回复任务。key=chat_id，value=asyncio.Task
 _running_tasks: dict[str, asyncio.Task] = {}
@@ -2174,6 +2175,7 @@ def _tts_default_config() -> dict:
         "name": "ElevenLabs",
         "base_url": "https://api.elevenlabs.io",
         "model_id": "eleven_multilingual_v2",
+        "model_name": "Eleven Multilingual v2",
         "voice_id": "",
         "voices": [],
         "active_voice_id": "",
@@ -2204,6 +2206,7 @@ def _tts_normalize_voices(raw: object, legacy_voice_id: str = "") -> list[dict]:
             "id": profile_id,
             "name": str(row.get("name") or f"音色 {index + 1}").strip()[:80] or f"音色 {index + 1}",
             "voice_id": voice_id,
+            "provider_name": str(row.get("provider_name") or "").strip()[:120],
         })
     return clean
 
@@ -2227,7 +2230,7 @@ def _tts_config() -> dict:
 
 def _tts_public_config(cfg: dict | None = None) -> dict:
     cfg = cfg or _tts_config()
-    keys = ("name", "base_url", "model_id", "voice_id", "voices", "active_voice_id", "auto_play", "read_mode")
+    keys = ("name", "base_url", "model_id", "model_name", "voice_id", "voices", "active_voice_id", "auto_play", "read_mode")
     return {key: cfg[key] for key in keys} | {
         "has_key": bool(cfg.get("api_key_box")),
         "encryption_ready": provider_secrets.encryption_ready(),
@@ -2280,6 +2283,43 @@ def _tts_remove_chat_cache(chat_id: str) -> None:
     shutil.rmtree(TTS_CACHE_DIR / safe, ignore_errors=True)
 
 
+def _tts_cache_files() -> list[tuple[Path, int, float]]:
+    files = []
+    if not TTS_CACHE_DIR.exists():
+        return files
+    for path in TTS_CACHE_DIR.rglob("*.mp3"):
+        try:
+            stat = path.stat()
+            files.append((path, stat.st_size, stat.st_mtime))
+        except OSError:
+            continue
+    return files
+
+
+def _tts_cache_stats() -> dict:
+    files = _tts_cache_files()
+    return {
+        "bytes": sum(size for _, size, _ in files),
+        "limit_bytes": TTS_CACHE_MAX_BYTES,
+        "files": len(files),
+    }
+
+
+def _tts_prune_cache() -> None:
+    files = _tts_cache_files()
+    total = sum(size for _, size, _ in files)
+    if total <= TTS_CACHE_MAX_BYTES:
+        return
+    for path, size, _ in sorted(files, key=lambda item: item[2]):
+        try:
+            path.unlink(missing_ok=True)
+            total -= size
+        except OSError:
+            continue
+        if total <= TTS_CACHE_MAX_BYTES:
+            break
+
+
 def _tts_api_key(cfg: dict) -> str:
     if not cfg.get("api_key_box"):
         raise HTTPException(409, "请先保存 ElevenLabs API Key")
@@ -2304,6 +2344,7 @@ async def tts_config_set(request: Request):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     cfg["model_id"] = str(payload.get("model_id", cfg["model_id"]))[:120].strip()
+    cfg["model_name"] = str(payload.get("model_name", cfg.get("model_name") or cfg["model_id"]))[:160].strip()
     cfg["auto_play"] = bool(payload.get("auto_play", cfg["auto_play"]))
     cfg["read_mode"] = str(payload.get("read_mode", cfg["read_mode"]))
     if cfg["read_mode"] not in {"plain", "plain_and_italic"}:
@@ -2327,6 +2368,17 @@ async def tts_config_set(request: Request):
             cfg["api_key_box"] = ""
     db.setting_set(TTS_CONFIG_KEY, json.dumps(cfg, ensure_ascii=False))
     return {"ok": True, **_tts_public_config(cfg)}
+
+
+@app.get("/api/tts/cache", dependencies=authed)
+async def tts_cache_get():
+    return {"ok": True, **_tts_cache_stats()}
+
+
+@app.delete("/api/tts/cache", dependencies=authed)
+async def tts_cache_clear():
+    shutil.rmtree(TTS_CACHE_DIR, ignore_errors=True)
+    return {"ok": True, **_tts_cache_stats()}
 
 
 @app.get("/api/tts/catalog", dependencies=authed)
@@ -2374,6 +2426,7 @@ async def tts_catalog_get():
                             "voice_id": voice_id,
                             "name": str(item.get("name") or voice_id),
                             "category": str(item.get("category") or ""),
+                            "preview_url": str(item.get("preview_url") or ""),
                         })
                 cursor = str(voice_data.get("next_page_token") or "") if isinstance(voice_data, dict) else ""
                 if not cursor or not voice_data.get("has_more"):
@@ -2439,8 +2492,13 @@ async def tts_message_audio(message_id: str):
             temp = path.with_suffix(".tmp")
             temp.write_bytes(response.content)
             temp.replace(path)
+            _tts_prune_cache()
         except httpx.HTTPError as exc:
             raise HTTPException(502, "语音服务网络错误") from exc
+    try:
+        path.touch()
+    except OSError:
+        pass
     return FileResponse(
         path,
         media_type="audio/mpeg",
