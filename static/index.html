@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&amp;family=Pinyon+Script&amp;family=Zen+Antique&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Ephesis&amp;family=Noto+Serif+SC:wght@400;500;600&amp;family=Pinyon+Script&amp;family=Zen+Antique&amp;display=swap" rel="stylesheet">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Claude">
@@ -609,8 +609,9 @@ html[data-theme="dark"] .composer {
   }
   #drawerWrap.show #drawer { transform: none; }
   .brand {
-    font-family: "Pinyon Script", cursive; font-size: 36px; font-weight: 400;
+    font-family: "Ephesis", cursive; font-size: 36px; font-weight: 400;
     line-height: .95; padding: 4px 24px 12px; letter-spacing: 0;
+    text-align: center; color: #5A4454;
   }
   .assistant-switch {
     flex: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -664,6 +665,13 @@ html[data-theme="dark"] .composer {
     display: flex; align-items: center; justify-content: center;
   }
   #avatarBtn .ic { width: 18px; height: 18px; }
+  #drawerThemeBtn {
+    margin-left: auto; width: 44px; height: 44px; border-radius: 50%;
+    display: grid; place-items: center; color: var(--text);
+    transition: transform 150ms var(--ease-out), background-color 150ms ease, color 150ms ease;
+  }
+  #drawerThemeBtn .ic { width: 19px; height: 19px; }
+  #drawerThemeBtn:active { transform: scale(.97); background: color-mix(in srgb, var(--text) 8%, transparent); }
   .freshtip { text-align: center; font-size: 13px; color: var(--dim); padding: 34px 30px; line-height: 1.8; }
   
   #gongSheet .sheet { height: 100dvh; max-height: 100dvh; border-radius: 0; }
@@ -3051,6 +3059,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     </div>
     <div class="drawer-foot">
       <button id="avatarBtn" title="设置" aria-label="设置"><span class="ic" data-i="sliders"></span></button>
+      <button id="drawerThemeBtn" title="切换夜间模式" aria-label="切换夜间模式"><span class="ic" data-i="sun"></span></button>
     </div>
   </div>
 </div>
@@ -3072,7 +3081,6 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       <div class="group-label">家</div>
       <div class="group">
         <button class="grow static" id="aliveRow"><span class="ic" data-i="activity"></span>后端在跑吗<span class="val" id="aliveVal">看看…</span></button>
-        <button class="grow" id="themeRow"><span class="ic" data-i="moon"></span>夜间模式<span class="sw wait" id="themeSw"></span></button>
         <button class="grow" id="petVisibilityRow"><span class="ic" data-i="activity"></span>隐藏 Clawd<span class="val" id="petVisibilityVal">已显示</span></button>
         <button class="grow" id="backgroundRow"><span class="ic" data-i="image"></span>聊天背景<span class="val" id="backgroundVal">默认</span><span class="chev">›</span></button>
         <button class="grow" id="messageStyleRow"><span class="ic" data-i="chat"></span>消息样式<span class="val">浅色 / 深色</span><span class="chev">›</span></button>
@@ -3561,6 +3569,7 @@ const ICONS = {
   calendar: S('<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>'),
   alarm: S('<circle cx="12" cy="13" r="8"/><polyline points="12 9 12 13 14.5 14.5"/><path d="M5 3 2.5 5.5"/><path d="M19 3l2.5 2.5"/>'),
   refresh: S('<path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.6 4.2v4.6h-4.6"/>'),
+  sun: S('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>'),
   moon: S('<path d="M20.5 14.4A8.6 8.6 0 0 1 9.6 3.5a8.6 8.6 0 1 0 10.9 10.9z"/>'),
   petal: S('<path d="M2.5 9.2c2.1-2.6 4.3-2.6 6.4 0s4.3 2.6 6.4 0 4.3-2.6 6.2 0"/><path d="M2.5 15.4c2.1-2.6 4.3-2.6 6.4 0s4.3 2.6 6.4 0 4.3-2.6 6.2 0"/>'),
   heartIc: S('<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>'),
@@ -8519,27 +8528,30 @@ async function loadApi() {
   document.getElementById('apOpenCatalog').onclick = () => { sheets.api.classList.remove('open'); openProviderModelPicker('browse'); };
 }
 
-/* 外观：跟随系统 → 常亮 → 常暗 → 转回来。
-   theme-color 也跟着改，连状态栏一起换皮 */
-const themeSw = document.getElementById('themeSw');
+/* 外观：日间 / 夜间直接切换，状态栏也同步换色。 */
+const drawerThemeBtn = document.getElementById('drawerThemeBtn');
 function themeNow() {
   try { return localStorage.getItem('homeTheme') || 'auto'; } catch (e) { return 'auto'; }
 }
+function themeIsDark(t = themeNow()) {
+  return t === 'dark' || (t === 'auto'
+    && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+}
 function wearTheme(t) {
-  if (t === 'dark') document.documentElement.dataset.theme = 'dark';
+  if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
   try { localStorage.setItem('homeTheme', t); } catch (e) {}
-  const dark = t === 'dark' || (t !== 'dark'
-    && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  const dark = themeIsDark(t);
   document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.remove());
   const m = document.createElement('meta');
   m.name = 'theme-color'; m.content = dark ? '#262624' : '#faf9f5';
   document.head.appendChild(m);
-  themeSw.classList.remove('wait');
-  themeSw.classList.toggle('on', t === 'dark');
+  drawerThemeBtn.dataset.i = dark ? 'moon' : 'sun';
+  drawerThemeBtn.title = dark ? '切换日间模式' : '切换夜间模式';
+  drawerThemeBtn.setAttribute('aria-label', drawerThemeBtn.title);
+  fillIcons(drawerThemeBtn);
 }
-document.getElementById('themeRow').onclick = () =>
-  wearTheme(themeNow() === 'dark' ? 'auto' : 'dark');
+drawerThemeBtn.onclick = () => wearTheme(themeIsDark() ? 'light' : 'dark');
 wearTheme(themeNow());
 document.getElementById('petVisibilityRow').onclick = () => {
   try { localStorage.setItem(PET_VISIBILITY_KEY, petIsHidden() ? '0' : '1'); } catch {}
