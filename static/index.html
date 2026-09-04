@@ -2604,7 +2604,6 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .drawer-chat-list .crow .cn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; font-weight: 500; }
   .drawer-chat-list .crow .cp { margin-top: 1px; font-size: 11.5px; }
   .drawer-chat-list .crow .ct { padding-top: 1px; font-size: 11px; }
-  .drawer-chat-list .chat-action { width: 58px; }
   .drawer-chat-empty { padding: 18px 12px; color: var(--dim); font-size: 12px; text-align: center; }
 
   /* User-tunable message glass. My messages and Cloudy's messages keep
@@ -5476,7 +5475,7 @@ document.addEventListener('touchstart', (e) => {
   const opened = drawerWrap.classList.contains('show');
   if (!opened && t.clientX < 30) {
     dg = { x: t.clientX, y: t.clientY, from: 0, live: false };
-  } else if (opened && !(e.target.closest?.('.nav .item, .drawer-foot'))) {
+  } else if (opened && !(e.target.closest?.('.nav button, .drawer-foot, .drawer-chat-list'))) {
     dg = { x: t.clientX, y: t.clientY, from: drawerWidth(), live: false };
   }
 }, { passive: true });
@@ -9231,9 +9230,8 @@ document.getElementById('healthKey').onclick = async () => {
   } catch { note('（钥匙拿不到）', 'err'); }
 };
 
-/* ---------- 窗口列表 ---------- */
-let chatScope = 'live';        // live=没收纳的 box=收纳了的
-const SCOPE_NAME = { live: '全部', box: '已收纳' };
+/* ---------- 侧边栏聊天记录 ---------- */
+let chatScope = 'live';        // live=最近对话，box=已收纳
 
 function ago(ts) {
   const s = Date.now() / 1000 - ts;
