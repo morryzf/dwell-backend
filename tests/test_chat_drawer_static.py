@@ -53,6 +53,14 @@ class ChatDrawerStaticTest(unittest.TestCase):
         self.assertIn('font-family: "Pinyon Script", cursive;', self.html)
         self.assertIn('<div class="brand">Cloudy studio</div>', self.html)
 
+    def test_brand_and_theme_control_live_in_the_drawer(self):
+        self.assertIn('family=Ephesis', self.html)
+        self.assertIn('font-family: "Ephesis", cursive;', self.html)
+        self.assertIn('text-align: center; color: #5A4454;', self.html)
+        self.assertIn('id="drawerThemeBtn"', self.html)
+        self.assertNotIn('id="themeRow"', self.html)
+        self.assertIn('drawerThemeBtn.dataset.i = dark ? "moon" : "sun"', self.html)
+
     def test_dark_recent_chats_stay_borderless(self):
         selector = (
             'html[data-theme="dark"] #drawer '
