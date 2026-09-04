@@ -29,6 +29,29 @@ class ChatDrawerStaticTest(unittest.TestCase):
         self.assertNotIn('<div class="sect">Assistants</div>', self.html)
         self.assertNotIn('class="assistant-avatar"', self.html)
 
+    def test_drawer_uses_uniform_more_translucent_surfaces(self):
+        self.assertIn(
+            "background: rgba(247, 236, 241, .51) !important;",
+            self.html,
+        )
+        self.assertEqual(
+            self.html.count("background: rgba(68,61,66,.60) !important;"),
+            2,
+        )
+        self.assertNotIn("#drawer::before", self.html)
+
+    def test_redundant_chat_navigation_item_is_removed(self):
+        self.assertNotIn('id="navChat"', self.html)
+
+    def test_dark_recent_chats_stay_borderless(self):
+        selector = (
+            'html[data-theme="dark"] #drawer '
+            ".drawer-chat-list .chatrow .crow"
+        )
+        self.assertIn(selector, self.html)
+        self.assertIn("background-image: none !important;", self.html)
+        self.assertIn("border-color: transparent !important;", self.html)
+
     def test_drawer_history_keeps_chat_actions(self):
         self.assertIn("rename.onclick = () => renameChat(it)", self.html)
         self.assertIn("del.onclick = (e) => deleteChat(it, e)", self.html)
