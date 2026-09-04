@@ -29,6 +29,31 @@ class MemoryConsoleStaticTest(unittest.TestCase):
         self.assertIn("暂停按需记忆", self.html)
         self.assertIn("最近一次带入", self.html)
 
+    def test_summary_typography_is_compact(self):
+        self.assertIn(
+            "#longContextDraft, #longContextOverview { font-size: 14px;",
+            self.html,
+        )
+        self.assertIn(
+            ".mc-summary-history-text { font-size: 12.5px;",
+            self.html,
+        )
+
+    def test_openrouter_decimal_claude_ids_are_normalized(self):
+        self.assertIn("function modelSlug(id)", self.html)
+        self.assertIn("s.split('/').pop()", self.html)
+        self.assertIn("leaf.replace(/(\\d)\\.(\\d)/g, '$1-$2')", self.html)
+
+    def test_drawer_uses_twenty_pixel_frost(self):
+        self.assertIn(
+            "-webkit-backdrop-filter: blur(20px) saturate(1.45) brightness(1.05);",
+            self.html,
+        )
+        self.assertNotIn(
+            "-webkit-backdrop-filter: blur(30px) saturate(1.45) brightness(1.05);",
+            self.html,
+        )
+
     def test_manual_generation_only_checks_new_segments(self):
         self.assertIn("生成未处理分段的记忆卡草稿", self.html)
         self.assertIn("尚未处理的新分段", self.html)

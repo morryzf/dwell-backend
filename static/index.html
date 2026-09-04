@@ -2222,8 +2222,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     border-left: 0 !important;
     border-radius: 0 28px 28px 0;
     outline: 0;
-    -webkit-backdrop-filter: blur(30px) saturate(1.45) brightness(1.05);
-    backdrop-filter: blur(30px) saturate(1.45) brightness(1.05);
+    -webkit-backdrop-filter: blur(20px) saturate(1.45) brightness(1.05);
+    backdrop-filter: blur(20px) saturate(1.45) brightness(1.05);
     box-shadow: 14px 0 36px rgba(72, 52, 62, .18), inset -1px 0 rgba(255,255,255,.62), inset 0 1px rgba(255,255,255,.62) !important;
   }
   #drawer .brand { text-shadow: 0 1px rgba(255,255,255,.54); }
@@ -2830,7 +2830,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .mc-topic input:focus-visible + span { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
   .mc-section-title { margin: 19px 3px 8px; color: var(--dim); font-size: 12px; letter-spacing: .1em; }
   .mc-summary textarea { width: 100%; min-height: 230px; box-sizing: border-box; resize: vertical; }
-  #longContextOverview { font-size: 14px; line-height: 1.55; }
+  #longContextDraft, #longContextOverview { font-size: 14px; line-height: 1.55; }
+  .mc-summary-history-text { font-size: 12.5px; line-height: 1.55; }
   @media (hover:hover) and (pointer:fine) { .mc-btn:hover { background: color-mix(in srgb, var(--card) 78%, var(--accent-soft)); } .mc-btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, #fff); } }
   @media (max-width: 699px) {
     #longContextSheet .sheet { height: 100dvh; max-height: 100dvh; border-radius: 0; }
@@ -9102,13 +9103,13 @@ function memoryOverviewHtml(state, modelState, cardState) {
   const reviewing = !!state.has_draft;
   const generated = state.generated_at ? memoryDate(state.generated_at) : '尚未保存';
   const draftGenerated = state.draft_generated_at ? memoryDate(state.draft_generated_at) : '';
-  const status = working ? '正在整理。完成后只会生成待确认草稿。' : reviewing ? '有一份新摘要等待确认；当前仍使用原来的正式摘要。' : state.status === 'error' ? ('没有生成成功：' + (state.error || '未知错误')) : (state.overview ? '正式摘要已启用。新的整理仍会先请你确认。' : '还没有正式摘要，目前聊天只保留最近消息原文。');
+  const status = working ? '正在整理。完成后只会生成待确认草稿。' : reviewing ? '有一份新摘要等待确认；当前仍使用原来的正式摘要。' : state.status === 'error' ? ('没有生成成功：' + (state.error || '未知错误')) : (state.overview ? '正式摘要已启用。只有点击更新摘要时才会重新整理。' : '还没有正式摘要；摘要只会在你点击生成时整理。');
   const modelOptions = (modelState.items || []).map(item => `<option value="${instructionEsc(item.provider_id)}::${instructionEsc(item.model_id)}" ${(item.provider_id === modelState.provider_id && item.model_id === modelState.model_id) ? 'selected' : ''}>${instructionEsc(item.provider_name || '供应商')} · ${instructionEsc(item.model_id)}</option>`).join('');
-  const versions = (state.versions || []).map(item => `<details style="margin-top:10px"><summary>${instructionEsc(memoryDate(item.made) || '较早版本')} · ${instructionEsc(item.reason || '历史版本')}</summary><div class="gnote" style="white-space:pre-wrap;margin-top:8px;max-height:260px;overflow:auto">${instructionEsc(item.overview || '')}</div><div class="mc-actions"><button class="mc-btn longContextRestore" data-version="${instructionEsc(item.id)}">恢复这一版</button></div></details>`).join('');
+  const versions = (state.versions || []).map(item => `<details style="margin-top:10px"><summary>${instructionEsc(memoryDate(item.made) || '较早版本')} · ${instructionEsc(item.reason || '历史版本')}</summary><div class="gnote mc-summary-history-text" style="white-space:pre-wrap;margin-top:8px;max-height:260px;overflow:auto">${instructionEsc(item.overview || '')}</div><div class="mc-actions"><button class="mc-btn longContextRestore" data-version="${instructionEsc(item.id)}">恢复这一版</button></div></details>`).join('');
   const blocked = working || reviewing;
   const lastUse = cardState.last_injection;
   const usedCards = lastUse && lastUse.items && lastUse.items.length ? `<div class="mc-stack" style="margin-top:12px">${lastUse.items.map(item=>memoryCardView(item,cardState.taxonomy,'used')).join('')}</div>` : '';
-  return `<div class="ap-section"><div class="ap-section-title">按需记忆</div><div class="gnote">${cardState.injection_enabled ? '已开启。每次回复只会挑最多 5 条真正相关的卡片；不相关时一条也不会带入。' : '已暂停。这间聊天暂时不会把任何记忆卡带给 AI。'}</div><div class="mc-actions"><button class="mc-btn ${cardState.injection_enabled ? 'quiet' : 'primary'}" id="memoryInjectionToggle">${cardState.injection_enabled ? '暂停按需记忆' : '开启按需记忆'}</button></div>${lastUse ? `<div class="mc-section-title">最近一次带入 · ${instructionEsc(memoryDate(lastUse.used_at))} · ${lastUse.items.length} 条</div>${usedCards}` : '<div class="gnote">还没有带入记录。下一次聊到与卡片相关的话题时，这里会显示 AI 实际看到的内容。</div>'}</div>
+  return `<div class="ap-section"><div class="ap-section-title">按需记忆</div><div class="gnote">${cardState.injection_enabled ? '已开启。每次回复只会挑最多 5 条真正相关的卡片；不相关时一条也不会带入。每累计 50 条旧消息会自动生成待确认记忆卡。' : '已暂停带入，但每累计 50 条旧消息仍会自动生成待确认记忆卡。'}</div><div class="mc-actions"><button class="mc-btn ${cardState.injection_enabled ? 'quiet' : 'primary'}" id="memoryInjectionToggle">${cardState.injection_enabled ? '暂停按需记忆' : '开启按需记忆'}</button></div>${lastUse ? `<div class="mc-section-title">最近一次带入 · ${instructionEsc(memoryDate(lastUse.used_at))} · ${lastUse.items.length} 条</div>${usedCards}` : '<div class="gnote">还没有带入记录。下一次聊到与卡片相关的话题时，这里会显示 AI 实际看到的内容。</div>'}</div>
     <div class="ap-section"><div class="ap-section-title">摘要状态</div><div class="gnote">${instructionEsc(status)}</div><div class="gnote">原消息 ${state.message_count} 条 · 已压缩 ${state.segment_count} 段 · 最近 ${state.tail_messages} 条保留原文</div><div class="gnote">正式摘要最近保存：${instructionEsc(generated)}</div></div>
     <div class="ap-section"><div class="ap-section-title">整理所用模型</div>${modelOptions ? `<select class="ap-in" id="longContextModel" style="margin-top:10px">${modelOptions}</select><div class="ap-msg" id="longContextModelMsg"></div>` : '<div class="gnote">还没有可选模型。先在设置里为供应商添加模型。</div>'}</div>
     <div class="mc-actions"><button class="mc-btn primary" id="longContextGenerate" ${blocked ? 'disabled' : ''}>${reviewing ? '先处理待确认摘要' : (state.overview ? '更新摘要' : '生成摘要')}</button>${state.enabled ? `<button class="mc-btn" id="longContextRebuild" ${blocked ? 'disabled' : ''}>从原文重建</button>` : ''}</div><div class="ap-msg" id="longContextMsg"></div>
@@ -9544,16 +9545,22 @@ let curEffort = 'high';
 let curShowThinking = true;
 const pill = document.getElementById('modelPill');
 
+function modelSlug(id) {
+  const s = String(id || '').trim();
+  const leaf = s.split('/').pop() || s;
+  return leaf.replace(/(\d)\.(\d)/g, '$1-$2');
+}
 function sameModel(cur, id) {
-  return cur === id || (cur.startsWith(id) && !cur.slice(id.length).startsWith('['));
+  const current = modelSlug(cur), target = modelSlug(id);
+  return current === target || (current.startsWith(target) && !current.slice(target.length).startsWith('['));
 }
 function displayName(id) {
   const all = MODELS_1M.concat(MODELS_MAIN, MODELS_MORE);
-  const hit = all.find(m => id === m.id || sameModel(id, m.id));
+  const hit = all.find(m => sameModel(id, m.id));
   if (hit) return hit.name;
-  // init 报的全名可能带日期尾巴，按特征认一下
+  // OpenRouter 可能带供应商前缀和小数点版本号，先规范化再按特征认。
   const s = String(id);
-  const m = s.match(/claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d+))?/);
+  const m = modelSlug(s).match(/claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d+))?/);
   if (m) {
     const fam = m[1][0].toUpperCase() + m[1].slice(1);
     return fam + ' ' + m[2] + (m[3] && m[3].length <= 2 ? '.' + m[3] : '');

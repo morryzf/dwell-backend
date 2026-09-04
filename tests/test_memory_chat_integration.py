@@ -13,7 +13,7 @@ class MemoryChatIntegrationTest(unittest.TestCase):
     def test_main_module_parses_and_wires_selection_before_history(self):
         ast.parse(self.source)
         self.assertIn("MEMORY_TAIL_MESSAGES = 80", self.source)
-        self.assertIn("MEMORY_UPDATE_MIN_MESSAGES = 50", self.source)
+        self.assertIn("MEMORY_CARD_UPDATE_MIN_MESSAGES = 50", self.source)
         self.assertIn("select_memory_cards(", self.source)
         self.assertIn("db.memory_card_usage_record(", self.source)
         self.assertIn("stable_messages = instructions + format_preference + memory_message", self.source)
@@ -44,6 +44,29 @@ class MemoryChatIntegrationTest(unittest.TestCase):
             "[int(segment[\"end_rowid\"]) for segment in pending_segments]",
             self.source,
         )
+
+    def test_visible_summary_is_manual_but_memory_cards_auto_queue(self):
+        self.assertIn(
+            "只响应用户的生成、更新或重建摘要操作",
+            self.source,
+        )
+        self.assertNotIn("MEMORY_UPDATE_MIN_MESSAGES", self.source)
+        self.assertIn(
+            "_queue_automatic_memory_cards(chat_id)",
+            self.source,
+        )
+        self.assertIn(
+            "if len(rows) < MEMORY_CARD_UPDATE_MIN_MESSAGES",
+            self.source,
+        )
+
+    def test_automatic_cards_create_internal_segments_without_updating_overview(self):
+        automatic = self.source.split(
+            "async def _refresh_automatic_memory_cards", 1
+        )[1].split("def _queue_automatic_memory_cards", 1)[0]
+        self.assertIn("db.chat_memory_add_segment", automatic)
+        self.assertIn("_generate_unprocessed_memory_card_suggestions", automatic)
+        self.assertNotIn("chat_memory_stage", automatic)
 
     def test_memory_card_button_describes_its_actual_job(self):
         self.assertIn("生成未处理分段的记忆卡草稿", self.ui_source)

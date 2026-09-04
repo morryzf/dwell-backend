@@ -47,7 +47,7 @@ _heartbeat_lock = asyncio.Lock()
 _study_lock = asyncio.Lock()
 
 MEMORY_TAIL_MESSAGES = 80
-MEMORY_UPDATE_MIN_MESSAGES = 50
+MEMORY_CARD_UPDATE_MIN_MESSAGES = 50
 MEMORY_SEGMENT_MESSAGES = 50
 CACHE_HISTORY_TARGET_MESSAGES = 100
 CACHE_HISTORY_MAX_MESSAGES = 160
@@ -542,8 +542,26 @@ async def _stage_memory_card_suggestions(
         db.memory_card_state_set(chat_id, "error", str(exc), generated=True)
 
 
+async def _generate_unprocessed_memory_card_suggestions(
+    chat_id: str, provider: dict, model_id: str, require_segments: bool = False
+) -> bool:
+    """把尚未处理的分段送去生成候选卡；自动与手动入口共用。"""
+    segments = db.memory_card_unprocessed_segments(chat_id)
+    if not segments:
+        if require_segments:
+            raise RuntimeError("没有尚未整理的新分段")
+        return False
+    for start in range(0, len(segments), 4):
+        await _stage_memory_card_suggestions(
+            chat_id, provider, model_id, segments[start:start + 4]
+        )
+        if db.memory_card_state_get(chat_id)["status"] == "error":
+            return False
+    return True
+
+
 async def _refresh_memory_card_suggestions(chat_id: str) -> None:
-    """为已有分段补建候选卡片，供第二阶段控制台手动触发。"""
+    """为已有分段补建候选卡片，供控制台按钮手动触发。"""
     task_started = time.perf_counter()
     task_log_id = _start_system_log(
         "memory_task", "memory_card_generation", chat_id=chat_id
@@ -554,15 +572,9 @@ async def _refresh_memory_card_suggestions(chat_id: str) -> None:
         selection, provider, _explicit = _long_context_model(chat_id)
         if not provider or not provider.get("enabled") or not selection.get("model_id"):
             raise RuntimeError("生成记忆卡片前，请先选择可用的长期上下文模型")
-        segments = db.memory_card_unprocessed_segments(chat_id)
-        if not segments:
-            raise RuntimeError("没有尚未整理的新分段")
-        for start in range(0, len(segments), 4):
-            await _stage_memory_card_suggestions(
-                chat_id, provider, selection["model_id"], segments[start:start + 4]
-            )
-            if db.memory_card_state_get(chat_id)["status"] == "error":
-                break
+        await _generate_unprocessed_memory_card_suggestions(
+            chat_id, provider, selection["model_id"], require_segments=True
+        )
     except Exception as exc:
         task_status = "error"
         task_detail = exc
@@ -570,6 +582,80 @@ async def _refresh_memory_card_suggestions(chat_id: str) -> None:
     finally:
         _finish_system_log(task_log_id, task_status, task_started, detail=task_detail)
         _memory_card_tasks.pop(chat_id, None)
+
+
+def _memory_card_segmented_through(chat_id: str) -> int:
+    """自动记忆卡只处理尚未分段、且已经离开近期窗口的原消息。"""
+    state = db.chat_memory_get(chat_id)
+    segments = db.chat_memory_segments(chat_id)
+    return max(
+        [int(state.get("through_rowid") or 0)]
+        + [int(segment["end_rowid"]) for segment in segments]
+    )
+
+
+async def _refresh_automatic_memory_cards(chat_id: str) -> None:
+    """每累计一整段旧消息，生成内部分段和待确认记忆卡，不更新总览摘要。"""
+    task_started = time.perf_counter()
+    task_log_id = _start_system_log(
+        "memory_task", "memory_card_generation", chat_id=chat_id
+    )
+    task_status = "success"
+    task_detail: object = ""
+    try:
+        selection, provider, _explicit = _long_context_model(chat_id)
+        if not provider or not provider.get("enabled") or not selection.get("model_id"):
+            return
+        cutoff = _memory_cutoff(chat_id)
+        processed_through = _memory_card_segmented_through(chat_id)
+        created = False
+        while processed_through < cutoff:
+            rows = db.chat_memory_source_messages(
+                chat_id, processed_through, cutoff, MEMORY_SEGMENT_MESSAGES
+            )
+            # 自动任务只消费完整的 50 条；不足一段时留给下一轮或手动摘要。
+            if len(rows) < MEMORY_CARD_UPDATE_MIN_MESSAGES:
+                break
+            start, end = int(rows[0]["rowid"]), int(rows[-1]["rowid"])
+            segment = await _memory_segment_summary(
+                provider, selection["model_id"], rows
+            )
+            db.chat_memory_add_segment(chat_id, start, end, segment)
+            processed_through = end
+            created = True
+        if created:
+            await _generate_unprocessed_memory_card_suggestions(
+                chat_id, provider, selection["model_id"]
+            )
+    except Exception as exc:
+        task_status = "error"
+        task_detail = exc
+        db.memory_card_state_set(chat_id, "error", str(exc), generated=True)
+    finally:
+        _finish_system_log(task_log_id, task_status, task_started, detail=task_detail)
+        _memory_card_tasks.pop(chat_id, None)
+
+
+def _queue_automatic_memory_cards(chat_id: str) -> bool:
+    """达到 50 条旧消息时排队；总览摘要仍只由用户按钮更新。"""
+    summary_task = _memory_tasks.get(chat_id)
+    card_task = _memory_card_tasks.get(chat_id)
+    if (summary_task and not summary_task.done()) or (card_task and not card_task.done()):
+        return False
+    selection, provider, _explicit = _long_context_model(chat_id)
+    if not provider or not provider.get("enabled") or not selection.get("model_id"):
+        return False
+    cutoff = _memory_cutoff(chat_id)
+    processed_through = _memory_card_segmented_through(chat_id)
+    rows = db.chat_memory_source_messages(
+        chat_id, processed_through, cutoff, MEMORY_CARD_UPDATE_MIN_MESSAGES
+    )
+    if len(rows) < MEMORY_CARD_UPDATE_MIN_MESSAGES:
+        return False
+    db.memory_card_state_set(chat_id, "queued")
+    task = asyncio.create_task(_refresh_automatic_memory_cards(chat_id))
+    _memory_card_tasks[chat_id] = task
+    return True
 
 
 def _long_context_model(chat_id: str) -> tuple[dict, dict | None, bool]:
@@ -685,16 +771,13 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
         _memory_tasks.pop(chat_id, None)
 
 
-def _queue_long_context_refresh(chat_id: str, reset: bool = False, force: bool = False) -> bool:
+def _queue_long_context_refresh(chat_id: str, reset: bool = False) -> bool:
+    """只响应用户的生成、更新或重建摘要操作，不再由聊天回复自动触发。"""
     task = _memory_tasks.get(chat_id)
     if task and not task.done():
         return False
     state = db.chat_memory_get(chat_id)
     if state.get("has_draft"):
-        return False
-    cutoff = _memory_cutoff(chat_id)
-    pending = max(0, cutoff - int(state.get("through_rowid") or 0))
-    if not force and (not state.get("enabled") or pending < MEMORY_UPDATE_MIN_MESSAGES):
         return False
     if not reset:
         db.chat_memory_set_status(chat_id, "queued", enabled=True)
@@ -2833,7 +2916,8 @@ async def long_context_get(chat_id: str):
         raise HTTPException(404, "chat 不存在")
     state = db.chat_memory_get(chat_id)
     state["tail_messages"] = MEMORY_TAIL_MESSAGES
-    state["update_threshold"] = MEMORY_UPDATE_MIN_MESSAGES
+    state["summary_update_mode"] = "manual"
+    state["memory_card_update_threshold"] = MEMORY_CARD_UPDATE_MIN_MESSAGES
     state["versions"] = db.chat_memory_versions(chat_id)
     state["version_count"] = len(state["versions"])
     return {"ok": True, **state}
@@ -2849,7 +2933,10 @@ async def long_context_post(chat_id: str, request: Request):
     state = db.chat_memory_get(chat_id)
     if state.get("has_draft"):
         raise HTTPException(409, "已有一份待确认草稿，请先采用或丢弃")
-    started = _queue_long_context_refresh(chat_id, reset=reset, force=True)
+    card_task = _memory_card_tasks.get(chat_id)
+    if card_task and not card_task.done():
+        raise HTTPException(409, "记忆卡正在整理，请完成后再更新摘要")
+    started = _queue_long_context_refresh(chat_id, reset=reset)
     state = db.chat_memory_get(chat_id)
     return {"ok": True, "started": started, **state}
 
@@ -3775,8 +3862,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         })
         _emit(chat_id, {"type": "result", "is_error": False})
         _finish_system_log(request_log_id, "success", request_started)
-        # 已启用长期上下文的聊天，只有足够多消息离开近期窗口后才额外整理一次。
-        _queue_long_context_refresh(chat_id)
+        # 每 50 条旧消息自动生成待确认记忆卡；可见摘要只响应用户按钮。
+        _queue_automatic_memory_cards(chat_id)
     except asyncio.CancelledError:
         if buf or thinking_buf:
             stopped_text = "".join(buf) + ("\n[已停止]" if buf else "")
