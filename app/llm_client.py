@@ -223,6 +223,7 @@ def _cacheable_tools(tools: list | None) -> list | None:
 def build_chat_payload(model_id: str, messages: list, tools: list | None = None,
                        max_tokens: int | None = None,
                        reasoning_effort: str | None = None,
+                       thinking_enabled: bool = True,
                        provider: dict | None = None,
                        session_id: str | None = None) -> dict:
     """Build one request, adding guarded OpenRouter cache fields when configured.
@@ -245,7 +246,9 @@ def build_chat_payload(model_id: str, messages: list, tools: list | None = None,
         payload["session_id"] = str(session_id)[:256]
     if max_tokens is not None:
         payload["max_tokens"] = max(1, int(max_tokens))
-    effort = str(reasoning_effort or "").strip()
+    # Match Claude-style thinking mode: disabling it changes the model request,
+    # rather than merely hiding reasoning returned by the provider.
+    effort = str(reasoning_effort or "").strip() if thinking_enabled else "none"
     if effort:
         payload["reasoning_effort"] = effort
     return payload
@@ -253,7 +256,7 @@ def build_chat_payload(model_id: str, messages: list, tools: list | None = None,
 
 async def stream_chat(provider: dict, model_id: str, messages: list, tools: list | None = None,
                       max_tokens: int | None = None, reasoning_effort: str | None = None,
-                      session_id: str | None = None):
+                      thinking_enabled: bool = True, session_id: str | None = None):
     """以 OpenAI 兼容 SSE 请求聊天，yield 正文、thinking 或完整工具调用组。"""
     if not model_id:
         yield {"type": "text", "text": "[配置错误] 这个聊天还没有选择模型"}
@@ -271,7 +274,8 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
     url = provider["base_url"].rstrip("/") + "/chat/completions"
     payload = build_chat_payload(
         model_id, messages, tools, max_tokens=max_tokens,
-        reasoning_effort=reasoning_effort, provider=provider, session_id=session_id,
+        reasoning_effort=reasoning_effort, thinking_enabled=thinking_enabled,
+        provider=provider, session_id=session_id,
     )
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "text/event-stream"}
 
