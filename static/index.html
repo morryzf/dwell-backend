@@ -5058,7 +5058,7 @@ function handle(d) {
     if (d.is_error) note('（出错了：' + (d.result || '不知道为什么') + '）', 'err');
     scroll();
     reconcileAfterReply();
-    maybeAutoReadLastReply();
+    if (!d.is_error) maybeAutoReadLastReply();
     return;
   }
 
@@ -5624,12 +5624,25 @@ document.getElementById('ttsRow').onclick = async () => {
 };
 async function playTts(messageId) {
   if (ttsState.audio) { ttsState.audio.pause(); ttsState.audio = null; }
+  let objectUrl = '';
   try {
-    const audio = new Audio('api/tts/messages/' + encodeURIComponent(messageId));
+    const r = await fetch('api/tts/messages/' + encodeURIComponent(messageId), {cache:'no-store'});
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.detail || '语音没能生成');
+    }
+    objectUrl = URL.createObjectURL(await r.blob());
+    const audio = new Audio(objectUrl);
     ttsState.audio = audio;
-    audio.onended = audio.onerror = () => { if (ttsState.audio === audio) ttsState.audio = null; };
+    audio.onended = audio.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      if (ttsState.audio === audio) ttsState.audio = null;
+    };
     await audio.play();
-  } catch (e) { note('（语音没能播放：' + e.message + '）', 'err'); }
+  } catch (e) {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    note('（语音没能播放：' + e.message + '）', 'err');
+  }
 }
 async function maybeAutoReadLastReply() {
   try {
