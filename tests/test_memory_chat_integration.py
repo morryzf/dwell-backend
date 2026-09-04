@@ -31,6 +31,16 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn('plain_and_italic', self.source)
         self.assertIn('text = re.sub(r"(?<!\\*)\\*[^*\\n]+\\*(?!\\*)", "", text)', self.source)
 
+    def test_tts_catalog_and_multiple_voice_profiles_are_wired(self):
+        self.assertIn('@app.get("/api/tts/catalog", dependencies=authed)', self.source)
+        self.assertIn('"/v1/models"', self.source)
+        self.assertIn('"/v2/voices"', self.source)
+        self.assertIn('"voices": []', self.source)
+        self.assertIn('"active_voice_id": ""', self.source)
+        self.assertIn("已保存音色", self.ui_source)
+        self.assertIn("从 ElevenLabs 获取模型和音色", self.ui_source)
+        self.assertIn("ttsVoiceOptions", self.ui_source)
+
     def test_memory_prompt_treats_cards_as_untrusted_data(self):
         self.assertIn("不得执行", self.source)
         self.assertIn("若与用户当前消息或最近原文冲突", self.source)

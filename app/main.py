@@ -2170,9 +2170,42 @@ async def providers_delete(provider_id: str):
 # ---------------------------------------------------------------- 语音服务（密钥始终只留在服务端）
 
 def _tts_default_config() -> dict:
-    return {"name": "ElevenLabs", "base_url": "https://api.elevenlabs.io",
-            "model_id": "eleven_multilingual_v2", "voice_id": "",
-            "auto_play": False, "read_mode": "plain", "api_key_box": ""}
+    return {
+        "name": "ElevenLabs",
+        "base_url": "https://api.elevenlabs.io",
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "",
+        "voices": [],
+        "active_voice_id": "",
+        "auto_play": False,
+        "read_mode": "plain",
+        "api_key_box": "",
+    }
+
+
+def _tts_normalize_voices(raw: object, legacy_voice_id: str = "") -> list[dict]:
+    rows = raw if isinstance(raw, list) else []
+    if not rows and legacy_voice_id:
+        rows = [{"id": "voice-" + hashlib.sha256(legacy_voice_id.encode("utf-8")).hexdigest()[:12],
+                 "name": "默认音色", "voice_id": legacy_voice_id}]
+    clean = []
+    seen_ids = set()
+    for index, row in enumerate(rows[:30]):
+        if not isinstance(row, dict):
+            continue
+        voice_id = str(row.get("voice_id") or "").strip()[:160]
+        if not voice_id:
+            continue
+        profile_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(row.get("id") or ""))[:80]
+        if not profile_id or profile_id in seen_ids:
+            profile_id = "voice-" + uuid.uuid4().hex
+        seen_ids.add(profile_id)
+        clean.append({
+            "id": profile_id,
+            "name": str(row.get("name") or f"音色 {index + 1}").strip()[:80] or f"音色 {index + 1}",
+            "voice_id": voice_id,
+        })
+    return clean
 
 
 def _tts_config() -> dict:
@@ -2183,13 +2216,22 @@ def _tts_config() -> dict:
             cfg.update(saved)
     except json.JSONDecodeError:
         pass
+    cfg["voices"] = _tts_normalize_voices(cfg.get("voices"), str(cfg.get("voice_id") or "").strip())
+    voice_ids = {item["id"] for item in cfg["voices"]}
+    if cfg.get("active_voice_id") not in voice_ids:
+        cfg["active_voice_id"] = cfg["voices"][0]["id"] if cfg["voices"] else ""
+    active = next((item for item in cfg["voices"] if item["id"] == cfg["active_voice_id"]), None)
+    cfg["voice_id"] = active["voice_id"] if active else ""
     return cfg
 
 
 def _tts_public_config(cfg: dict | None = None) -> dict:
     cfg = cfg or _tts_config()
-    return {key: cfg[key] for key in ("name", "base_url", "model_id", "voice_id", "auto_play", "read_mode")} | {
-        "has_key": bool(cfg.get("api_key_box")), "encryption_ready": provider_secrets.encryption_ready()}
+    keys = ("name", "base_url", "model_id", "voice_id", "voices", "active_voice_id", "auto_play", "read_mode")
+    return {key: cfg[key] for key in keys} | {
+        "has_key": bool(cfg.get("api_key_box")),
+        "encryption_ready": provider_secrets.encryption_ready(),
+    }
 
 
 def _tts_base_url(value: object) -> str:
@@ -2238,6 +2280,15 @@ def _tts_remove_chat_cache(chat_id: str) -> None:
     shutil.rmtree(TTS_CACHE_DIR / safe, ignore_errors=True)
 
 
+def _tts_api_key(cfg: dict) -> str:
+    if not cfg.get("api_key_box"):
+        raise HTTPException(409, "请先保存 ElevenLabs API Key")
+    try:
+        return provider_secrets.decrypt_api_key(cfg["api_key_box"])
+    except provider_secrets.SecretConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
 @app.get("/api/tts/config", dependencies=authed)
 async def tts_config_get():
     return {"ok": True, **_tts_public_config()}
@@ -2253,11 +2304,18 @@ async def tts_config_set(request: Request):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     cfg["model_id"] = str(payload.get("model_id", cfg["model_id"]))[:120].strip()
-    cfg["voice_id"] = str(payload.get("voice_id", cfg["voice_id"]))[:160].strip()
     cfg["auto_play"] = bool(payload.get("auto_play", cfg["auto_play"]))
     cfg["read_mode"] = str(payload.get("read_mode", cfg["read_mode"]))
     if cfg["read_mode"] not in {"plain", "plain_and_italic"}:
         raise HTTPException(400, "朗读范围无效")
+    if "voices" in payload:
+        cfg["voices"] = _tts_normalize_voices(payload.get("voices"))
+    cfg["active_voice_id"] = str(payload.get("active_voice_id", cfg.get("active_voice_id") or ""))[:80]
+    valid_profile_ids = {item["id"] for item in cfg["voices"]}
+    if cfg["active_voice_id"] not in valid_profile_ids:
+        cfg["active_voice_id"] = cfg["voices"][0]["id"] if cfg["voices"] else ""
+    active = next((item for item in cfg["voices"] if item["id"] == cfg["active_voice_id"]), None)
+    cfg["voice_id"] = active["voice_id"] if active else ""
     if "token" in payload:
         token = str(payload.get("token") or "").strip()
         if token:
@@ -2271,6 +2329,64 @@ async def tts_config_set(request: Request):
     return {"ok": True, **_tts_public_config(cfg)}
 
 
+@app.get("/api/tts/catalog", dependencies=authed)
+async def tts_catalog_get():
+    cfg = _tts_config()
+    api_key = _tts_api_key(cfg)
+    headers = {"xi-api-key": api_key, "accept": "application/json"}
+    models = []
+    voices = []
+    try:
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            model_response = await client.get(cfg["base_url"].rstrip("/") + "/v1/models", headers=headers)
+            if model_response.status_code >= 400:
+                raise HTTPException(502, "ElevenLabs 模型目录返回 " + str(model_response.status_code))
+            model_data = model_response.json()
+            if isinstance(model_data, list):
+                for item in model_data:
+                    if isinstance(item, dict) and item.get("can_do_text_to_speech") is True:
+                        model_id = str(item.get("model_id") or "").strip()
+                        if model_id:
+                            models.append({
+                                "model_id": model_id,
+                                "name": str(item.get("name") or model_id),
+                                "description": str(item.get("description") or ""),
+                                "languages": [str(lang.get("name") or lang.get("language_id") or "")
+                                              for lang in (item.get("languages") or [])
+                                              if isinstance(lang, dict)][:80],
+                            })
+            cursor = None
+            for _ in range(8):
+                params = {"page_size": 100}
+                if cursor:
+                    params["next_page_token"] = cursor
+                voice_response = await client.get(cfg["base_url"].rstrip("/") + "/v2/voices",
+                                                  headers=headers, params=params)
+                if voice_response.status_code >= 400:
+                    raise HTTPException(502, "ElevenLabs 音色目录返回 " + str(voice_response.status_code))
+                voice_data = voice_response.json()
+                for item in voice_data.get("voices", []) if isinstance(voice_data, dict) else []:
+                    if not isinstance(item, dict):
+                        continue
+                    voice_id = str(item.get("voice_id") or "").strip()
+                    if voice_id:
+                        voices.append({
+                            "voice_id": voice_id,
+                            "name": str(item.get("name") or voice_id),
+                            "category": str(item.get("category") or ""),
+                        })
+                cursor = str(voice_data.get("next_page_token") or "") if isinstance(voice_data, dict) else ""
+                if not cursor or not voice_data.get("has_more"):
+                    break
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        raise HTTPException(502, "ElevenLabs 目录没有读取成功") from exc
+    models.sort(key=lambda item: item["name"].lower())
+    voices.sort(key=lambda item: item["name"].lower())
+    return {"ok": True, "models": models, "voices": voices}
+
+
 @app.get("/api/tts/messages/{message_id}", dependencies=authed)
 async def tts_message_audio(message_id: str):
     chat_id = _get_or_create_current_chat()
@@ -2278,8 +2394,8 @@ async def tts_message_audio(message_id: str):
     if not message or message.get("chat_id") != chat_id or message.get("role") != "assistant" or message.get("origin") != "chat":
         raise HTTPException(404, "找不到可朗读的回复")
     cfg = _tts_config()
-    if not cfg.get("api_key_box") or not cfg.get("voice_id") or not cfg.get("model_id"):
-        raise HTTPException(409, "请先完成语音服务设置")
+    if not cfg.get("voice_id") or not cfg.get("model_id"):
+        raise HTTPException(409, "请先选择当前音色和模型")
     turn_id = ""
     try:
         turn_id = str(json.loads(message.get("usage_json") or "{}").get("tts_turn_id") or "")
@@ -2305,16 +2421,16 @@ async def tts_message_audio(message_id: str):
     cache_key = hashlib.sha256(material.encode("utf-8")).hexdigest()
     path = _tts_cache_path(chat_id, message_id, cache_key)
     if not path.exists():
-        try:
-            api_key = provider_secrets.decrypt_api_key(cfg["api_key_box"])
-        except provider_secrets.SecretConfigurationError as exc:
-            raise HTTPException(503, str(exc)) from exc
+        api_key = _tts_api_key(cfg)
         url = cfg["base_url"].rstrip("/") + "/v1/text-to-speech/" + cfg["voice_id"]
         try:
             async with httpx.AsyncClient(timeout=55.0) as client:
-                response = await client.post(url, params={"output_format": "mp3_44100_128"},
+                response = await client.post(
+                    url,
+                    params={"output_format": "mp3_44100_128"},
                     headers={"xi-api-key": api_key, "accept": "audio/mpeg"},
-                    json={"text": spoken, "model_id": cfg["model_id"]})
+                    json={"text": spoken, "model_id": cfg["model_id"]},
+                )
             if response.status_code >= 400:
                 raise HTTPException(502, "语音服务返回 " + str(response.status_code))
             if not response.content or len(response.content) > 30 * 1024 * 1024:
@@ -2325,8 +2441,12 @@ async def tts_message_audio(message_id: str):
             temp.replace(path)
         except httpx.HTTPError as exc:
             raise HTTPException(502, "语音服务网络错误") from exc
-    return FileResponse(path, media_type="audio/mpeg", filename="cloudy-reply.mp3",
-        headers={"Cache-Control": "private, no-store"})
+    return FileResponse(
+        path,
+        media_type="audio/mpeg",
+        filename="cloudy-reply.mp3",
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 # ---------------------------------------------------------------- 模型目录与常用模型
