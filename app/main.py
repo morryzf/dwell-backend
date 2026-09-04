@@ -8,8 +8,11 @@
 """
 
 import asyncio
+import hashlib
 import json
 import os
+import re
+import shutil
 import tempfile
 import time
 import uuid
@@ -33,6 +36,9 @@ from app.memory_retrieval import select_memory_cards
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+TTS_CONFIG_KEY = "tts_config_v1"
+TTS_CACHE_DIR = Path(os.environ.get("DWELL_TTS_CACHE_DIR", "/data/tts-cache"))
+TTS_MAX_TEXT_CHARS = 4500
 
 # 正在跑的 AI 回复任务。key=chat_id，value=asyncio.Task
 _running_tasks: dict[str, asyncio.Task] = {}
@@ -2161,6 +2167,168 @@ async def providers_delete(provider_id: str):
     return {"ok": True}
 
 
+# ---------------------------------------------------------------- 语音服务（密钥始终只留在服务端）
+
+def _tts_default_config() -> dict:
+    return {"name": "ElevenLabs", "base_url": "https://api.elevenlabs.io",
+            "model_id": "eleven_multilingual_v2", "voice_id": "",
+            "auto_play": False, "read_mode": "plain", "api_key_box": ""}
+
+
+def _tts_config() -> dict:
+    cfg = _tts_default_config()
+    try:
+        saved = json.loads(db.setting_get(TTS_CONFIG_KEY) or "{}")
+        if isinstance(saved, dict):
+            cfg.update(saved)
+    except json.JSONDecodeError:
+        pass
+    return cfg
+
+
+def _tts_public_config(cfg: dict | None = None) -> dict:
+    cfg = cfg or _tts_config()
+    return {key: cfg[key] for key in ("name", "base_url", "model_id", "voice_id", "auto_play", "read_mode")} | {
+        "has_key": bool(cfg.get("api_key_box")), "encryption_ready": provider_secrets.encryption_ready()}
+
+
+def _tts_base_url(value: object) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"https", "http"} or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError("语音 API 基址必须是完整的 http(s) 地址")
+    return raw
+
+
+def _tts_spoken_text(raw: object, include_italic: bool) -> str:
+    text = str(raw or "")
+    text = re.sub(r"\x60{3}[\s\S]*?\x60{3}", "", text)
+    text = re.sub(r"\x60[^\x60]*\x60", "", text)
+    if not include_italic:
+        text = re.sub(r"<(?:i|em)\b[^>]*>[\s\S]*?</(?:i|em)>", "", text, flags=re.I)
+        text = re.sub(r"(?<!\*)\*[^*\n]+\*(?!\*)", "", text)
+        text = re.sub(r"(?<!\w)_[^_\n]+_(?!\w)", "", text)
+    else:
+        text = re.sub(r"</?(?:i|em)\b[^>]*>", "", text, flags=re.I)
+        text = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"\1", text)
+        text = re.sub(r"(?<!\w)_([^_\n]+)_(?!\w)", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"https?://\S+", "", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)", "", text, flags=re.M)
+    text = text.replace("**", "").replace("__", "")
+    return re.sub(r"[ \t]+\n", "\n", re.sub(r"\n{3,}", "\n\n", text)).strip()
+
+
+def _tts_cache_path(chat_id: str, message_id: str, cache_key: str) -> Path:
+    clean = lambda value: re.sub(r"[^a-zA-Z0-9_-]", "", value)[:80]
+    return TTS_CACHE_DIR / clean(chat_id) / f"{clean(message_id)}-{cache_key}.mp3"
+
+
+def _tts_remove_message_cache(chat_id: str, message_id: str) -> None:
+    clean = lambda value: re.sub(r"[^a-zA-Z0-9_-]", "", value)[:80]
+    directory = TTS_CACHE_DIR / clean(chat_id)
+    if directory.exists():
+        for path in directory.glob(clean(message_id) + "-*.mp3"):
+            path.unlink(missing_ok=True)
+
+
+def _tts_remove_chat_cache(chat_id: str) -> None:
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "", chat_id)[:80]
+    shutil.rmtree(TTS_CACHE_DIR / safe, ignore_errors=True)
+
+
+@app.get("/api/tts/config", dependencies=authed)
+async def tts_config_get():
+    return {"ok": True, **_tts_public_config()}
+
+
+@app.post("/api/tts/config", dependencies=authed)
+async def tts_config_set(request: Request):
+    payload = await _read_json(request)
+    cfg = _tts_config()
+    cfg["name"] = str(payload.get("name", cfg["name"]))[:80].strip() or "ElevenLabs"
+    try:
+        cfg["base_url"] = _tts_base_url(payload.get("base_url", cfg["base_url"]))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    cfg["model_id"] = str(payload.get("model_id", cfg["model_id"]))[:120].strip()
+    cfg["voice_id"] = str(payload.get("voice_id", cfg["voice_id"]))[:160].strip()
+    cfg["auto_play"] = bool(payload.get("auto_play", cfg["auto_play"]))
+    cfg["read_mode"] = str(payload.get("read_mode", cfg["read_mode"]))
+    if cfg["read_mode"] not in {"plain", "plain_and_italic"}:
+        raise HTTPException(400, "朗读范围无效")
+    if "token" in payload:
+        token = str(payload.get("token") or "").strip()
+        if token:
+            try:
+                cfg["api_key_box"] = provider_secrets.encrypt_api_key(token)
+            except provider_secrets.SecretConfigurationError as exc:
+                raise HTTPException(503, str(exc)) from exc
+        else:
+            cfg["api_key_box"] = ""
+    db.setting_set(TTS_CONFIG_KEY, json.dumps(cfg, ensure_ascii=False))
+    return {"ok": True, **_tts_public_config(cfg)}
+
+
+@app.get("/api/tts/messages/{message_id}", dependencies=authed)
+async def tts_message_audio(message_id: str):
+    chat_id = _get_or_create_current_chat()
+    message = db.message_get(message_id)
+    if not message or message.get("chat_id") != chat_id or message.get("role") != "assistant" or message.get("origin") != "chat":
+        raise HTTPException(404, "找不到可朗读的回复")
+    cfg = _tts_config()
+    if not cfg.get("api_key_box") or not cfg.get("voice_id") or not cfg.get("model_id"):
+        raise HTTPException(409, "请先完成语音服务设置")
+    turn_id = ""
+    try:
+        turn_id = str(json.loads(message.get("usage_json") or "{}").get("tts_turn_id") or "")
+    except (TypeError, json.JSONDecodeError):
+        pass
+    turn_parts = [message.get("content") or ""]
+    if turn_id:
+        turn_parts = []
+        for item in db.message_list(chat_id, limit=400):
+            if item.get("role") != "assistant":
+                continue
+            try:
+                if str(json.loads(item.get("usage_json") or "{}").get("tts_turn_id") or "") == turn_id:
+                    turn_parts.append(item.get("content") or "")
+            except (TypeError, json.JSONDecodeError):
+                continue
+    spoken = _tts_spoken_text("\n".join(turn_parts), cfg.get("read_mode") == "plain_and_italic")
+    if not spoken:
+        raise HTTPException(422, "这条回复没有可朗读的文字")
+    if len(spoken) > TTS_MAX_TEXT_CHARS:
+        raise HTTPException(413, "这轮回复过长，暂时不能一次朗读")
+    material = "\n".join((cfg["base_url"], cfg["model_id"], cfg["voice_id"], cfg["read_mode"], spoken))
+    cache_key = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    path = _tts_cache_path(chat_id, message_id, cache_key)
+    if not path.exists():
+        try:
+            api_key = provider_secrets.decrypt_api_key(cfg["api_key_box"])
+        except provider_secrets.SecretConfigurationError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        url = cfg["base_url"].rstrip("/") + "/v1/text-to-speech/" + cfg["voice_id"]
+        try:
+            async with httpx.AsyncClient(timeout=55.0) as client:
+                response = await client.post(url, params={"output_format": "mp3_44100_128"},
+                    headers={"xi-api-key": api_key, "accept": "audio/mpeg"},
+                    json={"text": spoken, "model_id": cfg["model_id"]})
+            if response.status_code >= 400:
+                raise HTTPException(502, "语音服务返回 " + str(response.status_code))
+            if not response.content or len(response.content) > 30 * 1024 * 1024:
+                raise HTTPException(502, "语音服务没有返回有效音频")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp = path.with_suffix(".tmp")
+            temp.write_bytes(response.content)
+            temp.replace(path)
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, "语音服务网络错误") from exc
+    return FileResponse(path, media_type="audio/mpeg", filename="cloudy-reply.mp3",
+        headers={"Cache-Control": "private, no-store"})
+
+
 # ---------------------------------------------------------------- 模型目录与常用模型
 
 def _model_catalog_item(row: dict, providers: dict[str, dict]) -> dict:
@@ -2852,6 +3020,7 @@ async def newchat(request: Request):
 
 @app.delete("/api/chats/{chat_id}", dependencies=authed)
 async def chats_del(chat_id: str):
+    _tts_remove_chat_cache(chat_id)
     ok = db.chat_del(chat_id)
     current = _get_or_create_current_chat()
     items = db.chat_list("", current)
@@ -3256,6 +3425,7 @@ async def messages_delete(message_id: str):
     current = _get_or_create_current_chat()
     if not message or message["chat_id"] != current or message["role"] not in ("assistant", "user"):
         raise HTTPException(404, "找不到这条消息")
+    _tts_remove_message_cache(message["chat_id"], message_id)
     db.message_delete(message_id)
     return {"ok": True, "id": message_id}
 
@@ -3274,6 +3444,8 @@ async def messages_bulk_delete(request: Request):
         message = db.message_get(message_id)
         if not message or message["chat_id"] != current or message["role"] not in ("assistant", "user"):
             raise HTTPException(400, "选择中含有不属于当前聊天的消息，请重新选择")
+    for message_id in ids:
+        _tts_remove_message_cache(current, message_id)
     deleted = db.message_delete_many(ids)
     return {"ok": True, "deleted": deleted}
 
@@ -3656,6 +3828,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     natural_split = _REPLY_SPLIT_RE
     split_pending = ""
     current_message_id = msg_id
+    tts_turn_id = msg_id
     reply_started = time.perf_counter()
     model_duration_ms = 0
     token_usage_keys = (
@@ -3708,6 +3881,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         if not text:
             return
         db.message_update(current_message_id, text)
+        db.message_usage_update(current_message_id, {"tts_turn_id": tts_turn_id})
         _emit(chat_id, {"type": "assistant_split", "message_id": current_message_id, "text": text})
         current_message_id = db.message_add(chat_id, "assistant", "")["id"]
         buf = []
@@ -3854,7 +4028,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             )
             for key in cost_usage_keys:
                 usage_totals[key] = round(usage_totals[key], 8)
-            # Split replies persist as several messages; usage belongs only to the last bubble.
+            # Split replies persist as several messages; this id lets voice join one full reply.
+            usage_totals["tts_turn_id"] = tts_turn_id
             db.message_usage_update(current_message_id, usage_totals)
         _emit(chat_id, {
             "type": "assistant",

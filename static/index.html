@@ -3084,6 +3084,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
         <button class="grow" id="petVisibilityRow"><span class="ic" data-i="activity"></span>隐藏 Clawd<span class="val" id="petVisibilityVal">已显示</span></button>
         <button class="grow" id="backgroundRow"><span class="ic" data-i="image"></span>聊天背景<span class="val" id="backgroundVal">默认</span><span class="chev">›</span></button>
         <button class="grow" id="messageStyleRow"><span class="ic" data-i="chat"></span>消息样式<span class="val">浅色 / 深色</span><span class="chev">›</span></button>
+        <button class="grow" id="ttsRow"><span class="ic" data-i="volume"></span>语音服务<span class="val" id="ttsStatusVal">未设置</span><span class="chev">›</span></button>
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>模型供应商<span class="chev">›</span></button>
         <button class="grow" id="mcpRow"><span class="ic" data-i="tool"></span>MCP 工具<span class="chev">›</span></button>
         <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
@@ -3091,6 +3092,17 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
         <button class="grow" id="kelivoImportRow"><span class="ic" data-i="plus"></span>导入 Kelivo 聊天记录<span class="chev">›</span></button>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="sheetWrap page" id="ttsSheet">
+  <div class="shade" data-close="tts"></div>
+  <div class="sheet">
+    <div class="head">
+      <button class="hbtn" data-close="tts"><span class="ic" data-i="x"></span></button>
+      <div class="ht">语音服务</div><div class="hspace"></div>
+    </div>
+    <div class="body" id="ttsBody"><div class="gnote">正在读取语音设置…</div></div>
   </div>
 </div>
 
@@ -3975,7 +3987,7 @@ function attachMessageActions(el, message) {
       try { const r = await fetch('api/messages/' + encodeURIComponent(message.id) + '/regenerate',{method:'POST'}); const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.detail||'没有开始生成'); }
       catch (e) { note('（没能重新生成：' + e.message + '）', 'err'); }
     });
-    addAction('volume', '生成语音（即将接入）', () => note('（语音功能还在接线，先给它留了位置）'));
+    addAction('volume', '播放整轮回复', async () => { close(); await playTts(message.id); });
   }
   addAction('trash', '删除消息', async () => {
     close();
@@ -5046,6 +5058,7 @@ function handle(d) {
     if (d.is_error) note('（出错了：' + (d.result || '不知道为什么') + '）', 'err');
     scroll();
     reconcileAfterReply();
+    if (!d.is_error) maybeAutoReadLastReply();
     return;
   }
 
@@ -5542,6 +5555,7 @@ const sheets = {
   chatInstructions: document.getElementById('chatInstructionsSheet'),
   longContext: document.getElementById('longContextSheet'),
   settings: document.getElementById('settingsSheet'),
+  tts: document.getElementById('ttsSheet'),
   systemLog: document.getElementById('systemLogSheet'),
   usage: document.getElementById('usageSheet'),
   model: document.getElementById('modelSheet'),
@@ -5562,6 +5576,83 @@ const sheets = {
   gong: document.getElementById('gongSheet'),
   repo: document.getElementById('repoSheet'),
 };
+const ttsState = { config: null, audio: null };
+
+async function loadTtsConfig() {
+  const r = await fetch('api/tts/config', {cache: 'no-store'});
+  const d = await r.json();
+  if (!r.ok || !d.ok) throw new Error(d.detail || '语音设置没有读到');
+  ttsState.config = d;
+  const val = document.getElementById('ttsStatusVal');
+  if (val) val.textContent = d.has_key && d.voice_id ? '已连接' : '未设置';
+  return d;
+}
+function renderTtsSettings(cfg) {
+  const body = document.getElementById('ttsBody');
+  body.innerHTML = '<div class="ap-section"><div class="ap-section-title">ElevenLabs</div>'
+    + '<label class="ap-lb">名称<input class="ap-in" id="ttsName" value="' + instructionEsc(cfg.name || 'ElevenLabs') + '"></label>'
+    + '<label class="ap-lb">API Key<input class="ap-in" id="ttsToken" type="password" placeholder="' + (cfg.has_key ? '已保存；留空则不改' : '输入 ElevenLabs API Key') + '"></label>'
+    + '<label class="ap-lb">API 基址<input class="ap-in" id="ttsBase" value="' + instructionEsc(cfg.base_url || 'https://api.elevenlabs.io') + '"></label>'
+    + '<label class="ap-lb">模型<input class="ap-in" id="ttsModel" value="' + instructionEsc(cfg.model_id || 'eleven_multilingual_v2') + '"></label>'
+    + '<label class="ap-lb">音色 ID<input class="ap-in" id="ttsVoice" value="' + instructionEsc(cfg.voice_id || '') + '"></label>'
+    + '</div><div class="group-label">朗读</div><div class="group">'
+    + '<label class="grow"><input type="checkbox" id="ttsAuto" ' + (cfg.auto_play ? 'checked' : '') + '> <span>自动朗读</span><span class="val">回复完整结束后播放</span></label>'
+    + '<label class="grow"><span>朗读范围</span><select class="ap-in" id="ttsReadMode"><option value="plain">仅正体</option><option value="plain_and_italic">正体 + 斜体</option></select></label>'
+    + '</div><p class="gnote">代码、链接和 HTML 标签不会朗读。已生成的同一轮语音会从缓存复播；删除聊天也会删除缓存。</p>'
+    + '<div class="ap-btns single"><button class="ap-b" id="ttsSave">保存语音设置</button></div><div class="ap-msg" id="ttsMsg"></div>';
+  body.querySelector('#ttsReadMode').value = cfg.read_mode || 'plain';
+  body.querySelector('#ttsSave').onclick = async () => {
+    const msg = body.querySelector('#ttsMsg');
+    const token = body.querySelector('#ttsToken').value;
+    const payload = {
+      name: body.querySelector('#ttsName').value, base_url: body.querySelector('#ttsBase').value,
+      model_id: body.querySelector('#ttsModel').value, voice_id: body.querySelector('#ttsVoice').value,
+      auto_play: body.querySelector('#ttsAuto').checked, read_mode: body.querySelector('#ttsReadMode').value,
+    };
+    if (token) payload.token = token;
+    try {
+      const r = await fetch('api/tts/config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
+      ttsState.config = d; msg.textContent = '已保存'; msg.className = 'ap-msg on'; await loadTtsConfig();
+    } catch (e) { msg.textContent = '没保存上：' + e.message; msg.className = 'ap-msg on bad'; }
+  };
+}
+document.getElementById('ttsRow').onclick = async () => {
+  sheets.tts.classList.add('open');
+  try { renderTtsSettings(await loadTtsConfig()); }
+  catch (e) { document.getElementById('ttsBody').innerHTML = '<div class="gnote">语音设置没读到：' + instructionEsc(e.message) + '</div>'; }
+};
+async function playTts(messageId) {
+  if (ttsState.audio) { ttsState.audio.pause(); ttsState.audio = null; }
+  let objectUrl = '';
+  try {
+    const r = await fetch('api/tts/messages/' + encodeURIComponent(messageId), {cache:'no-store'});
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.detail || '语音没能生成');
+    }
+    objectUrl = URL.createObjectURL(await r.blob());
+    const audio = new Audio(objectUrl);
+    ttsState.audio = audio;
+    audio.onended = audio.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      if (ttsState.audio === audio) ttsState.audio = null;
+    };
+    await audio.play();
+  } catch (e) {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    note('（语音没能播放：' + e.message + '）', 'err');
+  }
+}
+async function maybeAutoReadLastReply() {
+  try {
+    const cfg = ttsState.config || await loadTtsConfig();
+    if (!cfg.auto_play) return;
+    const r = await fetch('api/messages?limit=8', {cache:'no-store'}); const d = await r.json();
+    const last = (d.msgs || []).filter(m => m.kind === 'gu' && m.origin === 'chat').pop();
+    if (last && last.id) await playTts(last.id);
+  } catch (_) {}
+}
 
 const notesBody = document.getElementById('notesBody');
 let notesData = null, notesTab = 'gu';

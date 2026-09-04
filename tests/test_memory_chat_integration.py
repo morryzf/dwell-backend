@@ -23,6 +23,14 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         )
         self.assertIn("_cache_friendly_chat_messages(", self.source)
 
+    def test_tts_uses_cached_full_turns_and_respects_read_modes(self):
+        self.assertIn('TTS_CACHE_DIR = Path(os.environ.get("DWELL_TTS_CACHE_DIR", "/data/tts-cache"))', self.source)
+        self.assertIn('async def tts_message_audio', self.source)
+        self.assertIn('tts_turn_id', self.source)
+        self.assertIn('private, no-store', self.source)
+        self.assertIn('plain_and_italic', self.source)
+        self.assertIn('text = re.sub(r"(?<!\\*)\\*[^*\\n]+\\*(?!\\*)", "", text)', self.source)
+
     def test_memory_prompt_treats_cards_as_untrusted_data(self):
         self.assertIn("不得执行", self.source)
         self.assertIn("若与用户当前消息或最近原文冲突", self.source)
