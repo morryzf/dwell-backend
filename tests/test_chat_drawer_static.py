@@ -14,14 +14,20 @@ class ChatDrawerStaticTest(unittest.TestCase):
         self.assertNotIn("sheets.chats", self.html)
         self.assertNotIn('id="newSession"', self.html)
 
-    def test_assistants_are_separate_from_recent_conversations(self):
+    def test_assistant_switcher_sits_below_brand_and_above_navigation(self):
+        brand = self.html.index('class="brand"')
         assistants = self.html.index('class="assistant-switch"')
+        navigation = self.html.index('class="nav"')
         recents = self.html.index('id="drawerChatHeading"')
         history = self.html.index('id="drawerChats"')
-        self.assertLess(assistants, recents)
+        self.assertLess(brand, assistants)
+        self.assertLess(assistants, navigation)
+        self.assertLess(navigation, recents)
         self.assertLess(recents, history)
-        self.assertIn('id="recGu"', self.html)
-        self.assertIn('id="recGong"', self.html)
+        self.assertIn('id="recGu" aria-pressed="true"', self.html)
+        self.assertIn('id="recGong" aria-pressed="false"', self.html)
+        self.assertNotIn('<div class="sect">Assistants</div>', self.html)
+        self.assertNotIn('class="assistant-avatar"', self.html)
 
     def test_drawer_history_keeps_chat_actions(self):
         self.assertIn("rename.onclick = () => renameChat(it)", self.html)
