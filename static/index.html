@@ -614,16 +614,16 @@ html[data-theme="dark"] .composer {
   }
   .assistant-switch {
     flex: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 3px; margin: 0 18px 14px; padding: 3px;
+    gap: 2px; margin: 0 18px 12px; padding: 2px;
     border: 1px solid color-mix(in srgb, var(--line) 82%, var(--accent-soft));
-    border-radius: 15px;
+    border-radius: 13px;
     background: color-mix(in srgb, var(--panel) 72%, transparent);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.28);
   }
   .assistant-choice {
-    min-width: 0; min-height: 42px; display: flex; align-items: center; justify-content: center;
-    padding: 8px 10px; border-radius: 11px;
-    color: color-mix(in srgb, var(--text) 82%, var(--dim)); font-size: 14px; font-weight: 500;
+    min-width: 0; min-height: 38px; display: flex; align-items: center; justify-content: center;
+    padding: 5px 8px; border-radius: 10px;
+    color: color-mix(in srgb, var(--text) 82%, var(--dim)); font-size: 13.5px; font-weight: 500;
     transition: transform 150ms var(--ease-out), background-color 150ms ease,
       color 150ms ease, box-shadow 150ms ease;
   }
@@ -2217,7 +2217,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
      but with a frosted separation layer so navigation stays effortless to read. */
   #drawer {
     isolation: isolate;
-    background: linear-gradient(145deg, rgba(255, 253, 254, .74), rgba(239, 219, 227, .48)) !important;
+    background: rgba(247, 236, 241, .51) !important;
     border: 1px solid rgba(255, 255, 255, .72) !important;
     border-left: 0 !important;
     border-radius: 0 28px 28px 0;
@@ -2225,11 +2225,6 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     -webkit-backdrop-filter: blur(30px) saturate(1.45) brightness(1.05);
     backdrop-filter: blur(30px) saturate(1.45) brightness(1.05);
     box-shadow: 14px 0 36px rgba(72, 52, 62, .18), inset -1px 0 rgba(255,255,255,.62), inset 0 1px rgba(255,255,255,.62) !important;
-  }
-  #drawer::before {
-    content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-    border-radius: inherit;
-    background: linear-gradient(125deg, rgba(255,255,255,.42), transparent 35%, rgba(219,166,187,.08) 72%, transparent);
   }
   #drawer .brand { text-shadow: 0 1px rgba(255,255,255,.54); }
   #drawer .nav .item, #drawer .nav .recent {
@@ -2260,7 +2255,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   }
   .lk-knob::after { position: relative; border-color: #625860; }
   html[data-theme="dark"] #drawer {
-    background: linear-gradient(145deg, rgba(77,70,75,.78), rgba(58,52,57,.63)) !important;
+    background: rgba(68,61,66,.60) !important;
     border-color: rgba(255,235,244,.18) !important;
     box-shadow: 14px 0 38px rgba(0,0,0,.3), inset -1px 0 rgba(255,237,245,.12), inset 0 1px rgba(255,237,245,.1) !important;
   }
@@ -2273,7 +2268,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   }
   @media (prefers-color-scheme: dark) {
     html:not([data-theme="light"]) #drawer {
-      background: linear-gradient(145deg, rgba(77,70,75,.78), rgba(58,52,57,.63)) !important;
+      background: rgba(68,61,66,.60) !important;
       border-color: rgba(255,235,244,.18) !important;
       box-shadow: 14px 0 38px rgba(0,0,0,.3), inset -1px 0 rgba(255,237,245,.12), inset 0 1px rgba(255,237,245,.1) !important;
     }
@@ -2601,12 +2596,29 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .drawer-foot { gap: 10px; }
   .drawer-chat-list { padding: 0 2px 8px; }
   .drawer-chat-list .chatrow { margin-bottom: 3px; border-radius: 11px; }
-  .drawer-chat-list .crow {
+  #drawer .drawer-chat-list .chatrow .crow {
     min-height: 47px; padding: 8px 11px; border: 0 !important; border-radius: 11px;
-    background: transparent !important; box-shadow: none !important;
+    background-color: transparent !important; background-image: none !important;
+    box-shadow: none !important;
     -webkit-backdrop-filter: none; backdrop-filter: none;
   }
-  .drawer-chat-list .crow.on { background: var(--panel) !important; }
+  #drawer .drawer-chat-list .chatrow .crow.on { background-color: var(--panel) !important; }
+  html[data-theme="dark"] #drawer .drawer-chat-list .chatrow .crow {
+    background-color: transparent !important; background-image: none !important;
+    border-color: transparent !important; box-shadow: none !important;
+  }
+  html[data-theme="dark"] #drawer .drawer-chat-list .chatrow .crow.on {
+    background-color: rgba(255,235,244,.08) !important;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) #drawer .drawer-chat-list .chatrow .crow {
+      background-color: transparent !important; background-image: none !important;
+      border-color: transparent !important; box-shadow: none !important;
+    }
+    html:not([data-theme="light"]) #drawer .drawer-chat-list .chatrow .crow.on {
+      background-color: rgba(255,235,244,.08) !important;
+    }
+  }
   .drawer-chat-list .crow .cn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; font-weight: 500; }
   .drawer-chat-list .crow .cp { margin-top: 1px; font-size: 11.5px; }
   .drawer-chat-list .crow .ct { padding-top: 1px; font-size: 11px; }
@@ -3020,7 +3032,6 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       <button class="assistant-choice" id="recGong" aria-pressed="false">另一位</button>
     </div>
     <div class="nav">
-      <button class="item on" id="navChat"><span class="ic" data-i="chat"></span>聊天</button>
       <button class="item" id="navTodo"><span class="ic" data-i="checkSquare"></span>待办</button>
       <button class="item" id="navCal"><span class="ic" data-i="calendar"></span>日历</button>
       <button class="item" id="navFocus"><span class="ic" data-i="clock"></span>专注</button>
@@ -8291,7 +8302,6 @@ document.getElementById('recGong').onclick = () => {
   closeDrawer(); sheets.gong.classList.add('open'); loadGong();
 };
 document.getElementById('recGu').onclick = closeDrawer;
-document.getElementById('navChat').onclick = closeDrawer;
 
 /* ---------- 健康 ---------- */
 const HEALTH_GROUPS = [
