@@ -2210,6 +2210,8 @@ def _tts_spoken_text(raw: object, include_italic: bool) -> str:
         text = re.sub(r"(?<!\w)_[^_\n]+_(?!\w)", "", text)
     else:
         text = re.sub(r"</?(?:i|em)\b[^>]*>", "", text, flags=re.I)
+        text = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"\1", text)
+        text = re.sub(r"(?<!\w)_([^_\n]+)_(?!\w)", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"https?://\S+", "", text)
     text = re.sub(r"<[^>]+>", "", text)
