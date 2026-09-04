@@ -26,6 +26,16 @@ class ChatPayloadTest(unittest.TestCase):
         self.assertNotIn("cache_control", payload)
         self.assertNotIn("session_id", payload)
 
+    def test_disabling_thinking_overrides_the_saved_effort(self):
+        payload = build_chat_payload(
+            "example/model",
+            [],
+            reasoning_effort="high",
+            thinking_enabled=False,
+        )
+
+        self.assertEqual(payload["reasoning_effort"], "none")
+
     def test_omits_optional_fields_when_they_are_not_requested(self):
         payload = build_chat_payload("example/model", [])
 
