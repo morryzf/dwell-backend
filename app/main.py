@@ -2204,10 +2204,12 @@ def _tts_spoken_text(raw: object, include_italic: bool) -> str:
     text = str(raw or "")
     text = re.sub(r"\x60{3}[\s\S]*?\x60{3}", "", text)
     text = re.sub(r"\x60[^\x60]*\x60", "", text)
-    text = re.sub(r"<(?:i|em)\b[^>]*>[\s\S]*?</(?:i|em)>", "", text, flags=re.I)
     if not include_italic:
+        text = re.sub(r"<(?:i|em)\b[^>]*>[\s\S]*?</(?:i|em)>", "", text, flags=re.I)
         text = re.sub(r"(?<!\*)\*[^*\n]+\*(?!\*)", "", text)
         text = re.sub(r"(?<!\w)_[^_\n]+_(?!\w)", "", text)
+    else:
+        text = re.sub(r"</?(?:i|em)\b[^>]*>", "", text, flags=re.I)
     text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"https?://\S+", "", text)
     text = re.sub(r"<[^>]+>", "", text)
@@ -2276,7 +2278,23 @@ async def tts_message_audio(message_id: str):
     cfg = _tts_config()
     if not cfg.get("api_key_box") or not cfg.get("voice_id") or not cfg.get("model_id"):
         raise HTTPException(409, "请先完成语音服务设置")
-    spoken = _tts_spoken_text(message.get("content"), cfg.get("read_mode") == "plain_and_italic")
+    turn_id = ""
+    try:
+        turn_id = str(json.loads(message.get("usage_json") or "{}").get("tts_turn_id") or "")
+    except (TypeError, json.JSONDecodeError):
+        pass
+    turn_parts = [message.get("content") or ""]
+    if turn_id:
+        turn_parts = []
+        for item in db.message_list(chat_id, limit=400):
+            if item.get("role") != "assistant":
+                continue
+            try:
+                if str(json.loads(item.get("usage_json") or "{}").get("tts_turn_id") or "") == turn_id:
+                    turn_parts.append(item.get("content") or "")
+            except (TypeError, json.JSONDecodeError):
+                continue
+    spoken = _tts_spoken_text("\n".join(turn_parts), cfg.get("read_mode") == "plain_and_italic")
     if not spoken:
         raise HTTPException(422, "这条回复没有可朗读的文字")
     if len(spoken) > TTS_MAX_TEXT_CHARS:
@@ -2306,7 +2324,7 @@ async def tts_message_audio(message_id: str):
         except httpx.HTTPError as exc:
             raise HTTPException(502, "语音服务网络错误") from exc
     return FileResponse(path, media_type="audio/mpeg", filename="cloudy-reply.mp3",
-        headers={"Cache-Control": "private, max-age=31536000, immutable"})
+        headers={"Cache-Control": "private, no-store"})
 
 
 # ---------------------------------------------------------------- 模型目录与常用模型
@@ -3808,6 +3826,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     natural_split = _REPLY_SPLIT_RE
     split_pending = ""
     current_message_id = msg_id
+    tts_turn_id = msg_id
     reply_started = time.perf_counter()
     model_duration_ms = 0
     token_usage_keys = (
@@ -3860,6 +3879,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         if not text:
             return
         db.message_update(current_message_id, text)
+        db.message_usage_update(current_message_id, {"tts_turn_id": tts_turn_id})
         _emit(chat_id, {"type": "assistant_split", "message_id": current_message_id, "text": text})
         current_message_id = db.message_add(chat_id, "assistant", "")["id"]
         buf = []
@@ -4006,7 +4026,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             )
             for key in cost_usage_keys:
                 usage_totals[key] = round(usage_totals[key], 8)
-            # Split replies persist as several messages; usage belongs only to the last bubble.
+            # Split replies persist as several messages; this id lets voice join one full reply.
+            usage_totals["tts_turn_id"] = tts_turn_id
             db.message_usage_update(current_message_id, usage_totals)
         _emit(chat_id, {
             "type": "assistant",
