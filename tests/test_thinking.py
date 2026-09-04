@@ -47,7 +47,7 @@ class ThinkingDatabaseTest(unittest.TestCase):
             if os.path.exists(path):
                 os.remove(path)
 
-    def test_thinking_is_saved_and_can_be_hidden_per_chat(self):
+    def test_saved_thinking_remains_visible_when_future_thinking_is_disabled(self):
         message = db.message_add(self.chat["id"], "assistant", "回答")
         self.assertTrue(db.message_thinking_update(message["id"], "推理内容"))
 
@@ -55,8 +55,8 @@ class ThinkingDatabaseTest(unittest.TestCase):
         self.assertEqual(visible["thinking"], "推理内容")
 
         db.chat_model_set(self.chat["id"], show_thinking=False)
-        hidden = db.message_ui_list(self.chat["id"])["msgs"][0]
-        self.assertEqual(hidden["thinking"], "")
+        still_visible = db.message_ui_list(self.chat["id"])["msgs"][0]
+        self.assertEqual(still_visible["thinking"], "推理内容")
 
         db.chat_model_set(self.chat["id"], show_thinking=True)
         restored = db.message_ui_list(self.chat["id"])["msgs"][0]
