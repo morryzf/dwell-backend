@@ -43,6 +43,16 @@ class ChatDrawerStaticTest(unittest.TestCase):
     def test_redundant_chat_navigation_item_is_removed(self):
         self.assertNotIn('id="navChat"', self.html)
 
+    def test_drawer_navigation_and_brand_are_compact(self):
+        self.assertIn(
+            'padding: 10px 14px; border-radius: 12px; font-size: 14px;',
+            self.html,
+        )
+        self.assertIn('.nav .item .ic { width: 16px; height: 16px; }', self.html)
+        self.assertIn('family=Pinyon+Script', self.html)
+        self.assertIn('font-family: "Pinyon Script", cursive;', self.html)
+        self.assertIn('<div class="brand">Cloudy studio</div>', self.html)
+
     def test_dark_recent_chats_stay_borderless(self):
         selector = (
             'html[data-theme="dark"] #drawer '
