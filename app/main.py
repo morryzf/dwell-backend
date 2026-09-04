@@ -983,6 +983,7 @@ async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
         async for event in stream_chat(
             provider, selection["model_id"], messages, tools or None,
             reasoning_effort=selection.get("reasoning_effort"),
+            thinking_enabled=bool(selection.get("show_thinking", 1)),
             session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
         ):
             if event.get("type") == "text":
@@ -3679,6 +3680,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             async for event in stream_chat(
                 provider, selection["model_id"], messages, tools or None,
                 reasoning_effort=selection.get("reasoning_effort"),
+                thinking_enabled=show_thinking,
                 session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
             ):
                 if event["type"] == "thinking":
