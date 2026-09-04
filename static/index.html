@@ -795,6 +795,50 @@ html[data-theme="dark"] .composer {
   .tts-voice-fields { display:grid; grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); gap:9px; }
   .tts-voice-fields .ap-in { min-width:0; }
   .tts-empty { padding:14px 4px 4px; color:var(--dim); font-size:13px; text-align:center; }
+  #ttsPlayer {
+    position:fixed; z-index:45; top:calc(env(safe-area-inset-top) + 58px); left:50%;
+    width:min(540px, calc(100vw - 24px)); padding:10px 12px; transform:translate(-50%, -14px);
+    border:1px solid var(--line); border-radius:17px; background:color-mix(in srgb, var(--card) 88%, transparent);
+    box-shadow:0 12px 34px rgba(0,0,0,.2); backdrop-filter:blur(18px) saturate(1.35);
+    -webkit-backdrop-filter:blur(18px) saturate(1.35); opacity:0; pointer-events:none;
+    transition:opacity .18s ease, transform .2s ease;
+  }
+  #ttsPlayer.on { opacity:1; transform:translate(-50%, 0); pointer-events:auto; }
+  .tts-player-main { display:flex; align-items:center; gap:9px; }
+  #ttsPlayerToggle { width:34px; height:34px; flex:none; border-radius:50%; color:#fff; background:var(--accent); font-size:13px; }
+  .tts-player-copy { flex:1; min-width:0; display:flex; flex-direction:column; line-height:1.25; }
+  .tts-player-copy strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
+  .tts-player-copy span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); font-size:11.5px; }
+  #ttsPlayerRate { min-width:48px; height:32px; padding:0 9px; border-radius:10px; background:var(--panel); color:var(--text); font-size:12.5px; font-weight:700; }
+  #ttsPlayerClose { width:30px; height:30px; color:var(--dim); font-size:22px; }
+  .tts-player-progress { display:grid; grid-template-columns:34px 1fr 34px; align-items:center; gap:7px; margin-top:7px; color:var(--dim); font-size:10.5px; }
+  #ttsPlayerSeek { width:100%; height:18px; accent-color:var(--accent); }
+  #ttsChoicePicker { position:fixed; inset:0; z-index:120; display:none; align-items:flex-end; justify-content:center; }
+  #ttsChoicePicker.on { display:flex; }
+  .tts-picker-shade { position:absolute; inset:0; background:rgba(0,0,0,.34); backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px); }
+  .tts-picker-panel {
+    position:relative; width:min(600px, 100%); max-height:min(78vh, 720px); padding:12px 18px calc(18px + env(safe-area-inset-bottom));
+    display:flex; flex-direction:column; gap:11px; border:1px solid var(--line); border-radius:24px 24px 0 0;
+    background:var(--bg); box-shadow:0 -18px 45px rgba(0,0,0,.22);
+  }
+  .tts-picker-head { display:grid; grid-template-columns:38px 1fr 38px; align-items:center; text-align:center; }
+  .tts-picker-head button { width:36px; height:36px; color:var(--dim); font-size:23px; }
+  .tts-picker-head strong { font-size:16px; }
+  .tts-picker-list { flex:1; min-height:160px; overflow:auto; display:grid; align-content:start; gap:8px; }
+  .tts-choice { width:100%; min-width:0; padding:12px 13px; display:flex; align-items:center; gap:10px; text-align:left; border:1px solid var(--line); border-radius:13px; background:var(--card); color:var(--text); }
+  .tts-choice.on { border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent); }
+  .tts-choice-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+  .tts-choice-copy strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
+  .tts-choice-copy span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); font-size:11.5px; }
+  .tts-preview { width:34px; height:34px; flex:none; border-radius:50%; background:var(--panel); color:var(--text); }
+  .tts-model-button, .tts-select-voice { width:100%; margin-top:6px; padding:11px 12px; display:flex; align-items:center; gap:8px; text-align:left; border:1px solid var(--line); border-radius:11px; background:var(--card); color:var(--text); }
+  .tts-model-button span, .tts-select-voice span { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .tts-model-button strong, .tts-select-voice strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
+  .tts-model-button small, .tts-select-voice small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); font-size:11px; }
+  .tts-cache-row { display:flex; align-items:center; gap:10px; margin-top:12px; color:var(--dim); font-size:12.5px; }
+  .tts-cache-row span { flex:1; }
+  .tts-cache-row button { padding:7px 10px; border-radius:9px; background:var(--card); color:var(--dim); }
+  .tts-voice-fields { display:block; }
   .ap-note { margin: 14px 2px 0; padding: 12px 13px; border-left: 3px solid var(--accent-soft); border-radius: 0 10px 10px 0; color: var(--dim); background: color-mix(in srgb, var(--card) 68%, transparent); font-size: 13.5px; line-height: 1.7; }
   .mcp-enabled { margin: 14px 0 0; }
   .mcp-enabled input { width: 18px; height: 18px; accent-color: var(--accent); }
@@ -2981,6 +3025,30 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   </div>
   <button class="iconbtn glass" id="dotsBtn" title="更多"><span class="ic" data-i="dots"></span></button>
 </header>
+
+<div id="ttsPlayer" aria-live="polite">
+  <div class="tts-player-main">
+    <button id="ttsPlayerToggle" type="button" title="暂停或继续">Ⅱ</button>
+    <div class="tts-player-copy"><strong id="ttsPlayerTitle">Cloudy</strong><span id="ttsPlayerStatus">正在准备语音…</span></div>
+    <button id="ttsPlayerRate" type="button">1×</button>
+    <button id="ttsPlayerClose" type="button" title="关闭播放器">×</button>
+  </div>
+  <div class="tts-player-progress">
+    <span id="ttsPlayerCurrent">0:00</span>
+    <input id="ttsPlayerSeek" type="range" min="0" max="1000" value="0" aria-label="播放进度">
+    <span id="ttsPlayerDuration">0:00</span>
+  </div>
+</div>
+
+<div id="ttsChoicePicker">
+  <div class="tts-picker-shade"></div>
+  <div class="tts-picker-panel">
+    <div class="tts-picker-head"><button id="ttsPickerClose" type="button">×</button><strong id="ttsPickerTitle">选择</strong><span></span></div>
+    <input class="ap-in" id="ttsPickerSearch" placeholder="搜索名称">
+    <div class="tts-picker-list" id="ttsPickerList"></div>
+    <button class="ap-b" id="ttsPickerManual" type="button">手动输入 ID</button>
+  </div>
+</div>
 
 <div id="log"></div>
 <div id="pet" title="他在这儿"><img id="petImg" src="pet/clawd-idle-follow.svg" alt=""></div>
@@ -5587,12 +5655,93 @@ const sheets = {
   gong: document.getElementById('gongSheet'),
   repo: document.getElementById('repoSheet'),
 };
-const ttsState = { config: null, catalog: {models: [], voices: []}, audio: null };
+const ttsState = {
+  config: null, catalog: {models: [], voices: []}, audio: null, rateIndex: 1,
+  objectUrl: '', controller: null, hideTimer: null, previewAudio: null
+};
+const ttsPicker = document.getElementById('ttsChoicePicker');
+const ttsPickerList = document.getElementById('ttsPickerList');
+const ttsPickerSearch = document.getElementById('ttsPickerSearch');
+let ttsPickerMode = '', ttsPickerCurrent = '', ttsPickerSelect = null;
 
 function ttsProfileId() {
   if (window.crypto && crypto.randomUUID) return 'voice-' + crypto.randomUUID();
   return 'voice-' + Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
+function closeTtsPicker() {
+  ttsPicker.classList.remove('on');
+  if (ttsState.previewAudio) { ttsState.previewAudio.pause(); ttsState.previewAudio = null; }
+}
+document.getElementById('ttsPickerClose').onclick = closeTtsPicker;
+ttsPicker.querySelector('.tts-picker-shade').onclick = closeTtsPicker;
+
+async function fetchTtsCatalog() {
+  const r = await fetch('api/tts/catalog', {cache:'no-store'});
+  const d = await r.json();
+  if (!r.ok || !d.ok) throw new Error(d.detail || '目录没有读到');
+  ttsState.catalog = {models: d.models || [], voices: d.voices || []};
+  return ttsState.catalog;
+}
+function renderTtsPicker() {
+  const q = ttsPickerSearch.value.trim().toLowerCase();
+  const rows = (ttsPickerMode === 'model' ? ttsState.catalog.models : ttsState.catalog.voices).filter(item => {
+    const id = ttsPickerMode === 'model' ? item.model_id : item.voice_id;
+    return !q || (String(item.name || '') + ' ' + String(id || '')).toLowerCase().includes(q);
+  });
+  ttsPickerList.innerHTML = '';
+  if (!rows.length) {
+    ttsPickerList.innerHTML = '<div class="tts-empty">没有找到匹配的选项</div>';
+    return;
+  }
+  rows.forEach(item => {
+    const id = ttsPickerMode === 'model' ? item.model_id : item.voice_id;
+    const row = document.createElement('div');
+    row.className = 'tts-choice' + (id === ttsPickerCurrent ? ' on' : '');
+    const choose = document.createElement('button');
+    choose.type = 'button';
+    choose.className = 'tts-choice-copy';
+    choose.innerHTML = '<strong>' + instructionEsc(item.name || id) + '</strong><span>' + instructionEsc(id) + '</span>';
+    choose.onclick = () => { if (ttsPickerSelect) ttsPickerSelect(item); closeTtsPicker(); };
+    row.appendChild(choose);
+    if (ttsPickerMode === 'voice' && item.preview_url) {
+      const preview = document.createElement('button');
+      preview.type = 'button'; preview.className = 'tts-preview'; preview.textContent = '▶'; preview.title = '试听';
+      preview.onclick = () => {
+        if (ttsState.previewAudio) ttsState.previewAudio.pause();
+        const audio = new Audio(item.preview_url);
+        ttsState.previewAudio = audio;
+        preview.textContent = 'Ⅱ';
+        audio.onended = audio.onerror = () => { preview.textContent = '▶'; if (ttsState.previewAudio === audio) ttsState.previewAudio = null; };
+        audio.play().catch(() => { preview.textContent = '▶'; });
+      };
+      row.appendChild(preview);
+    }
+    ttsPickerList.appendChild(row);
+  });
+}
+async function openTtsPicker(mode, current, onSelect) {
+  ttsPickerMode = mode; ttsPickerCurrent = current || ''; ttsPickerSelect = onSelect;
+  document.getElementById('ttsPickerTitle').textContent = mode === 'model' ? '选择模型' : '选择音色';
+  ttsPickerSearch.value = ''; ttsPicker.classList.add('on');
+  ttsPickerList.innerHTML = '<div class="tts-empty">正在读取 ElevenLabs…</div>';
+  try {
+    if (!(ttsState.catalog[mode === 'model' ? 'models' : 'voices'] || []).length) await fetchTtsCatalog();
+    renderTtsPicker();
+  } catch (e) {
+    ttsPickerList.innerHTML = '<div class="tts-empty">读取失败：' + instructionEsc(e.message) + '<br>请先保存 API Key，或返回点“同步可选项”。</div>';
+  }
+}
+ttsPickerSearch.oninput = renderTtsPicker;
+document.getElementById('ttsPickerManual').onclick = () => {
+  const id = prompt(ttsPickerMode === 'model' ? '输入模型 ID' : '输入音色 ID', ttsPickerCurrent || '');
+  if (!id || !id.trim()) return;
+  const item = ttsPickerMode === 'model'
+    ? {model_id:id.trim(), name:id.trim()}
+    : {voice_id:id.trim(), name:id.trim(), preview_url:''};
+  if (ttsPickerSelect) ttsPickerSelect(item);
+  closeTtsPicker();
+};
+
 async function loadTtsConfig() {
   const r = await fetch('api/tts/config', {cache: 'no-store'});
   const d = await r.json();
@@ -5605,35 +5754,49 @@ async function loadTtsConfig() {
   }
   return d;
 }
-function fillTtsCatalogLists(body) {
-  const models = body.querySelector('#ttsModelOptions');
-  const voices = body.querySelector('#ttsVoiceOptions');
-  if (models) models.innerHTML = (ttsState.catalog.models || []).map(item =>
-    '<option value="' + instructionEsc(item.model_id) + '">' + instructionEsc(item.name || item.model_id) + '</option>'
-  ).join('');
-  if (voices) voices.innerHTML = (ttsState.catalog.voices || []).map(item =>
-    '<option value="' + instructionEsc(item.voice_id) + '">' + instructionEsc(item.name || item.voice_id) + '</option>'
-  ).join('');
+function ttsBytes(bytes) {
+  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0) + ' MB';
+}
+async function loadTtsCacheStats(body) {
+  const label = body.querySelector('#ttsCacheSize');
+  try {
+    const r = await fetch('api/tts/cache', {cache:'no-store'}); const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error();
+    label.textContent = ttsBytes(d.bytes) + ' / ' + ttsBytes(d.limit_bytes) + ' · ' + d.files + ' 条';
+  } catch (_) { label.textContent = '缓存大小未读到'; }
 }
 function renderTtsSettings(cfg) {
   const body = document.getElementById('ttsBody');
   const working = (cfg.voices || []).map(item => ({...item}));
   let activeId = cfg.active_voice_id || (working[0] && working[0].id) || '';
+  let modelId = cfg.model_id || 'eleven_multilingual_v2';
+  let modelName = cfg.model_name || modelId;
+
   body.innerHTML = '<div class="ap-section"><div class="ap-section-title">ElevenLabs</div>'
     + '<label class="ap-lb">名称<input class="ap-in" id="ttsName" value="' + instructionEsc(cfg.name || 'ElevenLabs') + '"></label>'
     + '<label class="ap-lb">API Key<input class="ap-in" id="ttsToken" type="password" placeholder="' + (cfg.has_key ? '已保存；留空则不改' : '输入 ElevenLabs API Key') + '"></label>'
     + '<label class="ap-lb">API 基址<input class="ap-in" id="ttsBase" value="' + instructionEsc(cfg.base_url || 'https://api.elevenlabs.io') + '"></label>'
-    + '<label class="ap-lb">模型<input class="ap-in" id="ttsModel" list="ttsModelOptions" value="' + instructionEsc(cfg.model_id || 'eleven_multilingual_v2') + '"><datalist id="ttsModelOptions"></datalist></label>'
-    + '<div class="tts-catalog-bar"><button class="ap-b" id="ttsCatalog">从 ElevenLabs 获取模型和音色</button></div>'
-    + '<div class="ap-msg" id="ttsCatalogMsg"></div></div>'
+    + '<div class="ap-lb">模型<button class="tts-model-button" id="ttsModelPick" type="button"><span><strong id="ttsModelName"></strong><small id="ttsModelId"></small></span><b>›</b></button></div>'
+    + '<div class="tts-catalog-bar"><button class="ap-b" id="ttsCatalog">同步可选模型和音色</button></div><div class="ap-msg" id="ttsCatalogMsg"></div>'
+    + '<div class="tts-cache-row"><span id="ttsCacheSize">正在读取缓存…</span><button id="ttsCacheClear" type="button">清空缓存</button></div></div>'
     + '<div class="group-label">已保存音色</div><div class="ap-section"><div class="tts-voice-list" id="ttsVoiceList"></div>'
-    + '<datalist id="ttsVoiceOptions"></datalist><div class="ap-btns single"><button class="ap-b" id="ttsAddVoice">＋ 添加音色</button></div></div>'
+    + '<div class="ap-btns single"><button class="ap-b" id="ttsAddVoice">＋ 添加音色</button></div></div>'
     + '<div class="group-label">朗读</div><div class="group">'
     + '<label class="grow"><input type="checkbox" id="ttsAuto" ' + (cfg.auto_play ? 'checked' : '') + '> <span>自动朗读</span><span class="val">回复完整结束后播放</span></label>'
     + '<label class="grow"><span>朗读范围</span><select class="ap-in" id="ttsReadMode"><option value="plain">仅正体</option><option value="plain_and_italic">正体 + 斜体</option></select></label>'
-    + '</div><p class="gnote">代码、链接和 HTML 标签不会朗读。每个音色的语音分别缓存；删除聊天也会删除缓存。</p>'
+    + '</div><p class="gnote">代码、链接和 HTML 标签不会朗读。缓存上限 500 MB，超过后自动删除最久没播放的语音。</p>'
     + '<div class="ap-btns single"><button class="ap-b go" id="ttsSave">保存语音设置</button></div><div class="ap-msg" id="ttsMsg"></div>';
   body.querySelector('#ttsReadMode').value = cfg.read_mode || 'plain';
+
+  const drawModel = () => {
+    body.querySelector('#ttsModelName').textContent = modelName || modelId || '选择模型';
+    body.querySelector('#ttsModelId').textContent = modelId || '尚未选择';
+  };
+  body.querySelector('#ttsModelPick').onclick = () => openTtsPicker('model', modelId, item => {
+    modelId = item.model_id; modelName = item.name || item.model_id; drawModel();
+  });
+  drawModel();
 
   const renderVoices = () => {
     const list = body.querySelector('#ttsVoiceList');
@@ -5641,65 +5804,51 @@ function renderTtsSettings(cfg) {
     if (!working.length) list.innerHTML = '<div class="tts-empty">还没有音色，添加后可保存多套并随时切换。</div>';
     working.forEach((profile, index) => {
       const card = document.createElement('div');
-      card.className = 'tts-voice-card';
-      card.dataset.id = profile.id;
+      card.className = 'tts-voice-card'; card.dataset.id = profile.id;
       card.innerHTML = '<div class="tts-voice-head"><label class="tts-current"><input type="radio" name="ttsActive" value="' + instructionEsc(profile.id) + '" ' + (profile.id === activeId ? 'checked' : '') + '> 当前使用</label>'
         + '<strong>' + instructionEsc(profile.name || ('音色 ' + (index + 1))) + '</strong><button class="tts-remove" type="button" title="删除">×</button></div>'
-        + '<div class="tts-voice-fields"><input class="ap-in tts-profile-name" aria-label="音色名称" placeholder="显示名称" value="' + instructionEsc(profile.name || '') + '">'
-        + '<input class="ap-in tts-profile-voice" aria-label="音色 ID" list="ttsVoiceOptions" placeholder="选择或输入音色 ID" value="' + instructionEsc(profile.voice_id || '') + '"></div>';
+        + '<div class="tts-voice-fields"><label class="ap-lb">我的名称<input class="ap-in tts-profile-name" placeholder="例如：睡前声音" value="' + instructionEsc(profile.name || '') + '"></label>'
+        + '<div class="ap-lb">ElevenLabs 音色<button class="tts-select-voice" type="button"><span><strong>' + instructionEsc(profile.provider_name || '选择音色') + '</strong><small>' + instructionEsc(profile.voice_id || '尚未选择') + '</small></span><b>›</b></button></div></div>';
       card.querySelector('input[type=radio]').onchange = () => { activeId = profile.id; };
+      card.querySelector('.tts-profile-name').oninput = event => {
+        profile.name = event.target.value;
+        card.querySelector('.tts-voice-head strong').textContent = profile.name || ('音色 ' + (index + 1));
+      };
+      card.querySelector('.tts-select-voice').onclick = () => openTtsPicker('voice', profile.voice_id, item => {
+        profile.voice_id = item.voice_id; profile.provider_name = item.name || item.voice_id;
+        if (!profile.name || /^音色 \d+$/.test(profile.name)) profile.name = profile.provider_name;
+        renderVoices();
+      });
       card.querySelector('.tts-remove').onclick = () => {
         const pos = working.findIndex(item => item.id === profile.id);
         if (pos >= 0) working.splice(pos, 1);
         if (activeId === profile.id) activeId = working[0] ? working[0].id : '';
         renderVoices();
       };
-      const nameInput = card.querySelector('.tts-profile-name');
-      const voiceInput = card.querySelector('.tts-profile-voice');
-      nameInput.oninput = () => { profile.name = nameInput.value; };
-      voiceInput.oninput = () => { profile.voice_id = voiceInput.value; };
-      voiceInput.onchange = () => {
-        const found = (ttsState.catalog.voices || []).find(item => item.voice_id === voiceInput.value.trim());
-        if (found && (!nameInput.value.trim() || /^音色 \d+$/.test(nameInput.value.trim()))) {
-          nameInput.value = found.name || nameInput.value;
-          profile.name = nameInput.value;
-        }
-      };
       list.appendChild(card);
     });
-    fillTtsCatalogLists(body);
   };
-  const collectVoices = () => Array.from(body.querySelectorAll('.tts-voice-card')).map(card => ({
-    id: card.dataset.id,
-    name: card.querySelector('.tts-profile-name').value.trim(),
-    voice_id: card.querySelector('.tts-profile-voice').value.trim(),
-  })).filter(item => item.voice_id);
-
   body.querySelector('#ttsAddVoice').onclick = () => {
-    const profile = {id: ttsProfileId(), name: '音色 ' + (working.length + 1), voice_id: ''};
-    working.push(profile);
-    if (!activeId) activeId = profile.id;
-    renderVoices();
+    const profile = {id: ttsProfileId(), name:'音色 ' + (working.length + 1), voice_id:'', provider_name:''};
+    working.push(profile); if (!activeId) activeId = profile.id; renderVoices();
   };
 
   const save = async (showSuccess = true) => {
     const msg = body.querySelector('#ttsMsg');
     const token = body.querySelector('#ttsToken').value;
-    const voices = collectVoices();
+    const voices = working.filter(item => item.voice_id).map(item => ({
+      id:item.id, name:(item.name || item.provider_name || '未命名音色').trim(),
+      voice_id:item.voice_id.trim(), provider_name:(item.provider_name || '').trim()
+    }));
     if (voices.length && !voices.some(item => item.id === activeId)) activeId = voices[0].id;
     const payload = {
-      name: body.querySelector('#ttsName').value,
-      base_url: body.querySelector('#ttsBase').value,
-      model_id: body.querySelector('#ttsModel').value,
-      voices,
-      active_voice_id: activeId,
-      auto_play: body.querySelector('#ttsAuto').checked,
-      read_mode: body.querySelector('#ttsReadMode').value,
+      name:body.querySelector('#ttsName').value, base_url:body.querySelector('#ttsBase').value,
+      model_id:modelId, model_name:modelName, voices, active_voice_id:activeId,
+      auto_play:body.querySelector('#ttsAuto').checked, read_mode:body.querySelector('#ttsReadMode').value,
     };
     if (token) payload.token = token;
     const r = await fetch('api/tts/config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    const d = await r.json();
-    if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
+    const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
     ttsState.config = d;
     if (showSuccess) { msg.textContent = '已保存'; msg.className = 'ap-msg on'; }
     await loadTtsConfig();
@@ -5711,51 +5860,128 @@ function renderTtsSettings(cfg) {
     catch (e) { msg.textContent = '没保存上：' + e.message; msg.className = 'ap-msg on bad'; }
   };
   body.querySelector('#ttsCatalog').onclick = async () => {
-    const button = body.querySelector('#ttsCatalog');
-    const msg = body.querySelector('#ttsCatalogMsg');
-    button.disabled = true; button.textContent = '正在读取…';
+    const button = body.querySelector('#ttsCatalog'), msg = body.querySelector('#ttsCatalogMsg');
+    button.disabled = true; button.textContent = '正在同步…';
     try {
-      await save(false);
-      const r = await fetch('api/tts/catalog', {cache:'no-store'});
-      const d = await r.json();
-      if (!r.ok || !d.ok) throw new Error(d.detail || '目录没有读到');
-      ttsState.catalog = d;
-      fillTtsCatalogLists(body);
-      msg.textContent = '读到 ' + d.models.length + ' 个模型、' + d.voices.length + ' 个音色；输入框现在可以直接选择。';
+      await save(false); const d = await fetchTtsCatalog();
+      const selectedModel = d.models.find(item => item.model_id === modelId);
+      if (selectedModel) { modelName = selectedModel.name || modelId; drawModel(); }
+      msg.textContent = '已同步 ' + d.models.length + ' 个模型、' + d.voices.length + ' 个音色。';
       msg.className = 'ap-msg on';
-    } catch (e) {
-      msg.textContent = '读取失败：' + e.message;
-      msg.className = 'ap-msg on bad';
-    } finally {
-      button.disabled = false; button.textContent = '从 ElevenLabs 获取模型和音色';
-    }
+    } catch (e) { msg.textContent = '同步失败：' + e.message; msg.className = 'ap-msg on bad'; }
+    finally { button.disabled = false; button.textContent = '同步可选模型和音色'; }
   };
-  renderVoices();
+  body.querySelector('#ttsCacheClear').onclick = async () => {
+    if (!confirm('清空所有已生成的语音缓存？之后再次播放会重新生成。')) return;
+    try {
+      const r = await fetch('api/tts/cache', {method:'DELETE'}); const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.detail || '没有清空');
+      await loadTtsCacheStats(body);
+    } catch (e) { note('（缓存没能清空：' + e.message + '）', 'err'); }
+  };
+  renderVoices(); loadTtsCacheStats(body);
 }
 document.getElementById('ttsRow').onclick = async () => {
   sheets.tts.classList.add('open');
   try { renderTtsSettings(await loadTtsConfig()); }
   catch (e) { document.getElementById('ttsBody').innerHTML = '<div class="gnote">语音设置没读到：' + instructionEsc(e.message) + '</div>'; }
 };
+const ttsPlayerEl = document.getElementById('ttsPlayer');
+const ttsPlayerToggle = document.getElementById('ttsPlayerToggle');
+const ttsPlayerSeek = document.getElementById('ttsPlayerSeek');
+const TTS_RATES = [0.98, 1, 1.02];
+
+function ttsClock(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const whole = Math.floor(seconds);
+  return Math.floor(whole / 60) + ':' + String(whole % 60).padStart(2, '0');
+}
+function ttsPlayerLabel() {
+  const cfg = ttsState.config || {};
+  const active = (cfg.voices || []).find(item => item.id === cfg.active_voice_id);
+  return 'Cloudy' + (active && active.name ? ' · ' + active.name : '');
+}
+function stopTtsPlayer(hide = true) {
+  clearTimeout(ttsState.hideTimer);
+  if (ttsState.controller) { ttsState.controller.abort(); ttsState.controller = null; }
+  if (ttsState.audio) { ttsState.audio.pause(); ttsState.audio.src = ''; ttsState.audio = null; }
+  if (ttsState.objectUrl) { URL.revokeObjectURL(ttsState.objectUrl); ttsState.objectUrl = ''; }
+  if (hide) ttsPlayerEl.classList.remove('on');
+}
+document.getElementById('ttsPlayerClose').onclick = () => stopTtsPlayer(true);
+ttsPlayerToggle.onclick = () => {
+  const audio = ttsState.audio;
+  if (!audio) return;
+  if (audio.paused) {
+    audio.play().then(() => {
+      ttsPlayerToggle.textContent = 'Ⅱ';
+      document.getElementById('ttsPlayerStatus').textContent = '正在播放完整回复';
+    }).catch(() => {});
+  } else {
+    audio.pause(); ttsPlayerToggle.textContent = '▶';
+    document.getElementById('ttsPlayerStatus').textContent = '已暂停';
+  }
+};
+document.getElementById('ttsPlayerRate').onclick = () => {
+  ttsState.rateIndex = (ttsState.rateIndex + 1) % TTS_RATES.length;
+  const rate = TTS_RATES[ttsState.rateIndex];
+  if (ttsState.audio) ttsState.audio.playbackRate = rate;
+  document.getElementById('ttsPlayerRate').textContent = rate + '×';
+};
+ttsPlayerSeek.oninput = () => {
+  const audio = ttsState.audio;
+  if (audio && Number.isFinite(audio.duration)) audio.currentTime = audio.duration * Number(ttsPlayerSeek.value) / 1000;
+};
+
 async function playTts(messageId) {
-  if (ttsState.audio) { ttsState.audio.pause(); ttsState.audio = null; }
-  let objectUrl = '';
+  stopTtsPlayer(false);
+  const controller = new AbortController();
+  ttsState.controller = controller;
+  ttsPlayerEl.classList.add('on');
+  document.getElementById('ttsPlayerTitle').textContent = ttsPlayerLabel();
+  document.getElementById('ttsPlayerStatus').textContent = '正在生成或读取缓存…';
+  document.getElementById('ttsPlayerCurrent').textContent = '0:00';
+  document.getElementById('ttsPlayerDuration').textContent = '0:00';
+  ttsPlayerSeek.value = 0; ttsPlayerToggle.textContent = '…'; ttsPlayerToggle.disabled = true;
   try {
-    const r = await fetch('api/tts/messages/' + encodeURIComponent(messageId), {cache:'no-store'});
+    const r = await fetch('api/tts/messages/' + encodeURIComponent(messageId), {cache:'no-store', signal:controller.signal});
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
       throw new Error(d.detail || '语音没能生成');
     }
-    objectUrl = URL.createObjectURL(await r.blob());
+    const objectUrl = URL.createObjectURL(await r.blob());
+    if (controller.signal.aborted) { URL.revokeObjectURL(objectUrl); return; }
+    ttsState.objectUrl = objectUrl; ttsState.controller = null;
     const audio = new Audio(objectUrl);
-    ttsState.audio = audio;
-    audio.onended = audio.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      if (ttsState.audio === audio) ttsState.audio = null;
+    ttsState.audio = audio; audio.playbackRate = TTS_RATES[ttsState.rateIndex];
+    ttsPlayerToggle.disabled = false; ttsPlayerToggle.textContent = 'Ⅱ';
+    document.getElementById('ttsPlayerRate').textContent = TTS_RATES[ttsState.rateIndex] + '×';
+    document.getElementById('ttsPlayerStatus').textContent = '正在播放完整回复';
+    audio.onloadedmetadata = () => {
+      document.getElementById('ttsPlayerDuration').textContent = ttsClock(audio.duration);
+    };
+    audio.ontimeupdate = () => {
+      document.getElementById('ttsPlayerCurrent').textContent = ttsClock(audio.currentTime);
+      if (Number.isFinite(audio.duration) && audio.duration > 0) ttsPlayerSeek.value = Math.round(audio.currentTime / audio.duration * 1000);
+    };
+    audio.onplay = () => { ttsPlayerToggle.textContent = 'Ⅱ'; };
+    audio.onpause = () => { if (!audio.ended) ttsPlayerToggle.textContent = '▶'; };
+    audio.onended = () => {
+      ttsPlayerToggle.textContent = '▶'; ttsPlayerSeek.value = 1000;
+      document.getElementById('ttsPlayerStatus').textContent = '播放完成';
+      ttsState.hideTimer = setTimeout(() => stopTtsPlayer(true), 3000);
+    };
+    audio.onerror = () => {
+      if (ttsState.audio === audio) {
+        document.getElementById('ttsPlayerStatus').textContent = '播放失败';
+        note('（音频没能播放）', 'err');
+      }
     };
     await audio.play();
   } catch (e) {
-    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    if (e.name === 'AbortError') return;
+    ttsState.controller = null; ttsPlayerToggle.disabled = false; ttsPlayerToggle.textContent = '▶';
+    document.getElementById('ttsPlayerStatus').textContent = '播放失败';
     note('（语音没能播放：' + e.message + '）', 'err');
   }
 }

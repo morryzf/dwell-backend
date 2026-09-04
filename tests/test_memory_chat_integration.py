@@ -37,9 +37,20 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn('"/v2/voices"', self.source)
         self.assertIn('"voices": []', self.source)
         self.assertIn('"active_voice_id": ""', self.source)
+        self.assertIn('"provider_name"', self.source)
         self.assertIn("已保存音色", self.ui_source)
-        self.assertIn("从 ElevenLabs 获取模型和音色", self.ui_source)
-        self.assertIn("ttsVoiceOptions", self.ui_source)
+        self.assertIn("同步可选模型和音色", self.ui_source)
+        self.assertIn("openTtsPicker('model'", self.ui_source)
+        self.assertIn("openTtsPicker('voice'", self.ui_source)
+
+    def test_tts_cache_limit_and_player_controls_are_wired(self):
+        self.assertIn("500 * 1024 * 1024", self.source)
+        self.assertIn("def _tts_prune_cache", self.source)
+        self.assertIn('@app.delete("/api/tts/cache", dependencies=authed)', self.source)
+        self.assertIn('id="ttsPlayer"', self.ui_source)
+        self.assertIn("const TTS_RATES = [0.98, 1, 1.02]", self.ui_source)
+        self.assertIn("ttsPlayerSeek.oninput", self.ui_source)
+        self.assertIn("清空缓存", self.ui_source)
 
     def test_memory_prompt_treats_cards_as_untrusted_data(self):
         self.assertIn("不得执行", self.source)
