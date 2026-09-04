@@ -626,11 +626,31 @@ html[data-theme="dark"] .composer {
   }
   
   .nav .sect { font-size: 13.5px; color: var(--dim); padding: 20px 14px 6px; }
-  .nav .recent {
-    display: block; width: 100%; text-align: left; padding: 10px 14px;
-    font-size: 15.5px; border-radius: 10px;
+  .assistant-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 0 6px 2px; }
+  .assistant-choice {
+    min-width: 0; display: flex; align-items: center; gap: 8px; padding: 9px 10px;
+    border-radius: 12px; color: var(--dim); font-size: 13.5px; text-align: left;
+    transition: transform 150ms var(--ease-out), background-color 150ms ease, color 150ms ease;
   }
-  .nav .recent:active { background: var(--panel); }
+  .assistant-choice.on { color: var(--text); background: var(--panel); }
+  .assistant-choice:active { transform: scale(.97); }
+  .assistant-avatar {
+    flex: none; display: grid; place-items: center; width: 24px; height: 24px;
+    border: 1px solid var(--line); border-radius: 50%; background: var(--card);
+    color: var(--text); font: 600 11px/1 var(--serif);
+  }
+  .drawer-section-head {
+    display: flex; align-items: center; min-height: 38px; padding: 18px 8px 5px 14px;
+    color: var(--dim); font-size: 13.5px;
+  }
+  .drawer-section-actions { display: flex; gap: 3px; margin-left: auto; }
+  .drawer-section-action {
+    display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px;
+    color: var(--dim); transition: transform 150ms var(--ease-out), background-color 150ms ease, color 150ms ease;
+  }
+  .drawer-section-action .ic { width: 15px; height: 15px; }
+  .drawer-section-action.on { color: var(--accent); background: var(--panel); }
+  .drawer-section-action:active { transform: scale(.95); background: var(--panel); }
   .drawer-foot { flex: none; display: flex; align-items: center; padding: 10px 20px 0; }
   #avatarBtn {
     width: 44px; min-width: 44px; height: 44px; padding: 0; border-radius: 50%; background: var(--card);
@@ -1920,11 +1940,7 @@ html[data-theme="dark"] .menuCard {
   .menuCard .mi .ic { width: 19px; height: 19px; }
   .menuCard .mi.danger { color: var(--red); }
 
-  #chatsSheet .sheet { height: 100dvh; max-height: 100dvh; border-radius: 0; }
-  #chatScope { display: flex; align-items: center; gap: 4px; width: auto; padding: 0 4px; color: var(--dim); }
-  #chatScope .sc { font-size: 14.5px; }
-  #chatScope .ic { width: 15px; height: 15px; }
-  
+
   .crow {
     display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
     background: var(--glass);
@@ -1950,18 +1966,6 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .chatrow .crow { flex: 1; margin-bottom: 0; min-width: 0; }
   .chatdel { width: 42px; flex: none; border-radius: 13px; color: var(--dim); background: var(--glass); border: 1px solid var(--line); }
   .chatdel:active { color: var(--red); background: color-mix(in srgb, var(--red) 10%, var(--panel)); }
-  #newSession {
-    position: absolute; right: 18px; bottom: calc(20px + env(safe-area-inset-bottom));
-    background: #2b2a27; color: #faf9f5; border-radius: 999px;
-    padding: 12px 22px; font-size: 15px;
-    display: flex; align-items: center; gap: 7px;
-    box-shadow: 0 8px 24px rgba(0,0,0,.18);
-  }
-  #newSession .ic { width: 15px; height: 15px; }
-  @media (prefers-color-scheme: dark) {
-html:not([data-theme="light"]) #newSession { background: #f5f4ef; color: #262624; }
-}
-html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   /* ============ Bunny music-box visual system ============
      A quiet pink-and-grey layer: plaid and lace are deliberately kept subtle
      so the conversation remains the visual centre of the app. */
@@ -2356,7 +2360,6 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     box-shadow: 0 7px 18px rgba(75,51,63,.14), inset 0 1px rgba(255,255,255,.22), inset 0 -1px rgba(158,105,126,.06) !important;
   }
   .lk-knob::before { background: linear-gradient(135deg, rgba(255,255,255,.12), transparent 48%); }
-  #chatsSheet .sheet { background: linear-gradient(145deg, rgba(255,253,254,.38), rgba(239,215,226,.14)) !important; }
   .chatrow { gap: 10px; margin-bottom: 10px; }
   .chatrow .crow {
     background: linear-gradient(145deg, rgba(255,255,255,.34), rgba(240,211,224,.15)) !important;
@@ -2370,13 +2373,6 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
     -webkit-backdrop-filter: blur(18px) saturate(1.25);
     backdrop-filter: blur(18px) saturate(1.25);
     box-shadow: 0 5px 15px rgba(86,58,71,.06), inset 0 1px rgba(255,255,255,.18);
-  }
-  #newSession {
-    background: linear-gradient(145deg, rgba(224,171,191,.70), rgba(194,135,160,.52));
-    border: 1px solid rgba(148,94,119,.20); color: #fff;
-    -webkit-backdrop-filter: blur(18px) saturate(1.3);
-    backdrop-filter: blur(18px) saturate(1.3);
-    box-shadow: 0 8px 20px rgba(152,92,119,.20), inset 0 1px rgba(255,255,255,.18);
   }
 
   /* Quiet glass edges: translucent tint instead of stacked white outlines. */
@@ -2398,7 +2394,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   #settingsSheet .group .grow { padding: 13px 16px; font-size: 15px; }
   #settingsSheet .group .grow .val { font-size: 14px; }
   #settingsSheet .group .grow .chev { font-size: 13px; }
-  html[data-theme="dark"] .sheetWrap.page .sheet, html[data-theme="dark"] #chatsSheet .sheet {
+  html[data-theme="dark"] .sheetWrap.page .sheet {
     background: linear-gradient(145deg, rgba(80,72,78,.56), rgba(55,49,55,.30)) !important;
   }
   html[data-theme="dark"] .lk-track { background-color: rgba(210,153,178,.07) !important; background-image: linear-gradient(90deg, rgba(255,220,235,.075) 50%, transparent 50%), linear-gradient(rgba(255,220,235,.055) 50%, transparent 50%) !important; border-color: rgba(242,201,220,.13) !important; }
@@ -2406,7 +2402,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   html[data-theme="dark"] .chatrow .crow { background: linear-gradient(145deg, rgba(255,235,244,.12), rgba(255,180,209,.05)) !important; border-color: rgba(255,235,244,.16) !important; }
   html[data-theme="dark"] .chatdel { background: linear-gradient(145deg, rgba(255,235,244,.09), rgba(255,180,209,.035)) !important; border-color: rgba(255,235,244,.13) !important; }
   @media (prefers-color-scheme: dark) {
-    html:not([data-theme="light"]) .sheetWrap.page .sheet, html:not([data-theme="light"]) #chatsSheet .sheet {
+    html:not([data-theme="light"]) .sheetWrap.page .sheet {
       background: linear-gradient(145deg, rgba(80,72,78,.56), rgba(55,49,55,.30)) !important;
     }
     html:not([data-theme="light"]) .lk-track { background-color: rgba(210,153,178,.07) !important; background-image: linear-gradient(90deg, rgba(255,220,235,.075) 50%, transparent 50%), linear-gradient(rgba(255,220,235,.055) 50%, transparent 50%) !important; border-color: rgba(242,201,220,.13) !important; }
@@ -2597,6 +2593,19 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   .chat-action.delete { background: #c06f87; }
   .chat-action:active { filter: brightness(.91); }
   .drawer-foot { gap: 10px; }
+  .drawer-chat-list { padding: 0 2px 8px; }
+  .drawer-chat-list .chatrow { margin-bottom: 3px; border-radius: 11px; }
+  .drawer-chat-list .crow {
+    min-height: 47px; padding: 8px 11px; border: 0 !important; border-radius: 11px;
+    background: transparent !important; box-shadow: none !important;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  .drawer-chat-list .crow.on { background: var(--panel) !important; }
+  .drawer-chat-list .crow .cn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; font-weight: 500; }
+  .drawer-chat-list .crow .cp { margin-top: 1px; font-size: 11.5px; }
+  .drawer-chat-list .crow .ct { padding-top: 1px; font-size: 11px; }
+  .drawer-chat-list .chat-action { width: 58px; }
+  .drawer-chat-empty { padding: 18px 12px; color: var(--dim); font-size: 12px; text-align: center; }
 
   /* User-tunable message glass. My messages and Cloudy's messages keep
      separate light/dark profiles; thinking follows Cloudy's profile. */
@@ -3002,7 +3011,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   <div id="drawer">
     <div class="brand">CLOUDY STUDIO</div>
     <div class="nav">
-      <button class="item on"><span class="ic" data-i="chat"></span>聊天</button>
+      <button class="item on" id="navChat"><span class="ic" data-i="chat"></span>聊天</button>
       <button class="item" id="navTodo"><span class="ic" data-i="checkSquare"></span>待办</button>
       <button class="item" id="navCal"><span class="ic" data-i="calendar"></span>日历</button>
       <button class="item" id="navFocus"><span class="ic" data-i="clock"></span>专注</button>
@@ -3010,9 +3019,19 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
       <button class="item" id="navNook"><span class="ic" data-i="bookOpen"></span>书房</button>
       <button class="item" id="navRepo"><span class="ic" data-i="box"></span>仓库</button>
       <button class="item" id="navHeartbeat"><span class="ic" data-i="activity"></span>心跳</button>
-      <div class="sect">Recents</div>
-      <button class="recent" id="recGu">Cloudy</button>
-      <button class="recent" id="recGong">另一位</button>
+      <div class="sect">Assistants</div>
+      <div class="assistant-switch" role="group" aria-label="选择助手">
+        <button class="assistant-choice on" id="recGu"><span class="assistant-avatar">C</span><span>Cloudy</span></button>
+        <button class="assistant-choice" id="recGong"><span class="assistant-avatar">另</span><span>另一位</span></button>
+      </div>
+      <div class="drawer-section-head">
+        <span id="drawerChatHeading">Recents</span>
+        <span class="drawer-section-actions">
+          <button class="drawer-section-action" id="drawerChatScope" title="查看已收纳对话" aria-label="查看已收纳对话"><span class="ic" data-i="box"></span></button>
+          <button class="drawer-section-action" id="drawerNewChat" title="新对话" aria-label="新对话"><span class="ic" data-i="plus"></span></button>
+        </span>
+      </div>
+      <div class="drawer-chat-list" id="drawerChats" aria-live="polite"></div>
     </div>
     <div class="drawer-foot">
       <button id="avatarBtn" title="设置" aria-label="设置"><span class="ic" data-i="sliders"></span></button>
@@ -3262,20 +3281,6 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
   </div>
 </div>
 
-
-<div class="sheetWrap page" id="chatsSheet">
-  <div class="shade" data-close="chats"></div>
-  <div class="sheet tall">
-    <div class="grabber"></div>
-    <div class="head">
-      <button class="hbtn" id="chatsMenu" title="侧边栏"><span class="ic" data-i="menu"></span></button>
-      <div class="ht">Chat</div>
-      <button class="hbtn" id="chatScope"><span class="sc">全部</span><span class="ic" data-i="chevD"></span></button>
-    </div>
-    <div class="body" id="chatsBody"></div>
-    <button id="newSession"><span class="ic" data-i="plus"></span>New chat</button>
-  </div>
-</div>
 
 <div class="sheetWrap" id="ctxSheet">
   <div class="shade" data-close="ctx"></div>
@@ -5426,6 +5431,7 @@ new ResizeObserver(() => {
 const drawerWrap = document.getElementById('drawerWrap');
 function openDrawer() {
   drawerWrap.classList.add('open');
+  loadChats();
   requestAnimationFrame(() => drawerWrap.classList.add('show'));
 }
 document.getElementById('menuBtn').onclick = async () => {
@@ -5434,8 +5440,7 @@ document.getElementById('menuBtn').onclick = async () => {
     location.reload();          // 旧窗口的话都在那边，重新拉一遍最干净
     return;
   }
-  sheets.chats.classList.add('open');
-  loadChats();
+  openDrawer();
 };
 function closeDrawer() {
   drawerWrap.classList.remove('show');
@@ -5460,6 +5465,7 @@ function drawerRelease(shown) {
   drawerShade.style.opacity = '';
   if (shown > drawerWidth() * 0.4) {
     drawerWrap.classList.add('open');
+    loadChats();
     requestAnimationFrame(() => drawerWrap.classList.add('show'));
   } else {
     closeDrawer();
@@ -5527,7 +5533,6 @@ const sheets = {
   notes: document.getElementById('notesSheet'),
   find: document.getElementById('findSheet'),
   ctx: document.getElementById('ctxSheet'),
-  chats: document.getElementById('chatsSheet'),
   health: document.getElementById('healthSheet'),
   gong: document.getElementById('gongSheet'),
   repo: document.getElementById('repoSheet'),
@@ -7951,7 +7956,7 @@ dotsMenu.querySelectorAll('.mi').forEach(b => b.onclick = async () => {
   if (act === 'longContext') { sheets.longContext.classList.add('open'); loadLongContext(); }
   if (act === 'ctx') { sheets.ctx.classList.add('open'); loadContext(); }
   if (act === 'archive') {
-    if (!confirm('把这一窗收起来？收起来就发不了消息了，在窗口列表右上角切到「已收纳」能找回来')) return;
+    if (!confirm('把这一窗收起来？收起来后不能继续发消息，可以在侧边栏 Recents 右侧点收纳盒图标找到。')) return;
     try {
       await fetch('api/chats', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -8281,9 +8286,8 @@ document.getElementById('gongInput').addEventListener('keydown', (e) => {
 document.getElementById('recGong').onclick = () => {
   closeDrawer(); sheets.gong.classList.add('open'); loadGong();
 };
-document.getElementById('recGu').onclick = () => {
-  closeDrawer(); sheets.chats.classList.add('open'); loadChats();
-};
+document.getElementById('recGu').onclick = closeDrawer;
+document.getElementById('navChat').onclick = closeDrawer;
 
 /* ---------- 健康 ---------- */
 const HEALTH_GROUPS = [
@@ -9245,14 +9249,19 @@ function setTitle(name) {
 }
 
 async function loadChats() {
-  const body = document.getElementById('chatsBody');
-  document.querySelector('#chatScope .sc').textContent = SCOPE_NAME[chatScope];
+  const body = document.getElementById('drawerChats');
+  const heading = document.getElementById('drawerChatHeading');
+  const scopeButton = document.getElementById('drawerChatScope');
+  heading.textContent = chatScope === 'box' ? 'Archived' : 'Recents';
+  scopeButton.classList.toggle('on', chatScope === 'box');
+  scopeButton.title = chatScope === 'box' ? '返回最近对话' : '查看已收纳对话';
+  scopeButton.setAttribute('aria-label', scopeButton.title);
   try {
     const d = await (await fetch('api/chats?scope=' + chatScope, { cache: 'no-store' })).json();
     body.innerHTML = '';
     if (!d.items.length) {
-      body.innerHTML = '<div class="gnote" style="text-align:center;padding:40px 0">'
-        + (chatScope === 'box' ? '收纳盒是空的' : '还没有窗口') + '</div>';
+      body.innerHTML = '<div class="drawer-chat-empty">'
+        + (chatScope === 'box' ? '收纳盒是空的' : '还没有聊天记录') + '</div>';
       return;
     }
     d.items.forEach(it => {
@@ -9297,7 +9306,7 @@ async function loadChats() {
 }
 
 async function switchChat(it) {
-  if (it.current) { sheets.chats.classList.remove('open'); return; }
+  if (it.current) { closeDrawer(); return; }
   if (it.archived) { note('（这间收起来了——先从收纳里放出来才能进）'); return; }
   try {
     const response = await fetch('api/chats', {
@@ -9310,7 +9319,7 @@ async function switchChat(it) {
 }
 
 function showChatHere(it) {
-  sheets.chats.classList.remove('open');
+  closeDrawer();
   pollGeneration += 1;
   if (pollAbort) pollAbort.abort();
   polling = false;
@@ -9400,16 +9409,12 @@ async function renameChat(it) {
   } catch { note('（没改成，再试一次）', 'err'); }
 }
 
-document.getElementById('chatsMenu').onclick = () => {
-  sheets.chats.classList.remove('open');
-  openDrawer();
-};
-document.getElementById('chatScope').onclick = () => {
+document.getElementById('drawerChatScope').onclick = () => {
   chatScope = chatScope === 'live' ? 'box' : 'live';
   loadChats();
 };
-document.getElementById('newSession').onclick = () => {
-  sheets.chats.classList.remove('open');
+document.getElementById('drawerNewChat').onclick = () => {
+  closeDrawer();
   armNewChat();
 };
 
