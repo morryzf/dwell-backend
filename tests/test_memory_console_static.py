@@ -44,9 +44,9 @@ class MemoryConsoleStaticTest(unittest.TestCase):
         self.assertIn("s.split('/').pop()", self.html)
         self.assertIn("leaf.replace(/(\\d)\\.(\\d)/g, '$1-$2')", self.html)
 
-    def test_drawer_uses_twenty_pixel_frost(self):
+    def test_drawer_uses_ten_pixel_frost(self):
         self.assertIn(
-            "-webkit-backdrop-filter: blur(20px) saturate(1.45) brightness(1.05);",
+            "-webkit-backdrop-filter: blur(10px) saturate(1.45) brightness(1.05);",
             self.html,
         )
         self.assertNotIn(
