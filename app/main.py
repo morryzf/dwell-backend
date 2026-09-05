@@ -4347,7 +4347,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                         provider["id"], usage_key_hash, current_message_id,
                         request_kind, usage_totals.get("cost") or 0,
                     )
-                except (HTTPException, OSError, ValueError):
+                except Exception:
                     # Usage accounting must never turn a completed reply into an error.
                     pass
         _emit(chat_id, {
