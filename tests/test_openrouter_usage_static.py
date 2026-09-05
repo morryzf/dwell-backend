@@ -31,7 +31,7 @@ class OpenRouterUsageStaticTest(unittest.TestCase):
     def test_usage_fetches_openrouter_endpoint_and_converts_currency(self):
         self.assertIn("fetch('/api/openrouter/usage'", HTML)
         self.assertIn("openRouterUsageCurrency === 'CNY'", HTML)
-        self.assertIn("data.exchange_rate?.rate", HTML)
+        self.assertIn("openRouterUsageData?.exchange_rate?.rate", HTML)
         self.assertIn("localStorage.setItem('dwellUsageCurrency'", HTML)
         self.assertIn("usage_daily", HTML)
         self.assertIn("usage_weekly", HTML)
