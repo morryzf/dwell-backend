@@ -1207,6 +1207,33 @@ def message_get(message_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def message_assistant_turn(message_id: str) -> list[dict]:
+    """Return assistant chat bubbles between the surrounding user messages."""
+    with conn() as cx:
+        selected = cx.execute(
+            "SELECT rowid, chat_id FROM messages WHERE id=?", (message_id,)
+        ).fetchone()
+        if not selected:
+            return []
+        lower = cx.execute(
+            "SELECT COALESCE(MAX(rowid), 0) AS boundary FROM messages "
+            "WHERE chat_id=? AND role='user' AND rowid<?",
+            (selected["chat_id"], selected["rowid"]),
+        ).fetchone()["boundary"]
+        upper_row = cx.execute(
+            "SELECT MIN(rowid) AS boundary FROM messages "
+            "WHERE chat_id=? AND role='user' AND rowid>?",
+            (selected["chat_id"], selected["rowid"]),
+        ).fetchone()
+        upper = upper_row["boundary"] if upper_row and upper_row["boundary"] is not None else selected["rowid"] + 10_000_000_000
+        rows = cx.execute(
+            "SELECT rowid, * FROM messages WHERE chat_id=? AND role='assistant' "
+            "AND origin='chat' AND rowid>? AND rowid<? ORDER BY rowid",
+            (selected["chat_id"], lower, upper),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def message_list(chat_id: str, limit: int = 400, before: int | None = None) -> list:
     with conn() as cx:
         if before:
@@ -2352,6 +2379,10 @@ def message_usage_update(msg_id: str, usage: dict) -> bool:
         value = usage.get(key) if isinstance(usage, dict) else None
         if isinstance(value, (int, float)) and value >= 0:
             clean[key] = round(value, 2) if isinstance(value, float) else value
+    if isinstance(usage, dict):
+        tts_turn_id = usage.get("tts_turn_id")
+        if isinstance(tts_turn_id, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,120}", tts_turn_id):
+            clean["tts_turn_id"] = tts_turn_id
     with conn() as cx:
         cur = cx.execute(
             "UPDATE messages SET usage_json=? WHERE id=?",
