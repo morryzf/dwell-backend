@@ -3109,6 +3109,86 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .focus-credit a { color: inherit; }
   @media (max-width: 390px) { .focus-ring { margin-top: 17px; } .focus-actions { margin-bottom: 15px; } }
 </style>
+
+<style>
+  /* OpenRouter 用量：延续 Dwell 的纸张层次与暖色强调，不引入仪表盘式蓝色。 */
+  #usageSheet .sheet { background: var(--bg); }
+  .usage-body { padding: 8px 20px calc(30px + env(safe-area-inset-bottom)) !important; }
+  .usage-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 4px 18px; }
+  .usage-intro > div:first-child { min-width: 0; display: grid; gap: 3px; }
+  .usage-intro strong { overflow: hidden; color: var(--text); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+  .usage-eyebrow { color: var(--dim); font-size: 10px; font-weight: 700; letter-spacing: .14em; }
+  .usage-currency, .usage-range {
+    display: grid; grid-auto-flow: column; gap: 2px; padding: 2px;
+    border: 1px solid var(--line); border-radius: 12px;
+    background: color-mix(in srgb, var(--panel) 72%, transparent);
+  }
+  .usage-currency button, .usage-range button {
+    min-width: 44px; min-height: 36px; padding: 0 10px; border-radius: 9px;
+    color: var(--dim); font-size: 12px; font-weight: 650;
+    transition: transform 150ms var(--ease-out), background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+  }
+  .usage-currency button[aria-pressed="true"], .usage-range button[aria-pressed="true"] {
+    color: var(--text); background: var(--card);
+    box-shadow: 0 2px 8px rgba(65,45,55,.08), inset 0 1px 0 rgba(255,255,255,.3);
+  }
+  .usage-currency button:active, .usage-range button:active, #usageRefresh:active { transform: scale(.97); }
+  .usage-currency button:disabled { opacity: .38; }
+  .usage-status {
+    display: none; margin: 0 0 12px; padding: 11px 13px; border-radius: 13px;
+    color: var(--dim); background: var(--panel); font-size: 12px; line-height: 1.5;
+  }
+  .usage-status.on { display: block; }
+  .usage-status.bad { color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line)); }
+  .usage-balance {
+    position: relative; overflow: hidden; display: grid; gap: 7px;
+    padding: 24px 22px 22px; border: 1px solid color-mix(in srgb, var(--line) 76%, var(--accent-soft));
+    border-radius: 22px; background:
+      radial-gradient(circle at 92% 12%, color-mix(in srgb, var(--accent-soft) 58%, transparent), transparent 44%),
+      var(--card);
+    box-shadow: 0 14px 36px rgba(62,44,53,.07), inset 0 1px 0 rgba(255,255,255,.25);
+  }
+  .usage-balance span { color: var(--dim); font-size: 13px; }
+  .usage-balance strong { font: 600 clamp(36px, 11vw, 52px)/1.05 var(--serif); letter-spacing: -.025em; }
+  .usage-balance small { color: var(--dim); font-size: 11.5px; line-height: 1.5; }
+  .usage-summary {
+    display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 1px;
+    margin: 12px 0 18px; overflow: hidden; border: 1px solid var(--line); border-radius: 17px; background: var(--line);
+  }
+  .usage-summary > div { min-width: 0; display: grid; gap: 6px; padding: 14px 12px; background: var(--panel); }
+  .usage-summary span { color: var(--dim); font-size: 11px; }
+  .usage-summary strong { overflow: hidden; font: 600 clamp(15px,4.5vw,19px)/1.2 var(--serif); text-overflow: ellipsis; }
+  .usage-chart-card { padding: 18px 16px 15px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel); }
+  .usage-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .usage-chart-head > div:first-child { min-width: 0; display: grid; gap: 4px; }
+  .usage-chart-head strong { font-size: 14px; }
+  .usage-chart-head span { color: var(--dim); font-size: 11px; }
+  .usage-range button { min-width: 38px; min-height: 34px; padding: 0 8px; }
+  .usage-chart {
+    height: 188px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(18px,1fr);
+    align-items: end; gap: clamp(5px,2vw,12px); margin-top: 22px; overflow-x: auto; scrollbar-width: none;
+  }
+  .usage-chart::-webkit-scrollbar { display: none; }
+  .usage-bar { height: 100%; min-width: 18px; display: grid; grid-template-rows: 1fr 20px; gap: 7px; align-items: end; }
+  .usage-bar-track { height: 100%; display: flex; align-items: end; justify-content: center; border-radius: 8px; background: color-mix(in srgb, var(--card) 74%, transparent); }
+  .usage-bar-fill {
+    width: min(74%, 28px); min-height: 3px; border-radius: 8px 8px 4px 4px;
+    background: color-mix(in srgb, var(--accent) 64%, var(--accent-soft));
+  }
+  .usage-bar:last-child .usage-bar-fill { background: var(--accent); }
+  .usage-bar-label { overflow: hidden; color: var(--dim); font-size: 9.5px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+  .usage-chart-empty { align-self: center; grid-column: 1 / -1; color: var(--dim); font-size: 13px; text-align: center; }
+  .usage-note { margin: 13px 5px 0; color: var(--dim); font-size: 11px; line-height: 1.65; }
+  #usageRefresh { transition: transform 150ms var(--ease-out), opacity 150ms ease; }
+  #usageRefresh:disabled { opacity: .35; }
+  @media (max-width: 370px) {
+    .usage-body { padding-left: 15px !important; padding-right: 15px !important; }
+    .usage-summary > div { padding-left: 9px; padding-right: 9px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .usage-currency button, .usage-range button, #usageRefresh { transition: none; }
+  }
+</style>
 </head>
 <body>
 
@@ -3233,6 +3313,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       <button class="item" id="navNook"><span class="ic" data-i="bookOpen"></span>书房</button>
       <button class="item" id="navRepo"><span class="ic" data-i="box"></span>仓库</button>
       <button class="item" id="navHeartbeat"><span class="ic" data-i="activity"></span>心跳</button>
+      <button class="item" id="navUsage"><span class="ic" data-i="trend"></span>用量</button>
       <div class="drawer-section-head">
         <span id="drawerChatHeading">Recents</span>
         <span class="drawer-section-actions">
@@ -3261,7 +3342,6 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       <div class="group-label">账号</div>
       <div class="group">
         <button class="grow static"><span class="ic" data-i="user"></span>用户<span class="val">本机</span></button>
-        <button class="grow" id="usageRow"><span class="ic" data-i="trend"></span>用量<span class="chev">›</span></button>
       </div>
       <div class="group-label">家</div>
       <div class="group">
@@ -3517,16 +3597,45 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   </div>
 </div>
 
-<div class="sheetWrap" id="usageSheet">
+<div class="sheetWrap page" id="usageSheet">
   <div class="shade" data-close="usage"></div>
   <div class="sheet">
     <div class="head">
-      <button class="hbtn" data-close="usage"><span class="ic" data-i="chevL"></span></button>
-      <div class="ht">Usage</div>
-      <div class="hspace"></div>
+      <button class="hbtn" data-close="usage" aria-label="关闭用量"><span class="ic" data-i="x"></span></button>
+      <div class="ht">用量</div>
+      <button class="hbtn" id="usageRefresh" aria-label="刷新用量" title="刷新"><span class="ic" data-i="refresh"></span></button>
     </div>
-    <div class="body" id="usageBody">
-      <div class="ucard"><div class="ureset">正在问账房…</div></div>
+    <div class="body usage-body" id="usageBody">
+      <section class="usage-intro">
+        <div><span class="usage-eyebrow">OPENROUTER</span><strong id="usageProvider">当前聊天</strong></div>
+        <div class="usage-currency" role="group" aria-label="显示货币">
+          <button type="button" data-usage-currency="USD" aria-pressed="true">USD</button>
+          <button type="button" data-usage-currency="CNY" aria-pressed="false">CNY</button>
+        </div>
+      </section>
+      <div id="usageStatus" class="usage-status" role="status" aria-live="polite">正在读取用量…</div>
+      <section class="usage-balance" id="usageBalance" aria-label="账户余额">
+        <span>账户余额</span>
+        <strong id="usageBalanceValue">—</strong>
+        <small id="usageBalanceMeta">正在向 OpenRouter 查询</small>
+      </section>
+      <section class="usage-summary" aria-label="当前密钥用量">
+        <div><span>今日</span><strong id="usageToday">—</strong></div>
+        <div><span>本周</span><strong id="usageWeek">—</strong></div>
+        <div><span>本月</span><strong id="usageMonth">—</strong></div>
+      </section>
+      <section class="usage-chart-card">
+        <div class="usage-chart-head">
+          <div><strong id="usageChartTitle">最近 7 天</strong><span id="usageChartTotal">—</span></div>
+          <div class="usage-range" role="group" aria-label="统计周期">
+            <button type="button" data-usage-range="daily" aria-pressed="true">日</button>
+            <button type="button" data-usage-range="weekly" aria-pressed="false">周</button>
+            <button type="button" data-usage-range="monthly" aria-pressed="false">月</button>
+          </div>
+        </div>
+        <div class="usage-chart" id="usageChart" role="img" aria-label="用量趋势图"></div>
+      </section>
+      <p class="usage-note" id="usageNote">按 UTC 统计 · 金额为 OpenRouter 当前密钥在 Dwell 中的用量</p>
     </div>
   </div>
 </div>
@@ -8527,7 +8636,7 @@ Object.entries(sheets).forEach(([k, wrap]) => {
 });
 
 document.getElementById('avatarBtn').onclick = () => { closeDrawer(); sheets.settings.classList.add('open'); };
-document.getElementById('usageRow').onclick = () => { sheets.usage.classList.add('open'); loadUsage(); };
+document.getElementById('navUsage').onclick = () => { closeDrawer(); sheets.usage.classList.add('open'); loadOpenRouterUsage(); pushState(); };
 
 let systemLogCategory = '';
 let systemLogStatus = '';
@@ -10275,43 +10384,153 @@ async function loadContext() {
   }
 }
 
-async function loadUsage() {
-  const body = document.getElementById('usageBody');
-  try {
-    const d = await (await fetch('api/usage', { cache: 'no-store' })).json();
-    if (!d.ok) throw 0;
-    body.innerHTML = '';
-    (d.sections || []).forEach(sec => {
-      if (sec.label) {
-        const l = document.createElement('div');
-        l.className = 'group-label';
-        l.textContent = sec.label;
-        body.appendChild(l);
-      }
-      const card = document.createElement('div');
-      card.className = 'ucard';
-      sec.bars.forEach((bar, i) => {
-        if (i) { const hr = document.createElement('hr'); hr.className = 'usep'; card.appendChild(hr); }
-        const top = document.createElement('div');
-        top.className = 'urow-top';
-        top.innerHTML = '<span class="un"></span><span class="up"></span>';
-        top.querySelector('.un').textContent = bar.name;
-        top.querySelector('.up').textContent = bar.pct + '% used';
-        const track = document.createElement('div');
-        track.className = 'ubar' + heatOf(bar.pct);
-        track.innerHTML = '<i style="width:' + Math.min(100, bar.pct) + '%"></i>';
-        const reset = document.createElement('div');
-        reset.className = 'ureset';
-        reset.textContent = bar.reset || '';
-        card.append(top, track, reset);
-      });
-      body.appendChild(card);
+let openRouterUsageData = null;
+let openRouterUsageRange = 'daily';
+let openRouterUsageCurrency = 'USD';
+try {
+  openRouterUsageCurrency = localStorage.getItem('dwellUsageCurrency') === 'CNY' ? 'CNY' : 'USD';
+} catch (_) {}
+
+function openRouterUsageNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function openRouterUsageAmount(value) {
+  let amount = openRouterUsageNumber(value);
+  if (openRouterUsageCurrency === 'CNY') amount *= openRouterUsageNumber(openRouterUsageData?.exchange_rate?.rate);
+  const symbol = openRouterUsageCurrency === 'CNY' ? '¥' : '$';
+  const digits = amount > 0 && amount < 1 ? 4 : 2;
+  return symbol + amount.toLocaleString('en-US', {minimumFractionDigits:digits, maximumFractionDigits:digits});
+}
+
+function openRouterUsageLabel(start, range) {
+  const text = String(start || '');
+  if (range === 'monthly') {
+    const parts = text.split('-');
+    return parts.length > 1 ? Number(parts[1]) + '月' : text;
+  }
+  const parts = text.split('-');
+  return parts.length > 2 ? Number(parts[1]) + '/' + Number(parts[2]) : text;
+}
+
+function renderOpenRouterUsage() {
+  const data = openRouterUsageData;
+  if (!data) return;
+  const rateOK = Boolean(data.exchange_rate?.available && openRouterUsageNumber(data.exchange_rate.rate) > 0);
+  if (openRouterUsageCurrency === 'CNY' && !rateOK) openRouterUsageCurrency = 'USD';
+  document.querySelectorAll('[data-usage-currency]').forEach(button => {
+    const selected = button.dataset.usageCurrency === openRouterUsageCurrency;
+    button.setAttribute('aria-pressed', String(selected));
+    button.disabled = button.dataset.usageCurrency === 'CNY' && !rateOK;
+  });
+  document.querySelectorAll('[data-usage-range]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.usageRange === openRouterUsageRange));
+  });
+
+  document.getElementById('usageProvider').textContent =
+    data.provider?.name || data.current_key?.label || 'OpenRouter';
+  const balance = data.balance || {};
+  document.getElementById('usageBalanceValue').textContent =
+    balance.available ? openRouterUsageAmount(balance.remaining) : '暂不可用';
+  document.getElementById('usageBalanceMeta').textContent = balance.available
+    ? '累计充值 ' + openRouterUsageAmount(balance.total_credits) + ' · 已使用 ' + openRouterUsageAmount(balance.total_usage)
+    : (balance.error || 'OpenRouter 暂未返回账户余额');
+
+  const key = data.current_key || {};
+  document.getElementById('usageToday').textContent = key.available ? openRouterUsageAmount(key.usage_daily) : '—';
+  document.getElementById('usageWeek').textContent = key.available ? openRouterUsageAmount(key.usage_weekly) : '—';
+  document.getElementById('usageMonth').textContent = key.available ? openRouterUsageAmount(key.usage_monthly) : '—';
+
+  const labels = {daily:'最近 7 天', weekly:'最近 8 周', monthly:'最近 12 个月'};
+  const points = Array.isArray(data.series?.[openRouterUsageRange]) ? data.series[openRouterUsageRange] : [];
+  const total = points.reduce((sum, point) => sum + openRouterUsageNumber(point.cost), 0);
+  document.getElementById('usageChartTitle').textContent = labels[openRouterUsageRange];
+  document.getElementById('usageChartTotal').textContent = '合计 ' + openRouterUsageAmount(total);
+  const chart = document.getElementById('usageChart');
+  chart.innerHTML = '';
+  chart.setAttribute('aria-label', labels[openRouterUsageRange] + '，合计 ' + openRouterUsageAmount(total));
+  const max = Math.max(...points.map(point => openRouterUsageNumber(point.cost)), 0);
+  if (!points.length) {
+    const empty = document.createElement('div');
+    empty.className = 'usage-chart-empty';
+    empty.textContent = '还没有可展示的用量';
+    chart.appendChild(empty);
+  } else {
+    points.forEach(point => {
+      const cost = openRouterUsageNumber(point.cost);
+      const label = openRouterUsageLabel(point.start, openRouterUsageRange);
+      const bar = document.createElement('div');
+      bar.className = 'usage-bar';
+      bar.setAttribute('role', 'img');
+      bar.setAttribute('aria-label', label + '，' + openRouterUsageAmount(cost));
+      const track = document.createElement('div');
+      track.className = 'usage-bar-track';
+      const fill = document.createElement('i');
+      fill.className = 'usage-bar-fill';
+      fill.style.height = (max > 0 ? Math.max(cost > 0 ? 4 : 2, cost / max * 100) : 2) + '%';
+      track.appendChild(fill);
+      const tick = document.createElement('span');
+      tick.className = 'usage-bar-label';
+      tick.textContent = label;
+      bar.append(track, tick);
+      chart.appendChild(bar);
     });
-    if (!(d.sections || []).length) body.innerHTML = '<div class="ucard"><div class="ureset">账房没给数，等会儿再看</div></div>';
-  } catch {
-    body.innerHTML = '<div class="ucard"><div class="ureset">拿不到额度（可能被频控了），等会儿再点一次</div></div>';
+  }
+
+  const notes = ['按 UTC 统计', '金额为当前 OpenRouter 密钥在 Dwell 中的用量'];
+  if (openRouterUsageCurrency === 'CNY' && rateOK) {
+    notes.push('按 1 USD ≈ ' + openRouterUsageNumber(data.exchange_rate.rate).toFixed(4) + ' CNY 换算');
+    if (data.exchange_rate.stale) notes.push('汇率为最近缓存');
+  }
+  if (data.generated_at) {
+    notes.push('更新于 ' + new Date(Number(data.generated_at) * 1000).toLocaleString('zh-CN', {hour12:false}));
+  }
+  document.getElementById('usageNote').textContent = notes.join(' · ');
+
+  const warnings = [];
+  if (!balance.available && balance.error) warnings.push('余额：' + balance.error);
+  if (!key.available && key.error) warnings.push('当前密钥：' + key.error);
+  const status = document.getElementById('usageStatus');
+  status.textContent = warnings.join('；');
+  status.className = 'usage-status' + (warnings.length ? ' on' : '');
+}
+
+async function loadOpenRouterUsage() {
+  const status = document.getElementById('usageStatus');
+  const refresh = document.getElementById('usageRefresh');
+  refresh.disabled = true;
+  status.textContent = openRouterUsageData ? '正在刷新…' : '正在读取用量…';
+  status.className = 'usage-status on';
+  try {
+    const response = await fetch('/api/openrouter/usage', {cache:'no-store'});
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || '暂时拿不到 OpenRouter 用量');
+    openRouterUsageData = data;
+    renderOpenRouterUsage();
+  } catch (error) {
+    status.textContent = error.message || '暂时拿不到 OpenRouter 用量';
+    status.className = 'usage-status on bad';
+  } finally {
+    refresh.disabled = false;
   }
 }
+
+document.getElementById('usageRefresh').onclick = loadOpenRouterUsage;
+document.querySelectorAll('[data-usage-currency]').forEach(button => {
+  button.onclick = () => {
+    if (button.disabled) return;
+    openRouterUsageCurrency = button.dataset.usageCurrency;
+    try { localStorage.setItem('dwellUsageCurrency', openRouterUsageCurrency); } catch (_) {}
+    renderOpenRouterUsage();
+  };
+});
+document.querySelectorAll('[data-usage-range]').forEach(button => {
+  button.onclick = () => {
+    openRouterUsageRange = button.dataset.usageRange;
+    renderOpenRouterUsage();
+  };
+});
 
 /* ---------- 选模型：main / effort / more 三个子页 ---------- */
 const MODELS_MAIN = [
@@ -10935,7 +11154,7 @@ document.addEventListener('touchend', (e) => {
 (() => {
   const NAV = { todo: 'navTodo', cal: 'navCal', wall: 'navWall', news: 'navNews',
                 nook: 'navNook',
-                health: 'navHealth', repo: 'navRepo', heartbeat: 'navHeartbeat' };
+                health: 'navHealth', repo: 'navRepo', heartbeat: 'navHeartbeat', usage: 'navUsage' };
   let re = '';
   try { re = sessionStorage.getItem('reopenSheet') || ''; sessionStorage.removeItem('reopenSheet'); }
   catch (e) {}
