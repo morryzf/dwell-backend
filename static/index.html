@@ -788,15 +788,32 @@ html[data-theme="dark"] .composer {
   .ap-msg { display: none; margin-top: 12px; padding: 11px 12px; border-radius: 11px; color: var(--green); background: var(--sage-track); font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
   .ap-msg.on { display: block; }
   .ap-msg.bad { color: var(--red); background: var(--red-track); }
-  .tts-catalog-bar { display:flex; align-items:center; gap:10px; margin-top:14px; }
-  .tts-catalog-bar .ap-b { flex:1; }
-  .tts-voice-list { display:grid; gap:10px; margin-top:10px; }
-  .tts-voice-card { padding:13px; border:1px solid var(--line); border-radius:14px; background:var(--card); }
+  .tts-settings input[type="checkbox"],
+  .tts-settings input[type="radio"] { width:18px; height:18px; accent-color:var(--accent); }
+  .tts-provider-card { margin-top:0; padding:0; overflow:hidden; }
+  .tts-service-summary { min-height:68px; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+  .tts-service-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; line-height:1.35; }
+  .tts-service-copy strong { font-size:15px; }
+  .tts-service-copy span { color:var(--dim); font-size:12.5px; }
+  .tts-service-copy span::before { content:""; display:inline-block; width:7px; height:7px; margin-right:7px; border-radius:50%; background:var(--accent); vertical-align:1px; }
+  .tts-service-copy span.needs-key::before { background:var(--dim); }
+  .tts-edit-connection { flex:none; min-height:34px; padding:6px 11px; border-radius:10px; background:var(--card); color:var(--text); font-size:12.5px; font-weight:600; transition:transform 140ms cubic-bezier(.23,1,.32,1), background-color 160ms ease; }
+  .tts-edit-connection:active { transform:scale(.97); }
+  .tts-connection { padding:2px 16px 16px; border-top:1px solid var(--line); }
+  .tts-connection[hidden] { display:none; }
+  .tts-model-field { padding:0 16px 16px; border-top:1px solid var(--line); }
+  .tts-connection:not([hidden]) + .tts-model-field { border-top:0; }
+  .tts-catalog-bar { display:flex; align-items:center; gap:10px; margin-top:11px; }
+  .tts-catalog-bar .ap-b { flex:1; min-height:41px; color:var(--dim); font-size:13px; }
+  .tts-voice-list { display:grid; gap:10px; }
+  .tts-voice-card { padding:13px; border:1px solid var(--line); border-radius:14px; background:var(--card); transition:border-color 160ms ease, background-color 160ms ease; }
+  .tts-voice-card:has(input[type="radio"]:checked) { border-color:color-mix(in srgb, var(--accent) 72%, var(--line)); background:color-mix(in srgb, var(--accent) 7%, var(--card)); }
   .tts-voice-head { display:flex; align-items:center; gap:9px; margin-bottom:10px; }
   .tts-voice-head strong { flex:1; font-size:14px; }
   .tts-current { display:flex; align-items:center; gap:6px; color:var(--dim); font-size:12.5px; }
-  .tts-remove { width:32px; height:32px; border-radius:10px; color:var(--dim); font-size:20px; }
-  .tts-voice-fields { display:grid; grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); gap:9px; }
+  .tts-remove { width:32px; height:32px; border-radius:10px; color:var(--dim); font-size:20px; transition:transform 140ms cubic-bezier(.23,1,.32,1), color 160ms ease; }
+  .tts-remove:active { transform:scale(.97); color:var(--red); }
+  .tts-voice-fields { display:block; }
   .tts-voice-fields .ap-in { min-width:0; }
   .tts-empty { padding:14px 4px 4px; color:var(--dim); font-size:13px; text-align:center; }
   #ttsPlayer {
@@ -805,7 +822,7 @@ html[data-theme="dark"] .composer {
     border:1px solid var(--line); border-radius:17px; background:color-mix(in srgb, var(--card) 88%, transparent);
     box-shadow:0 12px 34px rgba(0,0,0,.2); backdrop-filter:blur(18px) saturate(1.35);
     -webkit-backdrop-filter:blur(18px) saturate(1.35); opacity:0; pointer-events:none;
-    transition:opacity .18s ease, transform .2s ease;
+    transition:opacity .18s ease, transform .2s cubic-bezier(.23,1,.32,1);
   }
   #ttsPlayer.on { opacity:1; transform:translate(-50%, 0); pointer-events:auto; }
   .tts-player-main { display:flex; align-items:center; gap:9px; }
@@ -830,19 +847,20 @@ html[data-theme="dark"] .composer {
   .tts-picker-head strong { font-size:16px; }
   .tts-picker-list { flex:1; min-height:160px; overflow:auto; display:grid; align-content:start; gap:8px; }
   .tts-choice { width:100%; min-width:0; padding:12px 13px; display:flex; align-items:center; gap:10px; text-align:left; border:1px solid var(--line); border-radius:13px; background:var(--card); color:var(--text); }
-  .tts-choice.on { border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent); }
+  .tts-choice.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 7%, var(--card)); box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent); }
   .tts-choice-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
   .tts-choice-copy strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
   .tts-choice-copy span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); font-size:11.5px; }
   .tts-preview { width:34px; height:34px; flex:none; border-radius:50%; background:var(--panel); color:var(--text); }
-  .tts-model-button, .tts-select-voice { width:100%; margin-top:6px; padding:11px 12px; display:flex; align-items:center; gap:8px; text-align:left; border:1px solid var(--line); border-radius:11px; background:var(--card); color:var(--text); }
+  .tts-model-button, .tts-select-voice { width:100%; margin-top:6px; padding:11px 12px; display:flex; align-items:center; gap:8px; text-align:left; border:1px solid var(--line); border-radius:11px; background:var(--card); color:var(--text); transition:transform 140ms cubic-bezier(.23,1,.32,1), border-color 160ms ease; }
+  .tts-model-button:active, .tts-select-voice:active, .tts-storage-clear:active { transform:scale(.97); }
   .tts-model-button span, .tts-select-voice span { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
   .tts-model-button strong, .tts-select-voice strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
   .tts-model-button small, .tts-select-voice small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); font-size:11px; }
-  .tts-cache-row { display:flex; align-items:center; gap:10px; margin-top:12px; color:var(--dim); font-size:12.5px; }
-  .tts-cache-row span { flex:1; }
-  .tts-cache-row button { padding:7px 10px; border-radius:9px; background:var(--card); color:var(--dim); }
-  .tts-voice-fields { display:block; }
+  .tts-storage .grow { min-height:68px; }
+  .tts-storage-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .tts-storage-copy small { color:var(--dim); font-size:12px; line-height:1.35; }
+  .tts-storage-clear { flex:none; min-height:34px; padding:6px 11px; border-radius:10px; background:var(--card); color:var(--red); font-size:12.5px; font-weight:600; transition:transform 140ms cubic-bezier(.23,1,.32,1); }
   .ap-note { margin: 14px 2px 0; padding: 12px 13px; border-left: 3px solid var(--accent-soft); border-radius: 0 10px 10px 0; color: var(--dim); background: color-mix(in srgb, var(--card) 68%, transparent); font-size: 13.5px; line-height: 1.7; }
   .mcp-enabled { margin: 14px 0 0; }
   .mcp-enabled input { width: 18px; height: 18px; accent-color: var(--accent); }
@@ -5785,21 +5803,35 @@ function renderTtsSettings(cfg) {
   let modelId = cfg.model_id || 'eleven_multilingual_v2';
   let modelName = cfg.model_name || modelId;
 
-  body.innerHTML = '<div class="ap-section"><div class="ap-section-title">ElevenLabs</div>'
+  body.innerHTML = '<div class="tts-settings">'
+    + '<div class="group-label">语音服务</div><div class="ap-section tts-provider-card">'
+    + '<div class="tts-service-summary"><div class="tts-service-copy"><strong>ElevenLabs</strong><span class="' + (cfg.has_key ? '' : 'needs-key') + '">' + (cfg.has_key ? '已连接' : '需要 API Key') + '</span></div>'
+    + '<button class="tts-edit-connection" id="ttsConnectionToggle" type="button" aria-expanded="' + (cfg.has_key ? 'false' : 'true') + '">' + (cfg.has_key ? '编辑连接' : '开始设置') + '</button></div>'
+    + '<div class="tts-connection" id="ttsConnection" ' + (cfg.has_key ? 'hidden' : '') + '>'
     + '<label class="ap-lb">名称<input class="ap-in" id="ttsName" value="' + instructionEsc(cfg.name || 'ElevenLabs') + '"></label>'
-    + '<label class="ap-lb">API Key<input class="ap-in" id="ttsToken" type="password" placeholder="' + (cfg.has_key ? '已保存；留空则不改' : '输入 ElevenLabs API Key') + '"></label>'
-    + '<label class="ap-lb">API 基址<input class="ap-in" id="ttsBase" value="' + instructionEsc(cfg.base_url || 'https://api.elevenlabs.io') + '"></label>'
-    + '<div class="ap-lb">模型<button class="tts-model-button" id="ttsModelPick" type="button"><span><strong id="ttsModelName"></strong><small id="ttsModelId"></small></span><b>›</b></button></div>'
-    + '<div class="tts-catalog-bar"><button class="ap-b" id="ttsCatalog">同步可选模型和音色</button></div><div class="ap-msg" id="ttsCatalogMsg"></div>'
-    + '<div class="tts-cache-row"><span id="ttsCacheSize">正在读取缓存…</span><button id="ttsCacheClear" type="button">清空缓存</button></div></div>'
-    + '<div class="group-label">已保存音色</div><div class="ap-section"><div class="tts-voice-list" id="ttsVoiceList"></div>'
+    + '<label class="ap-lb">API Key<input class="ap-in" id="ttsToken" type="password" autocomplete="off" placeholder="' + (cfg.has_key ? '已保存；留空则不改' : '输入 ElevenLabs API Key') + '"></label>'
+    + '<label class="ap-lb">API 基址<input class="ap-in" id="ttsBase" inputmode="url" value="' + instructionEsc(cfg.base_url || 'https://api.elevenlabs.io') + '"></label></div>'
+    + '<div class="tts-model-field"><div class="ap-lb">语音模型<button class="tts-model-button" id="ttsModelPick" type="button"><span><strong id="ttsModelName"></strong><small id="ttsModelId"></small></span><b>›</b></button></div>'
+    + '<div class="tts-catalog-bar"><button class="ap-b" id="ttsCatalog">同步模型与音色</button></div><div class="ap-msg" id="ttsCatalogMsg"></div></div></div>'
+    + '<div class="group-label">我的音色</div><div class="ap-section"><div class="tts-voice-list" id="ttsVoiceList"></div>'
     + '<div class="ap-btns single"><button class="ap-b" id="ttsAddVoice">＋ 添加音色</button></div></div>'
     + '<div class="group-label">朗读</div><div class="group">'
-    + '<label class="grow"><input type="checkbox" id="ttsAuto" ' + (cfg.auto_play ? 'checked' : '') + '> <span>自动朗读</span><span class="val">回复完整结束后播放</span></label>'
-    + '<label class="grow"><span>朗读范围</span><select class="ap-in" id="ttsReadMode"><option value="plain">仅正体</option><option value="plain_and_italic">正体 + 斜体</option></select></label>'
-    + '</div><p class="gnote">代码、链接和 HTML 标签不会朗读。缓存上限 500 MB，超过后自动删除最久没播放的语音。</p>'
-    + '<div class="ap-btns single"><button class="ap-b go" id="ttsSave">保存语音设置</button></div><div class="ap-msg" id="ttsMsg"></div>';
+    + '<label class="grow"><input type="checkbox" id="ttsAuto" ' + (cfg.auto_play ? 'checked' : '') + '> <span>自动朗读</span><span class="val">完整回复后播放</span></label>'
+    + '<label class="grow"><span>朗读范围</span><select class="ap-in" id="ttsReadMode"><option value="plain">仅正体</option><option value="plain_and_italic">正体 + 斜体</option></select></label></div>'
+    + '<p class="gnote">代码、链接和 HTML 标签不会朗读。</p>'
+    + '<div class="group-label">存储</div><div class="group tts-storage"><div class="grow static"><div class="tts-storage-copy"><span>语音缓存</span><small id="ttsCacheSize">正在读取缓存…</small></div>'
+    + '<button class="tts-storage-clear" id="ttsCacheClear" type="button">清空</button></div></div>'
+    + '<p class="gnote">缓存最多占用 500 MB，空间不足时会自动移除最久未播放的语音。</p>'
+    + '<div class="ap-btns single"><button class="ap-b go" id="ttsSave">保存语音设置</button></div><div class="ap-msg" id="ttsMsg"></div></div>';
   body.querySelector('#ttsReadMode').value = cfg.read_mode || 'plain';
+  const connection = body.querySelector('#ttsConnection');
+  const connectionToggle = body.querySelector('#ttsConnectionToggle');
+  connectionToggle.onclick = () => {
+    const willOpen = connection.hidden;
+    connection.hidden = !willOpen;
+    connectionToggle.setAttribute('aria-expanded', String(willOpen));
+    connectionToggle.textContent = willOpen ? '收起' : '编辑连接';
+  };
 
   const drawModel = () => {
     body.querySelector('#ttsModelName').textContent = modelName || modelId || '选择模型';
@@ -5882,7 +5914,7 @@ function renderTtsSettings(cfg) {
       msg.textContent = '已同步 ' + d.models.length + ' 个模型、' + d.voices.length + ' 个音色。';
       msg.className = 'ap-msg on';
     } catch (e) { msg.textContent = '同步失败：' + e.message; msg.className = 'ap-msg on bad'; }
-    finally { button.disabled = false; button.textContent = '同步可选模型和音色'; }
+    finally { button.disabled = false; button.textContent = '同步模型与音色'; }
   };
   body.querySelector('#ttsCacheClear').onclick = async () => {
     if (!confirm('清空所有已生成的语音缓存？之后再次播放会重新生成。')) return;
