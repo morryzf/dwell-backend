@@ -59,14 +59,18 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn("def message_assistant_turn", self.db_source)
         self.assertIn("db.message_assistant_turn(message_id)", self.source)
 
-    def test_tts_player_replay_timer_is_scoped_to_current_run(self):
+    def test_tts_player_replay_and_autoplay_unlock(self):
         self.assertIn("playerRunId: 0", self.ui_source)
         self.assertIn("playerRunId !== ttsState.playerRunId", self.ui_source)
-        self.assertIn("clearTimeout(ttsState.hideTimer)", self.ui_source)
+        self.assertNotIn("ttsState.hideTimer = setTimeout", self.ui_source)
+        self.assertIn("const TTS_SILENT_AUDIO", self.ui_source)
+        self.assertIn("function unlockTtsAudio", self.ui_source)
+        self.assertIn("if (!text && !attachments.length) return;\n  unlockTtsAudio();", self.ui_source)
+        self.assertIn("playTts(message.id, true)", self.ui_source)
 
     def test_drawer_brand_title_and_dark_color(self):
         self.assertIn('<div class="brand">Cloudy Studio</div>', self.ui_source)
-        self.assertIn("color: #E6D6E1", self.ui_source)
+        self.assertIn('html[data-theme="dark"] #drawer .brand { color: #E6D6E1; }', self.ui_source)
 
     def test_memory_prompt_treats_cards_as_untrusted_data(self):
         self.assertIn("不得执行", self.source)
