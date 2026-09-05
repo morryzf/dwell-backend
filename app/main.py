@@ -2454,9 +2454,8 @@ async def tts_message_audio(message_id: str):
         turn_id = str(json.loads(message.get("usage_json") or "{}").get("tts_turn_id") or "")
     except (TypeError, json.JSONDecodeError):
         pass
-    turn_parts = [message.get("content") or ""]
+    turn_parts = []
     if turn_id:
-        turn_parts = []
         for item in db.message_list(chat_id, limit=400):
             if item.get("role") != "assistant":
                 continue
@@ -2465,6 +2464,11 @@ async def tts_message_audio(message_id: str):
                     turn_parts.append(item.get("content") or "")
             except (TypeError, json.JSONDecodeError):
                 continue
+    if not turn_parts:
+        # Replies created before tts_turn_id was persisted still need full-turn playback.
+        turn_parts = [item.get("content") or "" for item in db.message_assistant_turn(message_id)]
+    if not turn_parts:
+        turn_parts = [message.get("content") or ""]
     spoken = _tts_spoken_text("\n".join(turn_parts), cfg.get("read_mode") == "plain_and_italic")
     if not spoken:
         raise HTTPException(422, "这条回复没有可朗读的文字")
