@@ -32,6 +32,7 @@ from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_
 from app.web_tools import WebToolError, web_fetch, web_search
 from app.kelivo_import import KelivoImportError, import_conversation as kelivo_import_conversation, preview as kelivo_preview
 from app.memory_retrieval import select_memory_cards
+from app.openrouter_usage import build_utc_cost_series, fetch_openrouter_snapshot, parse_usd_cny_rate
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
@@ -40,6 +41,8 @@ TTS_CONFIG_KEY = "tts_config_v1"
 TTS_CACHE_DIR = Path(os.environ.get("DWELL_TTS_CACHE_DIR", "/data/tts-cache"))
 TTS_MAX_TEXT_CHARS = 4500
 TTS_CACHE_MAX_BYTES = int(os.environ.get("DWELL_TTS_CACHE_MAX_BYTES", str(500 * 1024 * 1024)))
+OPENROUTER_FX_SETTING_KEY = "openrouter_usd_cny_rate_v1"
+OPENROUTER_FX_TTL_SECONDS = 24 * 60 * 60
 
 # 正在跑的 AI 回复任务。key=chat_id，value=asyncio.Task
 _running_tasks: dict[str, asyncio.Task] = {}
@@ -2159,6 +2162,89 @@ async def providers_upsert(request: Request):
     return {"ok": True, "provider": _provider_public(saved), "has_key": bool(saved.get("api_key_box"))}
 
 
+def _openrouter_credentials(provider: dict) -> tuple[str, str]:
+    if not provider.get("api_key_box"):
+        raise HTTPException(409, "当前 OpenRouter 还没有保存 API Key")
+    try:
+        token = provider_secrets.decrypt_api_key(provider["api_key_box"])
+    except provider_secrets.SecretConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return token, hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def _usd_cny_exchange_rate() -> dict:
+    now = int(time.time())
+    cached = {}
+    try:
+        cached = json.loads(db.setting_get(OPENROUTER_FX_SETTING_KEY) or "{}")
+    except json.JSONDecodeError:
+        cached = {}
+    cached_rate = cached.get("rate")
+    cached_at = int(cached.get("fetched_at") or 0)
+    if isinstance(cached_rate, (int, float)) and cached_rate > 0 and now - cached_at < OPENROUTER_FX_TTL_SECONDS:
+        return {**cached, "available": True, "stale": False}
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=6.0)) as client:
+            response = await client.get("https://api.frankfurter.dev/v2/rate/USD/CNY")
+        response.raise_for_status()
+        rate, source_date = parse_usd_cny_rate(response.json())
+        if rate is None:
+            raise ValueError("汇率响应缺少 rate")
+        fresh = {
+            "available": True,
+            "base": "USD",
+            "quote": "CNY",
+            "rate": round(rate, 6),
+            "source_date": source_date,
+            "fetched_at": now,
+            "stale": False,
+        }
+        db.setting_set(OPENROUTER_FX_SETTING_KEY, json.dumps(fresh, separators=(",", ":")))
+        return fresh
+    except (httpx.HTTPError, ValueError):
+        if isinstance(cached_rate, (int, float)) and cached_rate > 0:
+            return {**cached, "available": True, "stale": True}
+        return {
+            "available": False, "base": "USD", "quote": "CNY",
+            "rate": None, "source_date": "", "fetched_at": 0, "stale": False,
+        }
+
+
+@app.get("/api/openrouter/usage", dependencies=authed)
+async def openrouter_usage_get():
+    chat_id = _get_or_create_current_chat()
+    selection = db.chat_model_get(chat_id)
+    provider = db.provider_get(selection.get("provider_id") or "")
+    if not provider or not provider.get("enabled"):
+        raise HTTPException(409, "当前聊天没有可用的模型供应商")
+    if provider.get("provider_type") != "openrouter":
+        raise HTTPException(409, "当前聊天使用的不是 OpenRouter")
+    token, key_hash = _openrouter_credentials(provider)
+
+    # 用户确认这个供应商的 Key 从未更换；旧消息只导入一次。以后换 Key 时，
+    # provider 级标记会阻止旧账被重新归到新 Key。
+    backfill_marker = "openrouter_usage_backfill_v1:" + provider["id"]
+    if not db.setting_get(backfill_marker):
+        db.provider_usage_backfill_legacy(provider["id"], key_hash)
+        db.setting_set(backfill_marker, key_hash)
+
+    snapshot, exchange_rate = await asyncio.gather(
+        fetch_openrouter_snapshot(provider["base_url"], token),
+        _usd_cny_exchange_rate(),
+    )
+    events = db.provider_usage_events(provider["id"], key_hash)
+    return {
+        "ok": True,
+        "provider": {"id": provider["id"], "name": provider["name"]},
+        "balance": snapshot["balance"],
+        "current_key": snapshot["key"],
+        "series": build_utc_cost_series(events),
+        "exchange_rate": exchange_rate,
+        "generated_at": int(time.time()),
+    }
+
+
 @app.delete("/api/providers/{provider_id}", dependencies=authed)
 async def providers_delete(provider_id: str):
     if db.provider_in_use(provider_id):
@@ -4254,6 +4340,16 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             # Split replies persist as several messages; this id lets voice join one full reply.
             usage_totals["tts_turn_id"] = tts_turn_id
             db.message_usage_update(current_message_id, usage_totals)
+            if provider.get("provider_type") == "openrouter":
+                try:
+                    _, usage_key_hash = _openrouter_credentials(provider)
+                    db.provider_usage_event_add(
+                        provider["id"], usage_key_hash, current_message_id,
+                        request_kind, usage_totals.get("cost") or 0,
+                    )
+                except Exception:
+                    # Usage accounting must never turn a completed reply into an error.
+                    pass
         _emit(chat_id, {
             "type": "assistant",
             "message": {"content": assistant_parts(full)}
