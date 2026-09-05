@@ -613,6 +613,10 @@ html[data-theme="dark"] .composer {
     line-height: .95; padding: 4px 24px 12px; letter-spacing: 0;
     text-align: center; color: #5A4454;
   }
+  html[data-theme="dark"] #drawer .brand { color: #E6D6E1; }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) #drawer .brand { color: #E6D6E1; }
+  }
   .assistant-switch {
     flex: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 2px; margin: 0 18px 12px; padding: 2px;
@@ -4065,12 +4069,13 @@ function attachMessageActions(el, message) {
   addAction('pen', '编辑消息', () => { close(); openMessageEditor(message); });
   if (message.role === 'assistant') {
     addAction('refresh', '重新生成', async () => {
+      unlockTtsAudio();
       close();
       if (!confirm('重新生成这条回复？当前回复会保留在版本记录中。')) return;
       try { const r = await fetch('api/messages/' + encodeURIComponent(message.id) + '/regenerate',{method:'POST'}); const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.detail||'没有开始生成'); }
       catch (e) { note('（没能重新生成：' + e.message + '）', 'err'); }
     });
-    addAction('volume', '播放整轮回复', async () => { close(); await playTts(message.id); });
+    addAction('volume', '播放整轮回复', async () => { close(); await playTts(message.id, true); });
   }
   addAction('trash', '删除消息', async () => {
     close();
@@ -5369,8 +5374,10 @@ function deviceTimeContext() {
 
 async function send() {
   if (guBusy && !((box.value || '').trim() || attachments.length)) return stopGu();
+  unlockTtsAudio();
   const text = box.value.trim();
   if (!text && !attachments.length) return;
+  unlockTtsAudio();
   const wasBusy = guBusy;
   if (wasBusy) { try { fetch('api/stop', { method: 'POST' }); } catch (e) {} }
   const outgoingAttachments = attachments;
@@ -5661,7 +5668,8 @@ const sheets = {
 };
 const ttsState = {
   config: null, catalog: {models: [], voices: []}, audio: null, rateIndex: 1,
-  objectUrl: '', controller: null, hideTimer: null, previewAudio: null, playerRunId: 0
+  objectUrl: '', controller: null, hideTimer: null, previewAudio: null, playerRunId: 0,
+  audioUnlocked: false
 };
 const ttsPicker = document.getElementById('ttsChoicePicker');
 const ttsPickerList = document.getElementById('ttsPickerList');
@@ -5860,6 +5868,7 @@ function renderTtsSettings(cfg) {
   };
   body.querySelector('#ttsSave').onclick = async () => {
     const msg = body.querySelector('#ttsMsg');
+    if (body.querySelector('#ttsAuto').checked) unlockTtsAudio();
     try { await save(true); }
     catch (e) { msg.textContent = '没保存上：' + e.message; msg.className = 'ap-msg on bad'; }
   };
@@ -5894,6 +5903,24 @@ const ttsPlayerEl = document.getElementById('ttsPlayer');
 const ttsPlayerToggle = document.getElementById('ttsPlayerToggle');
 const ttsPlayerSeek = document.getElementById('ttsPlayerSeek');
 const TTS_RATES = [0.98, 1, 1.02];
+const TTS_SILENT_AUDIO = 'data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YRAAAACAgICAgICAgICAgICA';
+
+function unlockTtsAudio() {
+  if (ttsState.audioUnlocked) return;
+  const audio = ttsState.audio || new Audio();
+  ttsState.audio = audio;
+  audio.onloadedmetadata = null; audio.ontimeupdate = null; audio.onplay = null;
+  audio.onpause = null; audio.onended = null; audio.onerror = null;
+  audio.volume = 1; audio.src = TTS_SILENT_AUDIO;
+  const attempt = audio.play();
+  if (attempt && attempt.then) {
+    attempt.then(() => {
+      audio.volume = 1; ttsState.audioUnlocked = true;
+    }).catch(() => { audio.volume = 1; });
+  } else {
+    audio.volume = 1; ttsState.audioUnlocked = true;
+  }
+}
 
 function ttsClock(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -5913,7 +5940,7 @@ function stopTtsPlayer(hide = true) {
     ttsState.audio.onloadedmetadata = null; ttsState.audio.ontimeupdate = null;
     ttsState.audio.onplay = null; ttsState.audio.onpause = null;
     ttsState.audio.onended = null; ttsState.audio.onerror = null;
-    ttsState.audio.pause(); ttsState.audio.src = ''; ttsState.audio = null;
+    ttsState.audio.pause(); ttsState.audio.removeAttribute('src');
   }
   if (ttsState.objectUrl) { URL.revokeObjectURL(ttsState.objectUrl); ttsState.objectUrl = ''; }
   if (hide) ttsPlayerEl.classList.remove('on');
@@ -5923,6 +5950,7 @@ ttsPlayerToggle.onclick = () => {
   const audio = ttsState.audio;
   if (!audio) return;
   if (audio.paused) {
+    if (audio.ended) audio.currentTime = 0;
     audio.play().then(() => {
       ttsPlayerToggle.textContent = 'Ⅱ';
       document.getElementById('ttsPlayerStatus').textContent = '正在播放完整回复';
@@ -5943,8 +5971,9 @@ ttsPlayerSeek.oninput = () => {
   if (audio && Number.isFinite(audio.duration)) audio.currentTime = audio.duration * Number(ttsPlayerSeek.value) / 1000;
 };
 
-async function playTts(messageId) {
+async function playTts(messageId, userInitiated = false) {
   stopTtsPlayer(false);
+  if (userInitiated) unlockTtsAudio();
   const playerRunId = ttsState.playerRunId;
   const controller = new AbortController();
   ttsState.controller = controller;
@@ -5963,8 +5992,9 @@ async function playTts(messageId) {
     const objectUrl = URL.createObjectURL(await r.blob());
     if (controller.signal.aborted || playerRunId !== ttsState.playerRunId) { URL.revokeObjectURL(objectUrl); return; }
     ttsState.objectUrl = objectUrl; ttsState.controller = null;
-    const audio = new Audio(objectUrl);
-    ttsState.audio = audio; audio.playbackRate = TTS_RATES[ttsState.rateIndex];
+    const audio = ttsState.audio || new Audio();
+    ttsState.audio = audio; audio.volume = 1; audio.src = objectUrl;
+    audio.playbackRate = TTS_RATES[ttsState.rateIndex];
     ttsPlayerToggle.disabled = false; ttsPlayerToggle.textContent = 'Ⅱ';
     document.getElementById('ttsPlayerRate').textContent = TTS_RATES[ttsState.rateIndex] + '×';
     document.getElementById('ttsPlayerStatus').textContent = '正在播放完整回复';
@@ -5983,10 +6013,7 @@ async function playTts(messageId) {
       if (playerRunId !== ttsState.playerRunId) return;
       ttsPlayerToggle.textContent = '▶'; ttsPlayerSeek.value = 1000;
       document.getElementById('ttsPlayerStatus').textContent = '播放完成';
-      clearTimeout(ttsState.hideTimer);
-      ttsState.hideTimer = setTimeout(() => {
-        if (playerRunId === ttsState.playerRunId) stopTtsPlayer(true);
-      }, 3000);
+      clearTimeout(ttsState.hideTimer); ttsState.hideTimer = null;
     };
     audio.onerror = () => {
       if (playerRunId === ttsState.playerRunId && ttsState.audio === audio) {
