@@ -2335,6 +2335,10 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       border-color: rgba(255,235,244,.18) !important;
       box-shadow: 14px 0 38px rgba(0,0,0,.3), inset -1px 0 rgba(255,237,245,.12), inset 0 1px rgba(255,237,245,.1) !important;
     }
+    html:not([data-theme="light"]) #drawer .brand {
+      color: #E6D6E1;
+      text-shadow: 0 1px rgba(0,0,0,.22);
+    }
     html:not([data-theme="light"]) #drawer .nav .item.on, html:not([data-theme="light"]) #drawer #avatarBtn {
       background: rgba(255,235,244,.1); border-color: rgba(255,235,244,.13);
     }
@@ -3114,7 +3118,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
 <div id="drawerWrap">
   <div class="shade" data-close="drawer"></div>
   <div id="drawer">
-    <div class="brand">Cloudy studio</div>
+    <div class="brand">Cloudy Studio</div>
     <div class="assistant-switch" role="group" aria-label="选择助手">
       <button class="assistant-choice on" id="recGu" aria-pressed="true">Cloudy</button>
       <button class="assistant-choice" id="recGong" aria-pressed="false">另一位</button>
@@ -5657,7 +5661,7 @@ const sheets = {
 };
 const ttsState = {
   config: null, catalog: {models: [], voices: []}, audio: null, rateIndex: 1,
-  objectUrl: '', controller: null, hideTimer: null, previewAudio: null
+  objectUrl: '', controller: null, hideTimer: null, previewAudio: null, playerRunId: 0
 };
 const ttsPicker = document.getElementById('ttsChoicePicker');
 const ttsPickerList = document.getElementById('ttsPickerList');
@@ -5902,9 +5906,15 @@ function ttsPlayerLabel() {
   return 'Cloudy' + (active && active.name ? ' · ' + active.name : '');
 }
 function stopTtsPlayer(hide = true) {
-  clearTimeout(ttsState.hideTimer);
+  ttsState.playerRunId += 1;
+  clearTimeout(ttsState.hideTimer); ttsState.hideTimer = null;
   if (ttsState.controller) { ttsState.controller.abort(); ttsState.controller = null; }
-  if (ttsState.audio) { ttsState.audio.pause(); ttsState.audio.src = ''; ttsState.audio = null; }
+  if (ttsState.audio) {
+    ttsState.audio.onloadedmetadata = null; ttsState.audio.ontimeupdate = null;
+    ttsState.audio.onplay = null; ttsState.audio.onpause = null;
+    ttsState.audio.onended = null; ttsState.audio.onerror = null;
+    ttsState.audio.pause(); ttsState.audio.src = ''; ttsState.audio = null;
+  }
   if (ttsState.objectUrl) { URL.revokeObjectURL(ttsState.objectUrl); ttsState.objectUrl = ''; }
   if (hide) ttsPlayerEl.classList.remove('on');
 }
@@ -5935,6 +5945,7 @@ ttsPlayerSeek.oninput = () => {
 
 async function playTts(messageId) {
   stopTtsPlayer(false);
+  const playerRunId = ttsState.playerRunId;
   const controller = new AbortController();
   ttsState.controller = controller;
   ttsPlayerEl.classList.add('on');
@@ -5950,7 +5961,7 @@ async function playTts(messageId) {
       throw new Error(d.detail || '语音没能生成');
     }
     const objectUrl = URL.createObjectURL(await r.blob());
-    if (controller.signal.aborted) { URL.revokeObjectURL(objectUrl); return; }
+    if (controller.signal.aborted || playerRunId !== ttsState.playerRunId) { URL.revokeObjectURL(objectUrl); return; }
     ttsState.objectUrl = objectUrl; ttsState.controller = null;
     const audio = new Audio(objectUrl);
     ttsState.audio = audio; audio.playbackRate = TTS_RATES[ttsState.rateIndex];
@@ -5958,21 +5969,27 @@ async function playTts(messageId) {
     document.getElementById('ttsPlayerRate').textContent = TTS_RATES[ttsState.rateIndex] + '×';
     document.getElementById('ttsPlayerStatus').textContent = '正在播放完整回复';
     audio.onloadedmetadata = () => {
+      if (playerRunId !== ttsState.playerRunId) return;
       document.getElementById('ttsPlayerDuration').textContent = ttsClock(audio.duration);
     };
     audio.ontimeupdate = () => {
+      if (playerRunId !== ttsState.playerRunId) return;
       document.getElementById('ttsPlayerCurrent').textContent = ttsClock(audio.currentTime);
       if (Number.isFinite(audio.duration) && audio.duration > 0) ttsPlayerSeek.value = Math.round(audio.currentTime / audio.duration * 1000);
     };
-    audio.onplay = () => { ttsPlayerToggle.textContent = 'Ⅱ'; };
-    audio.onpause = () => { if (!audio.ended) ttsPlayerToggle.textContent = '▶'; };
+    audio.onplay = () => { if (playerRunId === ttsState.playerRunId) ttsPlayerToggle.textContent = 'Ⅱ'; };
+    audio.onpause = () => { if (playerRunId === ttsState.playerRunId && !audio.ended) ttsPlayerToggle.textContent = '▶'; };
     audio.onended = () => {
+      if (playerRunId !== ttsState.playerRunId) return;
       ttsPlayerToggle.textContent = '▶'; ttsPlayerSeek.value = 1000;
       document.getElementById('ttsPlayerStatus').textContent = '播放完成';
-      ttsState.hideTimer = setTimeout(() => stopTtsPlayer(true), 3000);
+      clearTimeout(ttsState.hideTimer);
+      ttsState.hideTimer = setTimeout(() => {
+        if (playerRunId === ttsState.playerRunId) stopTtsPlayer(true);
+      }, 3000);
     };
     audio.onerror = () => {
-      if (ttsState.audio === audio) {
+      if (playerRunId === ttsState.playerRunId && ttsState.audio === audio) {
         document.getElementById('ttsPlayerStatus').textContent = '播放失败';
         note('（音频没能播放）', 'err');
       }
