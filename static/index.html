@@ -2941,6 +2941,52 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .syslog-meta,.syslog-detail { color:var(--dim); font-size:12px; line-height:1.55; overflow-wrap:anywhere; }
   .syslog-detail { margin-top:6px; color:#b84b4b; }
 
+
+  /* User-tunable glass surfaces. Defaults preserve the existing Dwell material. */
+  :root {
+    --interface-composer-bg: linear-gradient(145deg, rgba(255,253,254,.47), rgba(244,218,229,.20));
+    --interface-composer-blur: 34px;
+    --interface-drawer-bg: rgba(247,236,241,.51);
+    --interface-drawer-blur: 10px;
+    --interface-tts-bg: color-mix(in srgb, var(--card) 88%, transparent);
+    --interface-tts-blur: 18px;
+  }
+  html[data-theme="dark"] {
+    --interface-composer-bg: linear-gradient(145deg, rgba(92,82,89,.58), rgba(61,54,60,.34));
+    --interface-drawer-bg: rgba(68,61,66,.60);
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) {
+      --interface-composer-bg: linear-gradient(145deg, rgba(92,82,89,.58), rgba(61,54,60,.34));
+      --interface-drawer-bg: rgba(68,61,66,.60);
+    }
+  }
+  .composer {
+    background: var(--interface-composer-bg) !important;
+    -webkit-backdrop-filter: blur(var(--interface-composer-blur)) saturate(1.55) brightness(1.05);
+    backdrop-filter: blur(var(--interface-composer-blur)) saturate(1.55) brightness(1.05);
+  }
+  #drawer {
+    background: var(--interface-drawer-bg) !important;
+    -webkit-backdrop-filter: blur(var(--interface-drawer-blur)) saturate(1.45) brightness(1.05);
+    backdrop-filter: blur(var(--interface-drawer-blur)) saturate(1.45) brightness(1.05);
+  }
+  #ttsPlayer {
+    background: var(--interface-tts-bg);
+    -webkit-backdrop-filter: blur(var(--interface-tts-blur)) saturate(1.35);
+    backdrop-filter: blur(var(--interface-tts-blur)) saturate(1.35);
+  }
+  .interface-glass-section { padding-top: 3px; padding-bottom: 3px; }
+  .interface-glass-surface { padding: 10px 0 4px; }
+  .interface-glass-surface + .interface-glass-surface { border-top: 1px solid color-mix(in srgb, var(--line) 58%, transparent); }
+  .interface-glass-head { min-height: 34px; display: flex; align-items: center; gap: 10px; }
+  .interface-glass-head strong { flex: 1; font-size: 13.5px; }
+  .interface-glass-reset {
+    min-height: 30px; padding: 4px 9px; border-radius: 9px; color: var(--dim); font-size: 11.5px;
+    transition: transform 150ms cubic-bezier(.23,1,.32,1), background-color 160ms ease;
+  }
+  .interface-glass-reset:active { transform: scale(.97); background: color-mix(in srgb, var(--panel) 62%, transparent); }
+  .glass-effect-label { margin-top: 16px; }
 </style>
 <style>
   /* Compact process summary + provider-reported usage (PR token-process-summary). */
@@ -3188,7 +3234,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
         <button class="grow static" id="aliveRow"><span class="ic" data-i="activity"></span>后端在跑吗<span class="val" id="aliveVal">看看…</span></button>
         <button class="grow" id="petVisibilityRow"><span class="ic" data-i="clawd"></span>隐藏 Clawd<span class="val" id="petVisibilityVal">已显示</span></button>
         <button class="grow" id="backgroundRow"><span class="ic" data-i="image"></span>聊天背景<span class="val" id="backgroundVal">默认</span><span class="chev">›</span></button>
-        <button class="grow" id="messageStyleRow"><span class="ic" data-i="chat"></span>消息样式<span class="val">浅色 / 深色</span><span class="chev">›</span></button>
+        <button class="grow" id="messageStyleRow"><span class="ic" data-i="sliders"></span>玻璃效果<span class="val">消息 / 界面</span><span class="chev">›</span></button>
         <button class="grow" id="ttsRow"><span class="ic" data-i="volume"></span>语音服务<span class="val" id="ttsStatusVal">未设置</span><span class="chev">›</span></button>
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>模型供应商<span class="chev">›</span></button>
         <button class="grow" id="mcpRow"><span class="ic" data-i="tool"></span>MCP 工具<span class="chev">›</span></button>
@@ -3304,8 +3350,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="shade" data-close="messageStyle"></div>
   <div class="sheet"><div class="grabber"></div><div class="head">
     <button class="hbtn" data-close="messageStyle"><span class="ic" data-i="x"></span></button>
-    <div class="ht">消息样式</div>
-    <button class="hbtn" id="messageStyleReset" title="恢复当前样式默认值"><span class="ic" data-i="refresh"></span></button>
+    <div class="ht">玻璃效果</div>
+    <button class="hbtn" id="messageStyleReset" title="恢复玻璃效果默认值"><span class="ic" data-i="refresh"></span></button>
   </div><div class="body" id="messageStyleBody"></div></div>
 </div>
 
@@ -9179,6 +9225,106 @@ const MESSAGE_STYLE_LIMITS = {
 let messageStyleRole = 'me';
 let messageStyleTab = 'light';
 
+const INTERFACE_GLASS_KEY = 'dwellInterfaceGlass';
+const INTERFACE_GLASS_DEFAULTS = {
+  light: {
+    composer: { opacity: 47, blur: 34 },
+    drawer: { opacity: 51, blur: 10 },
+    ttsPlayer: { opacity: 88, blur: 18 }
+  },
+  dark: {
+    composer: { opacity: 58, blur: 34 },
+    drawer: { opacity: 60, blur: 10 },
+    ttsPlayer: { opacity: 88, blur: 18 }
+  }
+};
+const INTERFACE_GLASS_SURFACES = [
+  { key: 'composer', label: '输入框' },
+  { key: 'drawer', label: '左侧边栏' },
+  { key: 'ttsPlayer', label: '语音浮窗' }
+];
+function cloneInterfaceGlass(value) {
+  return { opacity: value.opacity, blur: value.blur };
+}
+function normalizeInterfaceGlass(raw, base) {
+  raw = raw && typeof raw === 'object' ? raw : {};
+  const opacity = Number(raw.opacity), blur = Number(raw.blur);
+  return {
+    opacity: Number.isFinite(opacity) ? Math.min(100, Math.max(0, opacity)) : base.opacity,
+    blur: Number.isFinite(blur) ? Math.min(40, Math.max(0, blur)) : base.blur
+  };
+}
+function readInterfaceGlass() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(INTERFACE_GLASS_KEY) || '{}') || {}; } catch (e) {}
+  const out = { light: {}, dark: {} };
+  MESSAGE_STYLE_MODES.forEach(mode => {
+    INTERFACE_GLASS_SURFACES.forEach(surface => {
+      out[mode][surface.key] = normalizeInterfaceGlass(
+        saved[mode] && saved[mode][surface.key],
+        INTERFACE_GLASS_DEFAULTS[mode][surface.key]
+      );
+    });
+  });
+  return out;
+}
+let interfaceGlassState = readInterfaceGlass();
+function glassAlpha(value) {
+  return Math.round(Math.min(1, Math.max(0, Number(value) / 100)) * 1000) / 1000;
+}
+function applyInterfaceGlass() {
+  const mode = effectiveMessageStyleMode();
+  const values = interfaceGlassState[mode];
+  const style = document.documentElement.style;
+  const composerAlpha = glassAlpha(values.composer.opacity);
+  const composerTail = glassAlpha(values.composer.opacity * (mode === 'dark' ? 34 / 58 : 20 / 47));
+  const composerColors = mode === 'dark' ? ['92,82,89', '61,54,60'] : ['255,253,254', '244,218,229'];
+  const drawerColor = mode === 'dark' ? '68,61,66' : '247,236,241';
+  style.setProperty('--interface-composer-bg', 'linear-gradient(145deg, rgba(' + composerColors[0] + ',' + composerAlpha + '), rgba(' + composerColors[1] + ',' + composerTail + '))');
+  style.setProperty('--interface-composer-blur', values.composer.blur + 'px');
+  style.setProperty('--interface-drawer-bg', 'rgba(' + drawerColor + ',' + glassAlpha(values.drawer.opacity) + ')');
+  style.setProperty('--interface-drawer-blur', values.drawer.blur + 'px');
+  style.setProperty('--interface-tts-bg', 'color-mix(in srgb, var(--card) ' + values.ttsPlayer.opacity + '%, transparent)');
+  style.setProperty('--interface-tts-blur', values.ttsPlayer.blur + 'px');
+}
+function saveInterfaceGlass() {
+  try { localStorage.setItem(INTERFACE_GLASS_KEY, JSON.stringify(interfaceGlassState)); } catch (e) {}
+}
+function renderInterfaceGlassControls() {
+  const container = document.getElementById('interfaceGlassControls');
+  if (!container) return;
+  container.innerHTML = '';
+  INTERFACE_GLASS_SURFACES.forEach(surface => {
+    const current = interfaceGlassState[messageStyleTab][surface.key];
+    const section = document.createElement('section'); section.className = 'interface-glass-surface';
+    const head = document.createElement('div'); head.className = 'interface-glass-head';
+    const title = document.createElement('strong'); title.textContent = surface.label;
+    const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'interface-glass-reset'; reset.textContent = '恢复默认';
+    head.append(title, reset); section.appendChild(head);
+    [
+      { key: 'opacity', label: '不透明度', min: 0, max: 100, suffix: '%' },
+      { key: 'blur', label: '模糊强度', min: 0, max: 40, suffix: ' px' }
+    ].forEach(spec => {
+      const wrap = document.createElement('div'); wrap.className = 'msg-style-control';
+      const controlHead = document.createElement('div'); controlHead.className = 'msg-style-control-head';
+      const label = document.createElement('label'); label.textContent = spec.label;
+      const value = document.createElement('span'); value.className = 'msg-style-value'; value.textContent = current[spec.key] + spec.suffix;
+      const input = document.createElement('input'); input.type = 'range'; input.min = spec.min; input.max = spec.max; input.step = 1; input.value = current[spec.key];
+      controlHead.append(label, value); wrap.append(controlHead, input); section.appendChild(wrap);
+      input.oninput = () => {
+        current[spec.key] = Number(input.value);
+        value.textContent = current[spec.key] + spec.suffix;
+        applyInterfaceGlass(); saveInterfaceGlass();
+      };
+    });
+    reset.onclick = () => {
+      interfaceGlassState[messageStyleTab][surface.key] = cloneInterfaceGlass(INTERFACE_GLASS_DEFAULTS[messageStyleTab][surface.key]);
+      applyInterfaceGlass(); saveInterfaceGlass(); renderMessageStyleSettings();
+    };
+    container.appendChild(section);
+  });
+}
+
 function clampMessageStyleNumber(key, value, fallback) {
   const limits = MESSAGE_STYLE_LIMITS[key];
   const n = Number(value);
@@ -9282,10 +9428,15 @@ function renderMessageStyleSettings() {
     + '<div class="msg-style-actions"><button type="button" class="msg-style-copy" id="messageStyleCopy">把' + roleLabel + '的' + modeLabel + '样式复制给' + otherLabel + '</button></div>'
     + '<div class="ap-section" id="messageStyleControls"></div>'
     + '<div class="msg-style-note">双方消息可以分别调整。thinking 与工具调用属于 Cloudy 的输出，会跟随 Cloudy 的消息样式。</div>'
-    + '<div class="msg-style-reset-menu" id="messageStyleResetMenu" hidden><div class="msg-style-reset-card"><h2>重置哪些样式？</h2><p>只会恢复这里的外观，不会影响消息内容。</p><div class="msg-style-reset-choices">'
-    + '<button class="msg-style-reset-choice" data-reset-scope="current">重置当前：' + roleLabel + ' · ' + modeLabel + '</button>'
+    + '<div class="group-label glass-effect-label">界面玻璃 · ' + modeLabel + '模式</div>'
+    + '<div class="ap-section interface-glass-section" id="interfaceGlassControls"></div>'
+    + '<div class="msg-style-note">输入框、左侧边栏和语音浮窗分别保存浅色与深色参数。调整会立即生效并保存在当前设备。</div>'
+    + '<div class="msg-style-reset-menu" id="messageStyleResetMenu" hidden><div class="msg-style-reset-card"><h2>重置哪些玻璃效果？</h2><p>只会恢复外观，不会影响消息内容。</p><div class="msg-style-reset-choices">'
+    + '<button class="msg-style-reset-choice" data-reset-scope="current">重置当前消息：' + roleLabel + ' · ' + modeLabel + '</button>'
     + '<button class="msg-style-reset-choice" data-reset-scope="role">重置' + roleLabel + '的浅色和深色</button>'
-    + '<button class="msg-style-reset-choice danger" data-reset-scope="all">重置双方的全部消息样式</button></div>'
+    + '<button class="msg-style-reset-choice" data-reset-scope="messages">重置全部消息气泡</button>'
+    + '<button class="msg-style-reset-choice" data-reset-scope="interface">重置' + modeLabel + '界面玻璃</button>'
+    + '<button class="msg-style-reset-choice danger" data-reset-scope="all">重置全部玻璃效果</button></div>'
     + '<button class="msg-style-reset-choice msg-style-reset-cancel" data-reset-scope="cancel">取消</button></div></div>';
 
   const preview = body.querySelector('.msg-style-preview');
@@ -9323,6 +9474,7 @@ function renderMessageStyleSettings() {
     });
     controls.appendChild(wrap);
   });
+  renderInterfaceGlassControls();
 
   body.querySelector('#messageStyleCopy').onclick = () => {
     messageStyleState[otherRole][messageStyleTab] = cloneMessageStyle(current);
@@ -9349,12 +9501,21 @@ function renderMessageStyleSettings() {
       MESSAGE_STYLE_MODES.forEach(mode => {
         messageStyleState[messageStyleRole][mode] = cloneMessageStyle(MESSAGE_STYLE_DEFAULTS[messageStyleRole][mode]);
       });
-    } else if (scope === 'all') {
+    } else if (scope === 'messages' || scope === 'all') {
       MESSAGE_STYLE_ROLES.forEach(role => MESSAGE_STYLE_MODES.forEach(mode => {
         messageStyleState[role][mode] = cloneMessageStyle(MESSAGE_STYLE_DEFAULTS[role][mode]);
       }));
     }
-    applyMessageStyles(); saveMessageStyles(); renderMessageStyleSettings();
+    if (scope === 'interface') {
+      INTERFACE_GLASS_SURFACES.forEach(surface => {
+        interfaceGlassState[messageStyleTab][surface.key] = cloneInterfaceGlass(INTERFACE_GLASS_DEFAULTS[messageStyleTab][surface.key]);
+      });
+    } else if (scope === 'all') {
+      MESSAGE_STYLE_MODES.forEach(mode => INTERFACE_GLASS_SURFACES.forEach(surface => {
+        interfaceGlassState[mode][surface.key] = cloneInterfaceGlass(INTERFACE_GLASS_DEFAULTS[mode][surface.key]);
+      }));
+    }
+    applyMessageStyles(); saveMessageStyles(); applyInterfaceGlass(); saveInterfaceGlass(); renderMessageStyleSettings();
   });
 }
 document.getElementById('messageStyleRow').onclick = () => {
@@ -9362,11 +9523,13 @@ document.getElementById('messageStyleRow').onclick = () => {
   renderMessageStyleSettings();
 };
 applyMessageStyles();
-new MutationObserver(applyMessageStyles).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+applyInterfaceGlass();
+const applyGlassTheme = () => { applyMessageStyles(); applyInterfaceGlass(); };
+new MutationObserver(applyGlassTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 if (window.matchMedia) {
   const messageThemeQuery = matchMedia('(prefers-color-scheme: dark)');
-  if (messageThemeQuery.addEventListener) messageThemeQuery.addEventListener('change', applyMessageStyles);
-  else if (messageThemeQuery.addListener) messageThemeQuery.addListener(applyMessageStyles);
+  if (messageThemeQuery.addEventListener) messageThemeQuery.addEventListener('change', applyGlassTheme);
+  else if (messageThemeQuery.addListener) messageThemeQuery.addListener(applyGlassTheme);
 }
 
 document.getElementById('rewakeRow').onclick = async () => {
