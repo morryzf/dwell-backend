@@ -818,22 +818,45 @@ html[data-theme="dark"] .composer {
   .tts-empty { padding:14px 4px 4px; color:var(--dim); font-size:13px; text-align:center; }
   #ttsPlayer {
     position:fixed; z-index:45; top:calc(env(safe-area-inset-top) + 58px); left:50%;
-    width:min(540px, calc(100vw - 24px)); padding:10px 12px; transform:translate(-50%, -14px);
-    border:1px solid var(--line); border-radius:17px; background:color-mix(in srgb, var(--card) 88%, transparent);
+    width:min(540px, calc(100vw - 24px)); padding:11px 14px 12px; transform:translate(-50%, -14px);
+    border:1px solid var(--line); border-radius:19px; background:color-mix(in srgb, var(--card) 88%, transparent);
     box-shadow:0 12px 34px rgba(0,0,0,.2); backdrop-filter:blur(18px) saturate(1.35);
     -webkit-backdrop-filter:blur(18px) saturate(1.35); opacity:0; pointer-events:none;
     transition:opacity .18s ease, transform .2s cubic-bezier(.23,1,.32,1);
   }
   #ttsPlayer.on { opacity:1; transform:translate(-50%, 0); pointer-events:auto; }
-  .tts-player-main { display:flex; align-items:center; gap:9px; }
-  #ttsPlayerToggle { width:34px; height:34px; flex:none; border-radius:50%; color:#fff; background:var(--accent); font-size:13px; }
+  .tts-player-head { display:flex; align-items:center; gap:8px; min-height:34px; }
   .tts-player-copy { flex:1; min-width:0; display:flex; flex-direction:column; line-height:1.25; }
   .tts-player-copy strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
   .tts-player-copy span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); font-size:11.5px; }
-  #ttsPlayerRate { min-width:48px; height:32px; padding:0 9px; border-radius:10px; background:var(--panel); color:var(--text); font-size:12.5px; font-weight:700; }
-  #ttsPlayerClose { width:30px; height:30px; color:var(--dim); font-size:22px; }
-  .tts-player-progress { display:grid; grid-template-columns:34px 1fr 34px; align-items:center; gap:7px; margin-top:7px; color:var(--dim); font-size:10.5px; }
+  #ttsPlayerRate { min-width:42px; height:34px; padding:0 6px; color:var(--text); font-size:12.5px; font-weight:700; }
+  #ttsPlayerClose { width:36px; height:36px; color:var(--dim); }
+  #ttsPlayerClose .ic { width:17px; height:17px; }
+  .tts-player-transport { display:grid; grid-template-columns:52px 64px 52px; align-items:center; justify-content:center; gap:12px; margin:4px 0 1px; }
+  .tts-transport-button {
+    width:100%; height:48px; display:flex; align-items:center; justify-content:center;
+    color:var(--text); background:none; border:0; border-radius:0; box-shadow:none;
+    transition:transform 140ms cubic-bezier(.23,1,.32,1), opacity 140ms ease, color 140ms ease;
+  }
+  .tts-transport-button .ic { width:21px; height:21px; }
+  #ttsPlayerToggle { color:var(--accent); }
+  #ttsPlayerToggle .ic { width:29px; height:29px; }
+  .tts-transport-button:active:not(:disabled) { transform:scale(.92); }
+  .tts-transport-button:disabled { opacity:.2; cursor:default; }
+  .tts-player-progress { display:grid; grid-template-columns:34px 1fr 34px; align-items:center; gap:7px; color:var(--dim); font-size:10.5px; }
   #ttsPlayerSeek { width:100%; height:18px; accent-color:var(--accent); }
+  .tts-player-footer { display:flex; align-items:center; gap:10px; margin-top:4px; }
+  #ttsPlayerQueue { flex:1; min-width:0; color:var(--dim); font-size:11px; white-space:nowrap; }
+  .tts-player-modes {
+    flex:none; display:grid; grid-template-columns:1fr 1fr; gap:2px; padding:2px;
+    border-radius:10px; background:color-mix(in srgb, var(--panel) 68%, transparent);
+  }
+  .tts-player-mode {
+    min-height:29px; padding:4px 9px; border-radius:8px; color:var(--dim); font-size:11px; white-space:nowrap;
+    transition:transform 140ms cubic-bezier(.23,1,.32,1), background-color 150ms ease, color 150ms ease;
+  }
+  .tts-player-mode.on { color:var(--text); background:color-mix(in srgb, var(--card) 76%, transparent); box-shadow:0 2px 8px rgba(70,54,63,.07); }
+  .tts-player-mode:active { transform:scale(.97); }
   #ttsChoicePicker { position:fixed; inset:0; z-index:120; display:none; align-items:flex-end; justify-content:center; }
   #ttsChoicePicker.on { display:flex; }
   .tts-picker-shade { position:absolute; inset:0; background:rgba(0,0,0,.34); backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px); }
@@ -3099,16 +3122,27 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
 </header>
 
 <div id="ttsPlayer" aria-live="polite">
-  <div class="tts-player-main">
-    <button id="ttsPlayerToggle" type="button" title="暂停或继续">Ⅱ</button>
+  <div class="tts-player-head">
     <div class="tts-player-copy"><strong id="ttsPlayerTitle">Cloudy</strong><span id="ttsPlayerStatus">正在准备语音…</span></div>
-    <button id="ttsPlayerRate" type="button">1×</button>
-    <button id="ttsPlayerClose" type="button" title="关闭播放器">×</button>
+    <button id="ttsPlayerRate" type="button" title="调整播放速度">1×</button>
+    <button id="ttsPlayerClose" type="button" title="关闭播放器" aria-label="关闭播放器"><span class="ic" data-i="x"></span></button>
+  </div>
+  <div class="tts-player-transport" role="group" aria-label="语音播放控制">
+    <button class="tts-transport-button" id="ttsPlayerPrevious" type="button" title="上一条已缓存语音" aria-label="上一条已缓存语音" disabled><span class="ic" data-i="mediaPrevious"></span></button>
+    <button class="tts-transport-button" id="ttsPlayerToggle" type="button" title="暂停或继续" aria-label="暂停或继续"><span class="ic" data-i="mediaPause"></span></button>
+    <button class="tts-transport-button" id="ttsPlayerNext" type="button" title="下一条已缓存语音" aria-label="下一条已缓存语音" disabled><span class="ic" data-i="mediaNext"></span></button>
   </div>
   <div class="tts-player-progress">
     <span id="ttsPlayerCurrent">0:00</span>
     <input id="ttsPlayerSeek" type="range" min="0" max="1000" value="0" aria-label="播放进度">
     <span id="ttsPlayerDuration">0:00</span>
+  </div>
+  <div class="tts-player-footer">
+    <span id="ttsPlayerQueue">暂无缓存</span>
+    <div class="tts-player-modes" role="group" aria-label="播放模式">
+      <button class="tts-player-mode on" type="button" data-tts-play-mode="stop">播完暂停</button>
+      <button class="tts-player-mode" type="button" data-tts-play-mode="continuous">连续播放</button>
+    </div>
   </div>
 </div>
 
@@ -3713,6 +3747,10 @@ const ICONS = {
   chat: S('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'),
   pen: S('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>'),
   volume: S('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/>'),
+  mediaPrevious: S('<line x1="6" y1="5" x2="6" y2="19"/><path d="M18 6.5 9 12l9 5.5z" fill="currentColor" stroke="none"/>'),
+  mediaPlay: S('<path d="M8 5.5 18.5 12 8 18.5z" fill="currentColor" stroke="none"/>'),
+  mediaPause: S('<rect x="7" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="13.5" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none"/>'),
+  mediaNext: S('<line x1="18" y1="5" x2="18" y2="19"/><path d="m6 6.5 9 5.5-9 5.5z" fill="currentColor" stroke="none"/>'),
   branch: S('<circle cx="6" cy="4.5" r="2"/><circle cx="18" cy="5.5" r="2"/><circle cx="6" cy="19.5" r="2"/><path d="M6 6.5v11"/><path d="M8 6.5c5 0 3-1 8-1"/>'),
   image: S('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>'),
   bookOpen: S('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>'),
@@ -5734,7 +5772,7 @@ const sheets = {
 const ttsState = {
   config: null, catalog: {models: [], voices: []}, audio: null, rateIndex: 1,
   objectUrl: '', controller: null, hideTimer: null, previewAudio: null, playerRunId: 0,
-  audioUnlocked: false
+  audioUnlocked: false, queue: [], currentMessageId: '', playMode: 'stop'
 };
 const ttsPicker = document.getElementById('ttsChoicePicker');
 const ttsPickerList = document.getElementById('ttsPickerList');
@@ -5980,10 +6018,20 @@ document.getElementById('ttsRow').onclick = async () => {
 };
 const ttsPlayerEl = document.getElementById('ttsPlayer');
 const ttsPlayerToggle = document.getElementById('ttsPlayerToggle');
+const ttsPlayerPrevious = document.getElementById('ttsPlayerPrevious');
+const ttsPlayerNext = document.getElementById('ttsPlayerNext');
 const ttsPlayerSeek = document.getElementById('ttsPlayerSeek');
 const TTS_RATES = [0.98, 1, 1.02];
+const TTS_PLAY_MODE_KEY = 'dwellTtsPlayMode';
 const TTS_SILENT_AUDIO = 'data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YRAAAACAgICAgICAgICAgICA';
+try {
+  const savedMode = localStorage.getItem(TTS_PLAY_MODE_KEY);
+  if (savedMode === 'continuous') ttsState.playMode = savedMode;
+} catch (e) {}
 
+function setTtsPlayerIcon(button, name) {
+  button.replaceChildren(icEl(name, name === 'mediaPause' || name === 'mediaPlay' ? 29 : 21));
+}
 function unlockTtsAudio() {
   if (ttsState.audioUnlocked) return;
   const audio = ttsState.audio || new Audio();
@@ -6000,7 +6048,6 @@ function unlockTtsAudio() {
     audio.volume = 1; ttsState.audioUnlocked = true;
   }
 }
-
 function ttsClock(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
   const whole = Math.floor(seconds);
@@ -6010,6 +6057,35 @@ function ttsPlayerLabel() {
   const cfg = ttsState.config || {};
   const active = (cfg.voices || []).find(item => item.id === cfg.active_voice_id);
   return 'Cloudy' + (active && active.name ? ' · ' + active.name : '');
+}
+function ttsQueueIndex() {
+  return ttsState.queue.findIndex(item => item.message_id === ttsState.currentMessageId);
+}
+function updateTtsTransport() {
+  const index = ttsQueueIndex();
+  const total = ttsState.queue.length;
+  ttsPlayerPrevious.disabled = index <= 0;
+  ttsPlayerNext.disabled = index < 0 || index >= total - 1;
+  document.getElementById('ttsPlayerQueue').textContent = total
+    ? '已缓存 ' + (index >= 0 ? (index + 1) + ' / ' : '') + total
+    : '暂无缓存';
+  ttsPlayerEl.querySelectorAll('[data-tts-play-mode]').forEach(button => {
+    const on = button.dataset.ttsPlayMode === ttsState.playMode;
+    button.classList.toggle('on', on);
+    button.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+async function loadTtsQueue() {
+  try {
+    const response = await fetch('api/tts/cache/messages', {cache:'no-store'});
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || '缓存列表没有读到');
+    ttsState.queue = Array.isArray(data.items) ? data.items : [];
+  } catch (e) {
+    ttsState.queue = [];
+  }
+  updateTtsTransport();
+  return ttsState.queue;
 }
 function stopTtsPlayer(hide = true) {
   ttsState.playerRunId += 1;
@@ -6031,11 +6107,11 @@ ttsPlayerToggle.onclick = () => {
   if (audio.paused) {
     if (audio.ended) audio.currentTime = 0;
     audio.play().then(() => {
-      ttsPlayerToggle.textContent = 'Ⅱ';
+      setTtsPlayerIcon(ttsPlayerToggle, 'mediaPause');
       document.getElementById('ttsPlayerStatus').textContent = '正在播放完整回复';
     }).catch(() => {});
   } else {
-    audio.pause(); ttsPlayerToggle.textContent = '▶';
+    audio.pause(); setTtsPlayerIcon(ttsPlayerToggle, 'mediaPlay');
     document.getElementById('ttsPlayerStatus').textContent = '已暂停';
   }
 };
@@ -6049,32 +6125,44 @@ ttsPlayerSeek.oninput = () => {
   const audio = ttsState.audio;
   if (audio && Number.isFinite(audio.duration)) audio.currentTime = audio.duration * Number(ttsPlayerSeek.value) / 1000;
 };
+ttsPlayerEl.querySelectorAll('[data-tts-play-mode]').forEach(button => {
+  button.onclick = () => {
+    ttsState.playMode = button.dataset.ttsPlayMode;
+    try { localStorage.setItem(TTS_PLAY_MODE_KEY, ttsState.playMode); } catch (e) {}
+    updateTtsTransport();
+  };
+});
 
-async function playTts(messageId, userInitiated = false) {
+async function playTts(messageId, userInitiated = false, cachedOnly = false) {
   stopTtsPlayer(false);
+  ttsState.currentMessageId = messageId;
+  updateTtsTransport();
   if (userInitiated) unlockTtsAudio();
   const playerRunId = ttsState.playerRunId;
   const controller = new AbortController();
   ttsState.controller = controller;
   ttsPlayerEl.classList.add('on');
   document.getElementById('ttsPlayerTitle').textContent = ttsPlayerLabel();
-  document.getElementById('ttsPlayerStatus').textContent = '正在生成或读取缓存…';
+  document.getElementById('ttsPlayerStatus').textContent = cachedOnly ? '正在读取缓存…' : '正在生成或读取缓存…';
   document.getElementById('ttsPlayerCurrent').textContent = '0:00';
   document.getElementById('ttsPlayerDuration').textContent = '0:00';
-  ttsPlayerSeek.value = 0; ttsPlayerToggle.textContent = '…'; ttsPlayerToggle.disabled = true;
+  ttsPlayerSeek.value = 0; ttsPlayerToggle.disabled = true;
+  setTtsPlayerIcon(ttsPlayerToggle, 'dots');
   try {
-    const r = await fetch('api/tts/messages/' + encodeURIComponent(messageId), {cache:'no-store', signal:controller.signal});
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}));
-      throw new Error(d.detail || '语音没能生成');
+    const suffix = cachedOnly ? '?cached_only=true' : '';
+    const response = await fetch('api/tts/messages/' + encodeURIComponent(messageId) + suffix, {cache:'no-store', signal:controller.signal});
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || '语音没能生成');
     }
-    const objectUrl = URL.createObjectURL(await r.blob());
+    const objectUrl = URL.createObjectURL(await response.blob());
     if (controller.signal.aborted || playerRunId !== ttsState.playerRunId) { URL.revokeObjectURL(objectUrl); return; }
     ttsState.objectUrl = objectUrl; ttsState.controller = null;
+    await loadTtsQueue();
     const audio = ttsState.audio || new Audio();
     ttsState.audio = audio; audio.volume = 1; audio.src = objectUrl;
     audio.playbackRate = TTS_RATES[ttsState.rateIndex];
-    ttsPlayerToggle.disabled = false; ttsPlayerToggle.textContent = 'Ⅱ';
+    ttsPlayerToggle.disabled = false; setTtsPlayerIcon(ttsPlayerToggle, 'mediaPause');
     document.getElementById('ttsPlayerRate').textContent = TTS_RATES[ttsState.rateIndex] + '×';
     document.getElementById('ttsPlayerStatus').textContent = '正在播放完整回复';
     audio.onloadedmetadata = () => {
@@ -6086,12 +6174,20 @@ async function playTts(messageId, userInitiated = false) {
       document.getElementById('ttsPlayerCurrent').textContent = ttsClock(audio.currentTime);
       if (Number.isFinite(audio.duration) && audio.duration > 0) ttsPlayerSeek.value = Math.round(audio.currentTime / audio.duration * 1000);
     };
-    audio.onplay = () => { if (playerRunId === ttsState.playerRunId) ttsPlayerToggle.textContent = 'Ⅱ'; };
-    audio.onpause = () => { if (playerRunId === ttsState.playerRunId && !audio.ended) ttsPlayerToggle.textContent = '▶'; };
+    audio.onplay = () => { if (playerRunId === ttsState.playerRunId) setTtsPlayerIcon(ttsPlayerToggle, 'mediaPause'); };
+    audio.onpause = () => { if (playerRunId === ttsState.playerRunId && !audio.ended) setTtsPlayerIcon(ttsPlayerToggle, 'mediaPlay'); };
     audio.onended = () => {
       if (playerRunId !== ttsState.playerRunId) return;
-      ttsPlayerToggle.textContent = '▶'; ttsPlayerSeek.value = 1000;
-      document.getElementById('ttsPlayerStatus').textContent = '播放完成';
+      setTtsPlayerIcon(ttsPlayerToggle, 'mediaPlay'); ttsPlayerSeek.value = 1000;
+      const index = ttsQueueIndex();
+      const next = index >= 0 ? ttsState.queue[index + 1] : null;
+      if (ttsState.playMode === 'continuous' && next) {
+        document.getElementById('ttsPlayerStatus').textContent = '正在播放下一条缓存…';
+        void playTts(next.message_id, false, true);
+        return;
+      }
+      document.getElementById('ttsPlayerStatus').textContent =
+        ttsState.playMode === 'continuous' && index === ttsState.queue.length - 1 ? '已播放全部缓存' : '播放完成';
       clearTimeout(ttsState.hideTimer); ttsState.hideTimer = null;
     };
     audio.onerror = () => {
@@ -6103,11 +6199,22 @@ async function playTts(messageId, userInitiated = false) {
     await audio.play();
   } catch (e) {
     if (e.name === 'AbortError') return;
-    ttsState.controller = null; ttsPlayerToggle.disabled = false; ttsPlayerToggle.textContent = '▶';
+    ttsState.controller = null; ttsPlayerToggle.disabled = false; setTtsPlayerIcon(ttsPlayerToggle, 'mediaPlay');
     document.getElementById('ttsPlayerStatus').textContent = '播放失败';
+    if (cachedOnly) await loadTtsQueue();
     note('（语音没能播放：' + e.message + '）', 'err');
   }
 }
+async function playCachedOffset(offset) {
+  const index = ttsQueueIndex();
+  const target = index >= 0 ? ttsState.queue[index + offset] : null;
+  if (!target) return;
+  await playTts(target.message_id, true, true);
+}
+ttsPlayerPrevious.onclick = () => { void playCachedOffset(-1); };
+ttsPlayerNext.onclick = () => { void playCachedOffset(1); };
+updateTtsTransport();
+
 async function maybeAutoReadLastReply() {
   try {
     const cfg = ttsState.config || await loadTtsConfig();

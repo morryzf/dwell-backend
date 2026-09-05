@@ -2440,13 +2440,10 @@ async def tts_catalog_get():
     return {"ok": True, "models": models, "voices": voices}
 
 
-@app.get("/api/tts/messages/{message_id}", dependencies=authed)
-async def tts_message_audio(message_id: str):
-    chat_id = _get_or_create_current_chat()
+def _tts_message_cache_details(chat_id: str, message_id: str, cfg: dict) -> dict:
     message = db.message_get(message_id)
     if not message or message.get("chat_id") != chat_id or message.get("role") != "assistant" or message.get("origin") != "chat":
         raise HTTPException(404, "找不到可朗读的回复")
-    cfg = _tts_config()
     if not cfg.get("voice_id") or not cfg.get("model_id"):
         raise HTTPException(409, "请先选择当前音色和模型")
     turn_id = ""
@@ -2476,7 +2473,51 @@ async def tts_message_audio(message_id: str):
         raise HTTPException(413, "这轮回复过长，暂时不能一次朗读")
     material = "\n".join((cfg["base_url"], cfg["model_id"], cfg["voice_id"], cfg["read_mode"], spoken))
     cache_key = hashlib.sha256(material.encode("utf-8")).hexdigest()
-    path = _tts_cache_path(chat_id, message_id, cache_key)
+    return {
+        "message": message,
+        "spoken": spoken,
+        "turn_id": turn_id or message_id,
+        "path": _tts_cache_path(chat_id, message_id, cache_key),
+    }
+
+
+@app.get("/api/tts/cache/messages", dependencies=authed)
+async def tts_cached_messages():
+    chat_id = _get_or_create_current_chat()
+    cfg = _tts_config()
+    directory = TTS_CACHE_DIR / re.sub(r"[^a-zA-Z0-9_-]", "", chat_id)[:80]
+    if not directory.exists() or not cfg.get("voice_id") or not cfg.get("model_id"):
+        return {"ok": True, "items": []}
+    cached_by_turn: dict[str, dict] = {}
+    for message in db.message_list(chat_id, limit=400):
+        if message.get("role") != "assistant" or message.get("origin") != "chat":
+            continue
+        message_id = str(message.get("id") or "")
+        safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", message_id)[:80]
+        if not safe_id or not next(directory.glob(safe_id + "-*.mp3"), None):
+            continue
+        try:
+            details = _tts_message_cache_details(chat_id, message_id, cfg)
+        except HTTPException:
+            continue
+        if not details["path"].exists():
+            continue
+        cached_by_turn[details["turn_id"]] = {
+            "message_id": message_id,
+            "label": re.sub(r"\s+", " ", details["spoken"]).strip()[:90],
+        }
+    return {"ok": True, "items": list(cached_by_turn.values())}
+
+
+@app.get("/api/tts/messages/{message_id}", dependencies=authed)
+async def tts_message_audio(message_id: str, cached_only: bool = False):
+    chat_id = _get_or_create_current_chat()
+    cfg = _tts_config()
+    details = _tts_message_cache_details(chat_id, message_id, cfg)
+    spoken = details["spoken"]
+    path = details["path"]
+    if not path.exists() and cached_only:
+        raise HTTPException(404, "这条语音还没有缓存")
     if not path.exists():
         api_key = _tts_api_key(cfg)
         url = cfg["base_url"].rstrip("/") + "/v1/text-to-speech/" + cfg["voice_id"]
