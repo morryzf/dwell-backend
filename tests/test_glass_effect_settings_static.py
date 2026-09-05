@@ -26,3 +26,22 @@ def test_interface_glass_values_drive_the_live_surfaces():
     assert "blur(var(--interface-drawer-blur))" in HTML
     assert "background: var(--interface-tts-bg)" in HTML
     assert "blur(var(--interface-tts-blur))" in HTML
+
+
+def test_message_actions_use_requested_size_spacing_and_order():
+    assert "gap: 12px; max-width: calc(100vw - 36px)" in HTML
+    assert "button.appendChild(icEl(icon, 18));" in HTML
+    assert "more.appendChild(icEl('dots', 18));" in HTML
+    edit_pos = HTML.index("addAction('pen', '编辑消息'")
+    voice_pos = HTML.index("addAction('volume', '播放整轮回复'")
+    regenerate_pos = HTML.index("addAction('refresh', '重新生成'")
+    assert edit_pos < voice_pos < regenerate_pos
+
+
+def test_glass_preview_opens_with_the_effective_theme():
+    open_handler = HTML[
+        HTML.index("document.getElementById('messageStyleRow').onclick"):
+        HTML.index("applyMessageStyles();", HTML.index("document.getElementById('messageStyleRow').onclick"))
+    ]
+    assert "messageStyleTab = effectiveMessageStyleMode();" in open_handler
+    assert "if (sheets.messageStyle.classList.contains('open'))" in HTML
