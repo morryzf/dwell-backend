@@ -895,7 +895,7 @@ html[data-theme="dark"] .composer {
   .model-catalog-action.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
   .row { position: relative; }
   .row.actions-on { padding-bottom: 30px; }
-  .msg-actions { display: none; position: absolute; z-index: 8; left: 0; bottom: 2px; align-items: center; gap: 10px; max-width: calc(100vw - 36px); padding: 0; border: 0; background: transparent; box-shadow: none; }
+  .msg-actions { display: none; position: absolute; z-index: 8; left: 0; bottom: 2px; align-items: center; gap: 12px; max-width: calc(100vw - 36px); padding: 0; border: 0; background: transparent; box-shadow: none; }
   .row.me .msg-actions { left: auto; right: 0; }
   .msg-actions.on { display: flex; }
   .msg-action { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 0; color: var(--dim); background: transparent; display: flex; align-items: center; justify-content: center; }
@@ -4158,7 +4158,7 @@ function attachMessageActions(el, message) {
   const close = () => { actions.classList.remove('on'); actions.classList.remove('more-on'); rowEl.classList.remove('actions-on'); actions.querySelector('.msg-more')?.classList.remove('on'); };
   const addAction = (icon, title, handler, danger) => {
     const button = document.createElement('button'); button.className = 'msg-action' + (danger ? ' danger' : '');
-    button.title = title; button.setAttribute('aria-label', title); button.appendChild(icEl(icon, 17));
+    button.title = title; button.setAttribute('aria-label', title); button.appendChild(icEl(icon, 18));
     button.onclick = async (event) => { event.stopPropagation(); await handler(); };
     actions.appendChild(button);
   };
@@ -4171,6 +4171,7 @@ function attachMessageActions(el, message) {
   });
   addAction('pen', '编辑消息', () => { close(); openMessageEditor(message); });
   if (message.role === 'assistant') {
+    addAction('volume', '播放整轮回复', async () => { close(); await playTts(message.id, true); });
     addAction('refresh', '重新生成', async () => {
       unlockTtsAudio();
       close();
@@ -4178,7 +4179,6 @@ function attachMessageActions(el, message) {
       try { const r = await fetch('api/messages/' + encodeURIComponent(message.id) + '/regenerate',{method:'POST'}); const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.detail||'没有开始生成'); }
       catch (e) { note('（没能重新生成：' + e.message + '）', 'err'); }
     });
-    addAction('volume', '播放整轮回复', async () => { close(); await playTts(message.id, true); });
   }
   addAction('trash', '删除消息', async () => {
     close();
@@ -4186,7 +4186,7 @@ function attachMessageActions(el, message) {
     try { const r = await fetch('api/messages/' + encodeURIComponent(message.id), {method:'DELETE'}); if (!r.ok) throw new Error('没有删除'); await loadSaid(); }
     catch (e) { note('（没删掉：' + e.message + '）', 'err'); }
   }, true);
-  const more = document.createElement('button'); more.className = 'msg-action'; more.title = '更多消息操作'; more.setAttribute('aria-label', '更多消息操作'); more.appendChild(icEl('dots', 17));
+  const more = document.createElement('button'); more.className = 'msg-action'; more.title = '更多消息操作'; more.setAttribute('aria-label', '更多消息操作'); more.appendChild(icEl('dots', 18));
   const moreMenu = document.createElement('div'); moreMenu.className = 'msg-more';
   const addMore = (label, handler) => { const button = document.createElement('button'); button.textContent = label; button.onclick = async (event) => { event.stopPropagation(); await handler(); }; moreMenu.appendChild(button); };
   addMore('选择消息', () => { close(); setMessageSelectionMode(true); toggleMessageSelection(message.id); });
@@ -9626,12 +9626,20 @@ function renderMessageStyleSettings() {
   });
 }
 document.getElementById('messageStyleRow').onclick = () => {
+  messageStyleTab = effectiveMessageStyleMode();
   sheets.messageStyle.classList.add('open');
   renderMessageStyleSettings();
 };
 applyMessageStyles();
 applyInterfaceGlass();
-const applyGlassTheme = () => { applyMessageStyles(); applyInterfaceGlass(); };
+const applyGlassTheme = () => {
+  applyMessageStyles();
+  applyInterfaceGlass();
+  if (sheets.messageStyle.classList.contains('open')) {
+    messageStyleTab = effectiveMessageStyleMode();
+    renderMessageStyleSettings();
+  }
+};
 new MutationObserver(applyGlassTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 if (window.matchMedia) {
   const messageThemeQuery = matchMedia('(prefers-color-scheme: dark)');
