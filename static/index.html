@@ -5812,7 +5812,7 @@ async function send() {
   if (wasBusy) { try { fetch('api/stop', { method: 'POST' }); } catch (e) {} }
   const outgoingAttachments = attachments;
   const previousCacheEnd = cacheGlowEnd;
-  cacheGlowStop(false);
+  cacheGlowStop(true);
   box.value = '';
   box.style.height = 'auto';
   setBusy(true);
@@ -5832,7 +5832,11 @@ async function send() {
     attachments = outgoingAttachments.concat(attachments);
     box.value = text; box.dispatchEvent(new Event('input'));
     renderStrip(); setBusy(false);
-    if (previousCacheEnd > Date.now()) cacheGlowAnimate(previousCacheEnd);
+    if (previousCacheEnd > Date.now()) {
+      cacheGlowEnd = previousCacheEnd;
+      cacheGlowSave();
+      cacheGlowAnimate(previousCacheEnd);
+    }
     note('（没送出去：' + (e.message || '请再试一次') + '）', 'err');
   }
 }
