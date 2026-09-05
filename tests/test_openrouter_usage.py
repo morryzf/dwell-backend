@@ -133,5 +133,24 @@ class OpenRouterUsageDatabaseTest(unittest.TestCase):
         self.assertEqual(db.provider_usage_events("provider-1", "other-hash"), [])
 
 
+    def test_message_usage_preserves_subcent_cost_precision(self):
+        with db.conn() as cx:
+            cx.execute(
+                "INSERT INTO chats (id,name,made) VALUES (?,?,?)",
+                ("chat-precision", "Test", 1),
+            )
+            cx.execute(
+                "INSERT INTO messages (id,chat_id,role,content,made) VALUES (?,?,?,?,?)",
+                ("message-precision", "chat-precision", "assistant", "hello", 100),
+            )
+
+        db.message_usage_update(
+            "message-precision", {"cost": 0.00123456, "tokens_per_second": 12.3456}
+        )
+        usage = json.loads(db.message_get("message-precision")["usage_json"])
+        self.assertEqual(usage["cost"], 0.00123456)
+        self.assertEqual(usage["tokens_per_second"], 12.35)
+
+
 if __name__ == "__main__":
     unittest.main()
