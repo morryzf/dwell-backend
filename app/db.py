@@ -438,6 +438,21 @@ CREATE TABLE IF NOT EXISTS provider_models (
     FOREIGN KEY (provider_id) REFERENCES provider_profiles(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS ix_provider_models_favorite ON provider_models(favorite, updated DESC);
+
+-- OpenRouter 的实际请求费用流水。key_hash 只保存高熵密钥的单向摘要，
+-- 用来在用户以后更换密钥时隔离统计，绝不保存或返回明文密钥。
+CREATE TABLE IF NOT EXISTS provider_usage_events (
+    id          TEXT PRIMARY KEY,
+    provider_id TEXT NOT NULL,
+    key_hash    TEXT NOT NULL,
+    message_id  TEXT NOT NULL DEFAULT '',
+    request_kind TEXT NOT NULL DEFAULT 'chat_reply',
+    cost        REAL NOT NULL,
+    made        INTEGER NOT NULL,
+    source      TEXT NOT NULL DEFAULT 'request'
+);
+CREATE INDEX IF NOT EXISTS ix_provider_usage_scope
+ON provider_usage_events(provider_id, key_hash, made ASC);
 """
 
 
@@ -2467,3 +2482,73 @@ def message_delete_many(msg_ids: list[str]) -> int:
         cur = cx.execute(f"DELETE FROM messages WHERE id IN ({marks})", ids)
     return cur.rowcount
 
+
+
+# ---------------------------------------------------------------- 供应商用量流水
+
+def provider_usage_event_add(provider_id: str, key_hash: str, message_id: str,
+                             request_kind: str, cost: float, made: int | None = None) -> dict | None:
+    try:
+        clean_cost = float(cost)
+    except (TypeError, ValueError):
+        return None
+    if clean_cost < 0 or not provider_id or not key_hash:
+        return None
+    row = {
+        "id": new_id(),
+        "provider_id": provider_id,
+        "key_hash": key_hash,
+        "message_id": message_id or "",
+        "request_kind": (request_kind or "chat_reply")[:80],
+        "cost": round(clean_cost, 8),
+        "made": int(made or time.time()),
+        "source": "request",
+    }
+    with conn() as cx:
+        cx.execute(
+            "INSERT INTO provider_usage_events "
+            "(id,provider_id,key_hash,message_id,request_kind,cost,made,source) "
+            "VALUES (:id,:provider_id,:key_hash,:message_id,:request_kind,:cost,:made,:source)",
+            row,
+        )
+    return row
+
+
+def provider_usage_backfill_legacy(provider_id: str, key_hash: str) -> int:
+    """Import old provider-reported message costs once for the unchanged OpenRouter key."""
+    if not provider_id or not key_hash:
+        return 0
+    inserted = 0
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT id,made,usage_json FROM messages "
+            "WHERE role='assistant' AND usage_json NOT IN ('', '{}')"
+        ).fetchall()
+        for row in rows:
+            try:
+                usage = json.loads(row["usage_json"] or "{}")
+                cost = float(usage.get("cost"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if cost < 0:
+                continue
+            event_id = "legacy:" + row["id"]
+            cur = cx.execute(
+                "INSERT OR IGNORE INTO provider_usage_events "
+                "(id,provider_id,key_hash,message_id,request_kind,cost,made,source) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (event_id, provider_id, key_hash, row["id"], "legacy_message",
+                 round(cost, 8), int(row["made"]), "legacy_message"),
+            )
+            inserted += max(0, cur.rowcount)
+    return inserted
+
+
+def provider_usage_events(provider_id: str, key_hash: str) -> list[dict]:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT cost,made FROM provider_usage_events "
+            "WHERE provider_id=? AND key_hash=? ORDER BY made ASC",
+            (provider_id, key_hash),
+        ).fetchall()
+    return [dict(row) for row in rows]
