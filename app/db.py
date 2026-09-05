@@ -2393,7 +2393,10 @@ def message_usage_update(msg_id: str, usage: dict) -> bool:
     for key in allowed:
         value = usage.get(key) if isinstance(usage, dict) else None
         if isinstance(value, (int, float)) and value >= 0:
-            clean[key] = round(value, 2) if isinstance(value, float) else value
+            if isinstance(value, float):
+                clean[key] = round(value, 8 if key in {"cost", "upstream_cost"} else 2)
+            else:
+                clean[key] = value
     if isinstance(usage, dict):
         tts_turn_id = usage.get("tts_turn_id")
         if isinstance(tts_turn_id, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,120}", tts_turn_id):
