@@ -3189,6 +3189,47 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     .usage-currency button, .usage-range button, #usageRefresh { transition: none; }
   }
 </style>
+
+<style>
+  /* 五分钟缓存余温：沿输入卡轮廓退去，不占布局，也不与正文争夺注意力。 */
+  .composer { position: relative; }
+  .cache-glow-svg {
+    position: absolute; inset: -3px; z-index: 4; width: calc(100% + 6px); height: calc(100% + 6px);
+    overflow: visible; opacity: 0; pointer-events: none;
+    transition: opacity 180ms cubic-bezier(.23,1,.32,1);
+  }
+  .cache-glow-svg.on { opacity: 1; }
+  .cache-glow-line {
+    fill: none; stroke: color-mix(in srgb, var(--accent) 88%, #f5cbd9);
+    stroke-width: 1.55; stroke-linecap: round; vector-effect: non-scaling-stroke;
+    filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 48%, transparent));
+  }
+  .cache-glow-hit {
+    fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke;
+    pointer-events: stroke; cursor: pointer;
+  }
+  .cache-glow-svg:focus-visible { outline: none; }
+  .cache-glow-svg:focus-visible .cache-glow-line {
+    stroke-width: 2.2;
+    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 62%, transparent));
+  }
+  .cache-glow-hint {
+    position: absolute; right: 12px; top: -34px; z-index: 5;
+    padding: 5px 10px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+    border-radius: 999px; color: var(--text);
+    background: color-mix(in srgb, var(--card) 86%, transparent);
+    -webkit-backdrop-filter: blur(14px) saturate(1.35);
+    backdrop-filter: blur(14px) saturate(1.35);
+    box-shadow: 0 7px 20px rgba(56,41,49,.1);
+    font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap;
+    opacity: 0; transform: translateY(3px); pointer-events: none;
+    transition: opacity 150ms ease, transform 150ms cubic-bezier(.23,1,.32,1);
+  }
+  .cache-glow-hint.on { opacity: 1; transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) {
+    .cache-glow-svg, .cache-glow-hint { transition-property: opacity; }
+  }
+</style>
 </head>
 <body>
 
@@ -3248,6 +3289,11 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
 <footer>
   <div id="doingLine"><span class="pill"><span class="w"></span><span class="en"></span><span class="t"></span></span></div>
   <div class="composer">
+    <svg class="cache-glow-svg" id="cacheGlow" viewBox="0 0 100 60" preserveAspectRatio="none" role="button" tabindex="-1" aria-hidden="true" aria-label="缓存还在">
+      <path class="cache-glow-line" id="cacheGlowLine" pathLength="100"></path>
+      <path class="cache-glow-hit" id="cacheGlowHit" pathLength="100"></path>
+    </svg>
+    <span class="cache-glow-hint" id="cacheGlowHint" role="status" aria-live="polite"></span>
     <div id="attachStrip"></div>
     <textarea id="box" rows="1" placeholder="说点什么…" autocomplete="off"></textarea>
     <div class="ctlrow">
@@ -5321,6 +5367,7 @@ function handle(d) {
   }
 
   if (d.type === 'result') {
+    if (!d.is_error) cacheGlowStart();
     guEl?.querySelector('.caret')?.remove();
     guEl = null; endThink(); closeGroup(); processBand = null;
     if (regeneratingMessageId) {
@@ -5383,6 +5430,177 @@ function handle(d) {
     return;
   }
 }
+
+
+/* ---------- 五分钟缓存余温 ---------- */
+const CACHE_GLOW_MS = 5 * 60 * 1000;
+const CACHE_GLOW_STORAGE = 'dwellCacheGlow';
+const composerEl = document.querySelector('.composer');
+const cacheGlowEl = document.getElementById('cacheGlow');
+const cacheGlowLine = document.getElementById('cacheGlowLine');
+const cacheGlowHit = document.getElementById('cacheGlowHit');
+const cacheGlowHint = document.getElementById('cacheGlowHint');
+const cacheGlowReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let cacheGlowChatId = '';
+let cacheGlowEnd = 0;
+let cacheGlowTickTimer = null;
+let cacheGlowHintTimer = null;
+
+function cacheGlowPath() {
+  const rect = composerEl.getBoundingClientRect();
+  const width = Math.max(20, rect.width + 6);
+  const height = Math.max(20, rect.height + 6);
+  const inset = 2;
+  const radius = Math.max(8, Math.min(27, parseFloat(getComputedStyle(composerEl).borderRadius) + 1));
+  const left = inset, top = inset, right = width - inset, bottom = height - inset;
+  const r = Math.min(radius, (right - left) / 2, (bottom - top) / 2);
+  cacheGlowEl.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+  /* 从发送按钮旁的右下角出发，沿底边向左走完一圈。 */
+  const path = [
+    'M', right - r, bottom,
+    'H', left + r,
+    'A', r, r, 0, 0, 1, left, bottom - r,
+    'V', top + r,
+    'A', r, r, 0, 0, 1, left + r, top,
+    'H', right - r,
+    'A', r, r, 0, 0, 1, right, top + r,
+    'V', bottom - r,
+    'A', r, r, 0, 0, 1, right - r, bottom
+  ].join(' ');
+  cacheGlowLine.setAttribute('d', path);
+  cacheGlowHit.setAttribute('d', path);
+}
+
+function cacheGlowStored() {
+  try {
+    const value = JSON.parse(localStorage.getItem(CACHE_GLOW_STORAGE) || 'null');
+    return value && typeof value === 'object' ? value : null;
+  } catch (_) { return null; }
+}
+
+function cacheGlowSave() {
+  try {
+    if (cacheGlowEnd && cacheGlowChatId) {
+      localStorage.setItem(CACHE_GLOW_STORAGE, JSON.stringify({chat_id:cacheGlowChatId, end:cacheGlowEnd}));
+    } else {
+      localStorage.removeItem(CACHE_GLOW_STORAGE);
+    }
+  } catch (_) {}
+}
+
+function cacheGlowRemaining() {
+  return Math.max(0, cacheGlowEnd - Date.now());
+}
+
+function cacheGlowText() {
+  const seconds = Math.max(0, Math.ceil(cacheGlowRemaining() / 1000));
+  return '缓存还在 · ' + Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+}
+
+function cacheGlowUpdateLabel() {
+  if (!cacheGlowEnd) return;
+  const text = cacheGlowText();
+  cacheGlowEl.setAttribute('aria-label', text + '，点击查看');
+  if (cacheGlowHint.classList.contains('on')) cacheGlowHint.textContent = text;
+  if (cacheGlowRemaining() <= 0) cacheGlowStop(true);
+}
+
+function cacheGlowShowHint() {
+  if (!cacheGlowEnd || cacheGlowRemaining() <= 0) return;
+  clearTimeout(cacheGlowHintTimer);
+  cacheGlowHint.textContent = cacheGlowText();
+  cacheGlowHint.classList.add('on');
+  cacheGlowHintTimer = setTimeout(() => cacheGlowHint.classList.remove('on'), 1800);
+}
+
+function cacheGlowAnimate(end) {
+  const remaining = Math.max(0, Number(end) - Date.now());
+  if (!remaining) { cacheGlowStop(true); return; }
+  cacheGlowEnd = Number(end);
+  cacheGlowPath();
+  cacheGlowEl.classList.add('on');
+  cacheGlowEl.setAttribute('aria-hidden', 'false');
+  cacheGlowEl.setAttribute('tabindex', '0');
+  const elapsedRatio = Math.min(1, Math.max(0, 1 - remaining / CACHE_GLOW_MS));
+  cacheGlowLine.style.transition = 'none';
+  cacheGlowLine.style.opacity = '1';
+  if (cacheGlowReducedMotion.matches) {
+    cacheGlowLine.style.strokeDasharray = '100';
+    cacheGlowLine.style.strokeDashoffset = '0';
+    cacheGlowLine.getBoundingClientRect();
+    cacheGlowLine.style.transition = 'opacity ' + remaining + 'ms linear';
+    cacheGlowLine.style.opacity = '0';
+  } else {
+    cacheGlowLine.style.strokeDasharray = '100';
+    cacheGlowLine.style.strokeDashoffset = String(elapsedRatio * 100);
+    cacheGlowLine.getBoundingClientRect();
+    cacheGlowLine.style.transition = 'stroke-dashoffset ' + remaining + 'ms linear';
+    cacheGlowLine.style.strokeDashoffset = '100';
+  }
+  clearInterval(cacheGlowTickTimer);
+  cacheGlowTickTimer = setInterval(cacheGlowUpdateLabel, 1000);
+  cacheGlowUpdateLabel();
+}
+
+function cacheGlowStart() {
+  const begin = () => {
+    cacheGlowEnd = Date.now() + CACHE_GLOW_MS;
+    cacheGlowSave();
+    cacheGlowAnimate(cacheGlowEnd);
+  };
+  if (cacheGlowChatId) { begin(); return; }
+  fetch('api/chats?scope=live', {cache:'no-store'}).then(r => r.json()).then(data => {
+    const current = (data.items || []).find(item => item.current);
+    if (current) cacheGlowChatId = current.id;
+    begin();
+  }).catch(begin);
+}
+
+function cacheGlowStop(clearStored, quick) {
+  const stored = cacheGlowStored();
+  cacheGlowEnd = 0;
+  clearInterval(cacheGlowTickTimer);
+  cacheGlowTickTimer = null;
+  clearTimeout(cacheGlowHintTimer);
+  cacheGlowHint.classList.remove('on');
+  cacheGlowLine.style.transition = quick ? 'none' : 'stroke-dashoffset 160ms cubic-bezier(.23,1,.32,1), opacity 160ms ease';
+  cacheGlowLine.style.strokeDashoffset = '100';
+  cacheGlowLine.style.opacity = '0';
+  cacheGlowEl.classList.remove('on');
+  cacheGlowEl.setAttribute('aria-hidden', 'true');
+  cacheGlowEl.setAttribute('tabindex', '-1');
+  if (clearStored && (!stored || !cacheGlowChatId || stored.chat_id === cacheGlowChatId)) {
+    try { localStorage.removeItem(CACHE_GLOW_STORAGE); } catch (_) {}
+  }
+}
+
+function cacheGlowSetChat(chatId) {
+  cacheGlowChatId = String(chatId || '');
+  const stored = cacheGlowStored();
+  if (stored && stored.chat_id === cacheGlowChatId && Number(stored.end) > Date.now()) {
+    cacheGlowAnimate(Number(stored.end));
+  } else {
+    cacheGlowStop(false, true);
+  }
+}
+
+cacheGlowHit.addEventListener('click', cacheGlowShowHint);
+cacheGlowEl.addEventListener('keydown', event => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    cacheGlowShowHint();
+  }
+});
+new ResizeObserver(() => {
+  if (!cacheGlowEnd) return;
+  cacheGlowPath();
+}).observe(composerEl);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && cacheGlowEnd) cacheGlowAnimate(cacheGlowEnd);
+});
+cacheGlowReducedMotion.addEventListener?.('change', () => {
+  if (cacheGlowEnd) cacheGlowAnimate(cacheGlowEnd);
+});
 
 /* ---------- 发送（带图） ---------- */
 let attachments = [];
@@ -5593,6 +5811,8 @@ async function send() {
   const wasBusy = guBusy;
   if (wasBusy) { try { fetch('api/stop', { method: 'POST' }); } catch (e) {} }
   const outgoingAttachments = attachments;
+  const previousCacheEnd = cacheGlowEnd;
+  cacheGlowStop(false);
   box.value = '';
   box.style.height = 'auto';
   setBusy(true);
@@ -5612,6 +5832,7 @@ async function send() {
     attachments = outgoingAttachments.concat(attachments);
     box.value = text; box.dispatchEvent(new Event('input'));
     renderStrip(); setBusy(false);
+    if (previousCacheEnd > Date.now()) cacheGlowAnimate(previousCacheEnd);
     note('（没送出去：' + (e.message || '请再试一次') + '）', 'err');
   }
 }
@@ -6533,6 +6754,7 @@ async function openSearchChatHit(hit) {
     guEl = null; turnThink = null; curGroup = null;
     earliestSeq = null; olderBtn = null;
     setTitle(chat.name);
+    cacheGlowSetChat(chat.id);
     refreshInstructionButton(); refreshMcpChatButton();
     await loadSaid(hit.message_id);
     document.querySelector('#log .row[data-message-id="' + CSS.escape(hit.message_id) + '"]')
@@ -8851,7 +9073,7 @@ document.getElementById('aliveRow').onclick = async () => {
   try {
     const c = await (await fetch('api/chats?scope=live', { cache: 'no-store' })).json();
     const cur = (c.items || []).find(x => x.current);
-    if (cur) setTitle(cur.name);
+    if (cur) { setTitle(cur.name); cacheGlowSetChat(cur.id); }
   } catch {}
 })();
 
@@ -10252,6 +10474,7 @@ function showChatHere(it) {
   guEl = null; turnThink = null; curGroup = null;
   earliestSeq = null; olderBtn = null;
   setTitle(it.name);
+  cacheGlowSetChat(it.id);
   refreshInstructionButton();
   refreshMcpChatButton();
   loadSaid().then(() => poll());
