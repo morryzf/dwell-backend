@@ -472,6 +472,8 @@ def init_db():
             cx.execute("ALTER TABLE chats ADD COLUMN split_replies INTEGER NOT NULL DEFAULT 0")
         if "show_thinking" not in cols:
             cx.execute("ALTER TABLE chats ADD COLUMN show_thinking INTEGER NOT NULL DEFAULT 1")
+        if "prompt_cache_ttl" not in cols:
+            cx.execute("ALTER TABLE chats ADD COLUMN prompt_cache_ttl TEXT NOT NULL DEFAULT ''")
         provider_cols = {
             r["name"] for r in cx.execute("PRAGMA table_info(provider_profiles)").fetchall()
         }
@@ -1046,11 +1048,12 @@ def chat_branch_from_message(source_chat_id: str, message_id: str) -> dict | Non
         branch = {"id": new_id(), "name": base_name[:max(1, 60 - len(suffix))] + suffix,
                   "made": int(time.time()), "provider_id": source["provider_id"],
                   "model_id": source["model_id"], "reasoning_effort": source["reasoning_effort"],
-                  "show_thinking": source["show_thinking"]}
+                  "show_thinking": source["show_thinking"],
+                  "prompt_cache_ttl": source["prompt_cache_ttl"]}
         cx.execute("""INSERT INTO chats
-                      (id,name,made,archived,provider_id,model_id,reasoning_effort,show_thinking)
+                      (id,name,made,archived,provider_id,model_id,reasoning_effort,show_thinking,prompt_cache_ttl)
                       VALUES
-                      (:id,:name,:made,0,:provider_id,:model_id,:reasoning_effort,:show_thinking)""", branch)
+                      (:id,:name,:made,0,:provider_id,:model_id,:reasoning_effort,:show_thinking,:prompt_cache_ttl)""", branch)
         rows = cx.execute("SELECT rowid,* FROM messages WHERE chat_id=? AND rowid<=? ORDER BY rowid ASC",
                           (source_chat_id, pivot["rowid"])).fetchall()
         id_map: dict[str, str] = {}
@@ -1091,17 +1094,19 @@ def chat_branch_from_message(source_chat_id: str, message_id: str) -> dict | Non
 def chat_model_get(chat_id: str) -> dict:
     with conn() as cx:
         row = cx.execute(
-            "SELECT provider_id, model_id, reasoning_effort, show_thinking FROM chats WHERE id=?",
+            "SELECT provider_id, model_id, reasoning_effort, show_thinking, prompt_cache_ttl FROM chats WHERE id=?",
             (chat_id,),
         ).fetchone()
     return dict(row) if row else {
         "provider_id": "", "model_id": "", "reasoning_effort": "", "show_thinking": 1,
+        "prompt_cache_ttl": "",
     }
 
 
 def chat_model_set(chat_id: str, provider_id: str | None = None,
                    model_id: str | None = None, reasoning_effort: str | None = None,
-                   show_thinking: bool | None = None) -> bool:
+                   show_thinking: bool | None = None,
+                   prompt_cache_ttl: str | None = None) -> bool:
     current = chat_model_get(chat_id)
     if not chat_get(chat_id):
         return False
@@ -1110,12 +1115,14 @@ def chat_model_set(chat_id: str, provider_id: str | None = None,
         "model_id": current["model_id"] if model_id is None else model_id,
         "reasoning_effort": current["reasoning_effort"] if reasoning_effort is None else reasoning_effort,
         "show_thinking": current["show_thinking"] if show_thinking is None else (1 if show_thinking else 0),
+        "prompt_cache_ttl": current["prompt_cache_ttl"] if prompt_cache_ttl is None else prompt_cache_ttl,
         "id": chat_id,
     }
     with conn() as cx:
         cx.execute(
             "UPDATE chats SET provider_id=:provider_id, model_id=:model_id, "
-            "reasoning_effort=:reasoning_effort, show_thinking=:show_thinking WHERE id=:id",
+            "reasoning_effort=:reasoning_effort, show_thinking=:show_thinking, "
+            "prompt_cache_ttl=:prompt_cache_ttl WHERE id=:id",
             values,
         )
     return True
