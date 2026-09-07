@@ -47,6 +47,16 @@ class ProviderPromptCacheDatabaseTest(unittest.TestCase):
 
         self.assertEqual(saved["prompt_cache_ttl"], "off")
 
+    def test_chat_cache_ttl_round_trips_independently(self):
+        first = db.chat_add("First")
+        second = db.chat_add("Second")
+
+        db.chat_model_set(first["id"], prompt_cache_ttl="1h")
+        db.chat_model_set(second["id"], prompt_cache_ttl="5m")
+
+        self.assertEqual(db.chat_model_get(first["id"])["prompt_cache_ttl"], "1h")
+        self.assertEqual(db.chat_model_get(second["id"])["prompt_cache_ttl"], "5m")
+
 
 class PromptCacheIntegrationSourceTest(unittest.TestCase):
     @classmethod
@@ -69,6 +79,15 @@ class PromptCacheIntegrationSourceTest(unittest.TestCase):
         self.assertIn('id="apCacheTtl"', self.ui)
         self.assertIn('value="5m">5 分钟（推荐）', self.ui)
         self.assertIn("https://openrouter.ai/api/v1", self.ui)
+
+    def test_chat_cache_ttl_is_exposed_and_applied_to_both_request_paths(self):
+        self.assertIn('"prompt_cache_ttl": _chat_prompt_cache_ttl(selection, provider)', self.main)
+        self.assertEqual(self.main.count("_chat_cache_provider(provider, selection)"), 2)
+        self.assertIn("prompt_cache_ttl=prompt_cache_ttl", self.main)
+        self.assertIn("function renderPromptCachePicker()", self.ui)
+        self.assertIn("function setChatPromptCacheTtl(ttl, button)", self.ui)
+        self.assertIn("{id: '5m', name: '5 分钟'}", self.ui)
+        self.assertIn("{id: '1h', name: '1 小时'}", self.ui)
 
 
 if __name__ == "__main__":
