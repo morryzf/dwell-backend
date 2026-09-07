@@ -12,8 +12,11 @@ class CacheGlowStaticTest(unittest.TestCase):
         textarea = HTML.index('<textarea id="box"', composer)
         section = HTML[composer:textarea]
         self.assertIn('id="cacheGlow"', section)
+        self.assertIn('id="cacheGlowAura"', section)
         self.assertIn('id="cacheGlowLine"', section)
         self.assertIn('id="cacheGlowHit"', section)
+        self.assertIn('id="cacheGlowBlur"', section)
+        self.assertIn('<feGaussianBlur stdDeviation="2.6">', section)
         self.assertIn('pathLength="100"', section)
         self.assertIn('id="cacheGlowHint"', section)
         self.assertIn('position: absolute; inset: -3px', HTML)
@@ -21,7 +24,9 @@ class CacheGlowStaticTest(unittest.TestCase):
     def test_countdown_is_five_minutes_and_uses_linear_stroke(self):
         self.assertIn("const CACHE_GLOW_MS = 5 * 60 * 1000;", HTML)
         self.assertIn("style.transition = 'stroke-dashoffset ' + remaining + 'ms linear'", HTML)
-        self.assertIn("cacheGlowLine.style.strokeDashoffset = '100';", HTML)
+        self.assertIn("const glowStrokes = [cacheGlowAura, cacheGlowLine];", HTML)
+        self.assertIn("stroke.style.strokeDashoffset = '100';", HTML)
+        self.assertIn("filter: url(#cacheGlowBlur)", HTML)
         self.assertIn("从发送按钮旁的右下角出发", HTML)
         self.assertNotIn("@keyframes cacheGlow", HTML)
 
