@@ -10802,6 +10802,7 @@ const EFFORTS = [
 let curModel = '';       // 真跑着的（init 报的）
 let curEffort = 'high';
 let curShowThinking = true;
+let curPromptCacheTtl = 'off';
 const pill = document.getElementById('modelPill');
 
 function modelSlug(id) {
@@ -11111,6 +11112,7 @@ reasoningBtn.onclick = openReasoningSheet;
     const d = await (await fetch('api/model')).json();
     curEffort = d.effort || 'high';
     curShowThinking = d.show_thinking !== false;
+    curPromptCacheTtl = d.prompt_cache_ttl || 'off';
     currentProviderId = d.provider_id || '';
     setModelPill(d.model || '');
     syncReasoningButton();
@@ -11134,6 +11136,7 @@ async function chooseCatalogModel(item) {
     const r = await (await fetch('api/model', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:item.provider_id,model:item.model_id})})).json();
     if (!r.ok) throw new Error(r.detail || '没有切换');
     currentProviderId = item.provider_id || currentProviderId;
+    curPromptCacheTtl = r.prompt_cache_ttl || curPromptCacheTtl;
     setModelPill(item.model_id); modelSheetEl.classList.remove('open');
     note('（这间聊天换成 ' + item.model_id + ' 了）');
   } catch (e) { note('（没换上：' + e.message + '）', 'err'); }
@@ -11240,6 +11243,58 @@ function composerModelSwipeRow(item, removable) {
   };
   return shell;
 }
+async function setChatPromptCacheTtl(ttl, button) {
+  if (ttl === curPromptCacheTtl) return;
+  button.disabled = true;
+  try {
+    const response = await fetch('api/model', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({prompt_cache_ttl: ttl})
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || '没有保存');
+    curPromptCacheTtl = data.prompt_cache_ttl || ttl;
+    renderProviderModelPicker();
+  } catch (error) {
+    button.disabled = false;
+    note('（缓存时长没存上：' + error.message + '）', 'err');
+  }
+}
+
+function renderPromptCachePicker() {
+  const provider = (catalogData.providers || []).find(
+    item => item.id === currentProviderId
+  );
+  if (!provider || provider.provider_type !== 'openrouter'
+      || !String(curModel || '').toLowerCase().startsWith('anthropic/')) return;
+  const label = document.createElement('div');
+  label.className = 'group-label';
+  label.textContent = '缓存时长';
+  modelBody.appendChild(label);
+  const group = document.createElement('div');
+  group.className = 'group';
+  [
+    {id: 'off', name: '关闭'},
+    {id: '5m', name: '5 分钟'},
+    {id: '1h', name: '1 小时'},
+  ].forEach(option => {
+    const row = document.createElement('button');
+    row.className = 'grow';
+    row.setAttribute('aria-pressed', String(curPromptCacheTtl === option.id));
+    const name = document.createElement('span');
+    name.textContent = option.name;
+    row.appendChild(name);
+    if (curPromptCacheTtl === option.id) {
+      const check = icEl('check', 17);
+      check.classList.add('ck');
+      row.appendChild(check);
+    }
+    row.onclick = () => setChatPromptCacheTtl(option.id, row);
+    group.appendChild(row);
+  });
+  modelBody.appendChild(group);
+}
+
 function renderProviderModelPicker() {
   modelBody.innerHTML = '';
   modelTitle.textContent = catalogMode === 'favorites' ? '切换模型' : '模型目录';
@@ -11263,6 +11318,7 @@ function renderProviderModelPicker() {
     } else {
       const group = document.createElement('div'); group.className = 'group'; favorites.forEach(item => group.appendChild(composerModelSwipeRow(item, true))); modelBody.appendChild(group);
     }
+    renderPromptCachePicker();
     return;
   }
   const select = document.createElement('select'); select.className = 'ap-in';
@@ -11290,6 +11346,7 @@ async function openProviderModelPicker(mode = 'favorites') {
   try {
     const selection = await (await fetch('api/model', {cache:'no-store'})).json();
     currentProviderId = selection.provider_id || '';
+    curPromptCacheTtl = selection.prompt_cache_ttl || 'off';
     setModelPill(selection.model || '');
     await getModelCatalog();
     renderProviderModelPicker();
