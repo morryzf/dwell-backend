@@ -448,6 +448,9 @@ CREATE TABLE IF NOT EXISTS provider_usage_events (
     message_id  TEXT NOT NULL DEFAULT '',
     request_kind TEXT NOT NULL DEFAULT 'chat_reply',
     cost        REAL NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    cached_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_observed INTEGER NOT NULL DEFAULT 0,
     made        INTEGER NOT NULL,
     source      TEXT NOT NULL DEFAULT 'request'
 );
@@ -496,6 +499,24 @@ def init_db():
             cx.execute("ALTER TABLE messages ADD COLUMN thinking TEXT NOT NULL DEFAULT ''")
         if "usage_json" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN usage_json TEXT NOT NULL DEFAULT '{}'")
+        usage_cols = {
+            r["name"] for r in cx.execute("PRAGMA table_info(provider_usage_events)").fetchall()
+        }
+        if "input_tokens" not in usage_cols:
+            cx.execute(
+                "ALTER TABLE provider_usage_events ADD COLUMN input_tokens "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "cached_tokens" not in usage_cols:
+            cx.execute(
+                "ALTER TABLE provider_usage_events ADD COLUMN cached_tokens "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "cache_observed" not in usage_cols:
+            cx.execute(
+                "ALTER TABLE provider_usage_events ADD COLUMN cache_observed "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         # #82 曾在保存时强制补“我记得：”。只清理一次这段前缀，绝不改正文；
         # 清理完成后，用户以后主动写下同样的开头也会原样保留。
         cleanup_key = "memory_remove_forced_prefix_v1"
@@ -2497,9 +2518,13 @@ def message_delete_many(msg_ids: list[str]) -> int:
 # ---------------------------------------------------------------- 供应商用量流水
 
 def provider_usage_event_add(provider_id: str, key_hash: str, message_id: str,
-                             request_kind: str, cost: float, made: int | None = None) -> dict | None:
+                             request_kind: str, cost: float, made: int | None = None,
+                             *, input_tokens: int = 0, cached_tokens: int = 0,
+                             cache_observed: bool = False) -> dict | None:
     try:
         clean_cost = float(cost)
+        clean_input_tokens = max(0, int(input_tokens or 0))
+        clean_cached_tokens = max(0, int(cached_tokens or 0))
     except (TypeError, ValueError):
         return None
     if clean_cost < 0 or not provider_id or not key_hash:
@@ -2511,14 +2536,19 @@ def provider_usage_event_add(provider_id: str, key_hash: str, message_id: str,
         "message_id": message_id or "",
         "request_kind": (request_kind or "chat_reply")[:80],
         "cost": round(clean_cost, 8),
+        "input_tokens": clean_input_tokens,
+        "cached_tokens": clean_cached_tokens,
+        "cache_observed": int(bool(cache_observed)),
         "made": int(made or time.time()),
         "source": "request",
     }
     with conn() as cx:
         cx.execute(
             "INSERT INTO provider_usage_events "
-            "(id,provider_id,key_hash,message_id,request_kind,cost,made,source) "
-            "VALUES (:id,:provider_id,:key_hash,:message_id,:request_kind,:cost,:made,:source)",
+            "(id,provider_id,key_hash,message_id,request_kind,cost,input_tokens,"
+            "cached_tokens,cache_observed,made,source) "
+            "VALUES (:id,:provider_id,:key_hash,:message_id,:request_kind,:cost,"
+            ":input_tokens,:cached_tokens,:cache_observed,:made,:source)",
             row,
         )
     return row
@@ -2557,7 +2587,8 @@ def provider_usage_backfill_legacy(provider_id: str, key_hash: str) -> int:
 def provider_usage_events(provider_id: str, key_hash: str) -> list[dict]:
     with conn() as cx:
         rows = cx.execute(
-            "SELECT cost,made FROM provider_usage_events "
+            "SELECT cost,made,input_tokens,cached_tokens,cache_observed "
+            "FROM provider_usage_events "
             "WHERE provider_id=? AND key_hash=? ORDER BY made ASC",
             (provider_id, key_hash),
         ).fetchall()

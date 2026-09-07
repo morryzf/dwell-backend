@@ -4184,6 +4184,13 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         **{key: 0 for key in token_usage_keys},
         **{key: 0.0 for key in cost_usage_keys},
     }
+    usage_key_hash = ""
+    if provider and provider.get("provider_type") == "openrouter":
+        try:
+            _, usage_key_hash = _openrouter_credentials(provider)
+        except Exception:
+            # Usage accounting must never interfere with the reply itself.
+            usage_key_hash = ""
 
     def append_stream_thinking(text: str):
         if not show_thinking or not text:
@@ -4304,6 +4311,18 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     usage_totals[key] += max(0.0, float(round_usage.get(key) or 0))
                 except (TypeError, ValueError):
                     continue
+            if usage_key_hash and round_usage:
+                try:
+                    db.provider_usage_event_add(
+                        provider["id"], usage_key_hash, current_message_id,
+                        request_kind, round_usage.get("cost") or 0,
+                        input_tokens=round_usage.get("input_tokens") or 0,
+                        cached_tokens=round_usage.get("cached_tokens") or 0,
+                        cache_observed="cached_tokens" in round_usage,
+                    )
+                except Exception:
+                    # Usage accounting must never turn a completed model round into an error.
+                    pass
             if not calls:
                 break
 
@@ -4374,16 +4393,6 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             # Split replies persist as several messages; this id lets voice join one full reply.
             usage_totals["tts_turn_id"] = tts_turn_id
             db.message_usage_update(current_message_id, usage_totals)
-            if provider.get("provider_type") == "openrouter":
-                try:
-                    _, usage_key_hash = _openrouter_credentials(provider)
-                    db.provider_usage_event_add(
-                        provider["id"], usage_key_hash, current_message_id,
-                        request_kind, usage_totals.get("cost") or 0,
-                    )
-                except Exception:
-                    # Usage accounting must never turn a completed reply into an error.
-                    pass
         _emit(chat_id, {
             "type": "assistant",
             "message": {"content": assistant_parts(full)}

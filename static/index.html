@@ -3158,24 +3158,49 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .usage-summary > div { min-width: 0; display: grid; gap: 6px; padding: 14px 12px; background: var(--panel); }
   .usage-summary span { color: var(--dim); font-size: 11px; }
   .usage-summary strong { overflow: hidden; font: 600 clamp(15px,4.5vw,19px)/1.2 var(--serif); text-overflow: ellipsis; }
+  .usage-cache-card {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    margin: -6px 0 18px; padding: 15px 17px; border: 1px solid var(--line);
+    border-radius: 17px; background: var(--panel);
+  }
+  .usage-cache-card > div { min-width: 0; display: grid; gap: 4px; }
+  .usage-cache-card span { font-size: 13px; font-weight: 650; }
+  .usage-cache-card small { overflow: hidden; color: var(--dim); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+  .usage-cache-card > strong { flex: 0 0 auto; color: var(--accent); font: 600 25px/1 var(--serif); }
   .usage-chart-card { padding: 18px 16px 15px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel); }
   .usage-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .usage-chart-head > div:first-child { min-width: 0; display: grid; gap: 4px; }
   .usage-chart-head strong { font-size: 14px; }
   .usage-chart-head span { color: var(--dim); font-size: 11px; }
   .usage-range button { min-width: 38px; min-height: 34px; padding: 0 8px; }
+  .usage-chart-detail {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    min-height: 37px; margin-top: 14px; padding: 10px 12px; border-radius: 12px;
+    background: color-mix(in srgb, var(--accent-soft) 34%, transparent);
+  }
+  .usage-chart-detail strong { font-size: 12px; }
+  .usage-chart-detail span { color: var(--dim); font-size: 10.5px; text-align: right; }
   .usage-chart {
-    height: 188px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(18px,1fr);
-    align-items: end; gap: clamp(5px,2vw,12px); margin-top: 22px; overflow-x: auto; scrollbar-width: none;
+    height: 166px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(18px,1fr);
+    align-items: end; gap: clamp(5px,2vw,12px); margin-top: 14px; overflow-x: auto; scrollbar-width: none;
   }
   .usage-chart::-webkit-scrollbar { display: none; }
-  .usage-bar { height: 100%; min-width: 18px; display: grid; grid-template-rows: 1fr 20px; gap: 7px; align-items: end; }
+  .usage-bar {
+    appearance: none; height: 100%; min-width: 18px; display: grid;
+    grid-template-rows: 1fr 20px; gap: 7px; align-items: end; padding: 0;
+    border: 0; background: none; color: inherit; cursor: pointer;
+    transition: transform 150ms var(--ease-out);
+  }
+  .usage-bar:active { transform: scale(.97); }
   .usage-bar-track { height: 100%; display: flex; align-items: end; justify-content: center; border-radius: 8px; background: color-mix(in srgb, var(--card) 74%, transparent); }
   .usage-bar-fill {
     width: min(74%, 28px); min-height: 3px; border-radius: 8px 8px 4px 4px;
-    background: color-mix(in srgb, var(--accent) 64%, var(--accent-soft));
+    background: color-mix(in srgb, var(--accent) 58%, var(--accent-soft));
+    transition: background-color 150ms ease, filter 150ms ease;
   }
-  .usage-bar:last-child .usage-bar-fill { background: var(--accent); }
+  .usage-bar[aria-pressed="true"] .usage-bar-fill { background: var(--accent); filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--accent) 34%, transparent)); }
+  .usage-bar[aria-pressed="true"] .usage-bar-label { color: var(--ink); font-weight: 650; }
+  .usage-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
   .usage-bar-label { overflow: hidden; color: var(--dim); font-size: 9.5px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
   .usage-chart-empty { align-self: center; grid-column: 1 / -1; color: var(--dim); font-size: 13px; text-align: center; }
   .usage-note { margin: 13px 5px 0; color: var(--dim); font-size: 11px; line-height: 1.65; }
@@ -3186,7 +3211,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     .usage-summary > div { padding-left: 9px; padding-right: 9px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .usage-currency button, .usage-range button, #usageRefresh { transition: none; }
+    .usage-currency button, .usage-range button, .usage-bar, .usage-bar-fill, #usageRefresh { transition: none; }
   }
 </style>
 
@@ -3674,6 +3699,10 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
         <div><span>本周</span><strong id="usageWeek">—</strong></div>
         <div><span>本月</span><strong id="usageMonth">—</strong></div>
       </section>
+      <section class="usage-cache-card" aria-label="请求缓存命中率">
+        <div><span>请求命中率</span><small id="usageCacheMeta">从本次更新后的请求开始统计</small></div>
+        <strong id="usageCacheRate">—</strong>
+      </section>
       <section class="usage-chart-card">
         <div class="usage-chart-head">
           <div><strong id="usageChartTitle">最近 7 天</strong><span id="usageChartTotal">—</span></div>
@@ -3683,7 +3712,10 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
             <button type="button" data-usage-range="monthly" aria-pressed="false">月</button>
           </div>
         </div>
-        <div class="usage-chart" id="usageChart" role="img" aria-label="用量趋势图"></div>
+        <div class="usage-chart-detail" id="usageChartDetail" aria-live="polite">
+          <strong>点一下柱子看具体金额</strong><span>也会显示该时段的缓存命中情况</span>
+        </div>
+        <div class="usage-chart" id="usageChart" role="group" aria-label="用量趋势图"></div>
       </section>
       <p class="usage-note" id="usageNote">按 UTC 统计 · 金额为 OpenRouter 当前密钥在 Dwell 中的用量</p>
     </div>
@@ -10628,6 +10660,7 @@ async function loadContext() {
 let openRouterUsageData = null;
 let openRouterUsageRange = 'daily';
 let openRouterUsageCurrency = 'USD';
+let openRouterUsageSelectedStart = '';
 try {
   openRouterUsageCurrency = localStorage.getItem('dwellUsageCurrency') === 'CNY' ? 'CNY' : 'USD';
 } catch (_) {}
@@ -10645,6 +10678,13 @@ function openRouterUsageAmount(value) {
   return symbol + amount.toLocaleString('en-US', {minimumFractionDigits:digits, maximumFractionDigits:digits});
 }
 
+function openRouterUsageExactAmount(value) {
+  let amount = openRouterUsageNumber(value);
+  if (openRouterUsageCurrency === 'CNY') amount *= openRouterUsageNumber(openRouterUsageData?.exchange_rate?.rate);
+  const symbol = openRouterUsageCurrency === 'CNY' ? '¥' : '$';
+  return symbol + amount.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:8});
+}
+
 function openRouterUsageLabel(start, range) {
   const text = String(start || '');
   if (range === 'monthly') {
@@ -10653,6 +10693,24 @@ function openRouterUsageLabel(start, range) {
   }
   const parts = text.split('-');
   return parts.length > 2 ? Number(parts[1]) + '/' + Number(parts[2]) : text;
+}
+
+function openRouterUsagePeriodLabel(start, range) {
+  const parts = String(start || '').split('-').map(Number);
+  if (range === 'monthly' && parts.length >= 2) return parts[0] + '年' + parts[1] + '月';
+  if (parts.length < 3) return String(start || '');
+  if (range === 'weekly') {
+    const end = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + 6));
+    return parts[0] + '年' + parts[1] + '月' + parts[2] + '日–'
+      + (end.getUTCMonth() + 1) + '月' + end.getUTCDate() + '日';
+  }
+  return parts[0] + '年' + parts[1] + '月' + parts[2] + '日';
+}
+
+function openRouterUsageHitText(point) {
+  const requests = Math.max(0, Math.trunc(openRouterUsageNumber(point?.requests)));
+  const hits = Math.max(0, Math.trunc(openRouterUsageNumber(point?.cache_hits)));
+  return requests ? '缓存命中 ' + hits + '/' + requests + ' · ' + (hits / requests * 100).toFixed(1) + '%' : '命中率暂无数据';
 }
 
 function renderOpenRouterUsage() {
@@ -10686,9 +10744,18 @@ function renderOpenRouterUsage() {
   const labels = {daily:'最近 7 天', weekly:'最近 8 周', monthly:'最近 12 个月'};
   const points = Array.isArray(data.series?.[openRouterUsageRange]) ? data.series[openRouterUsageRange] : [];
   const total = points.reduce((sum, point) => sum + openRouterUsageNumber(point.cost), 0);
+  const observedRequests = points.reduce((sum, point) => sum + Math.max(0, Math.trunc(openRouterUsageNumber(point.requests))), 0);
+  const cacheHits = points.reduce((sum, point) => sum + Math.max(0, Math.trunc(openRouterUsageNumber(point.cache_hits))), 0);
+  document.getElementById('usageCacheRate').textContent =
+    observedRequests ? (cacheHits / observedRequests * 100).toFixed(1) + '%' : '—';
+  document.getElementById('usageCacheMeta').textContent = observedRequests
+    ? labels[openRouterUsageRange] + ' · ' + cacheHits + ' / ' + observedRequests + ' 次命中'
+    : '从本次更新后的请求开始统计';
   document.getElementById('usageChartTitle').textContent = labels[openRouterUsageRange];
   document.getElementById('usageChartTotal').textContent = '合计 ' + openRouterUsageAmount(total);
+
   const chart = document.getElementById('usageChart');
+  const detail = document.getElementById('usageChartDetail');
   chart.innerHTML = '';
   chart.setAttribute('aria-label', labels[openRouterUsageRange] + '，合计 ' + openRouterUsageAmount(total));
   const max = Math.max(...points.map(point => openRouterUsageNumber(point.cost)), 0);
@@ -10697,14 +10764,33 @@ function renderOpenRouterUsage() {
     empty.className = 'usage-chart-empty';
     empty.textContent = '还没有可展示的用量';
     chart.appendChild(empty);
+    detail.innerHTML = '<strong>还没有具体数值</strong><span>产生用量后会显示在这里</span>';
   } else {
+    if (!points.some(point => point.start === openRouterUsageSelectedStart)) {
+      openRouterUsageSelectedStart = points[points.length - 1].start;
+    }
+    const selectPoint = point => {
+      openRouterUsageSelectedStart = point.start;
+      chart.querySelectorAll('.usage-bar').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.usageStart === point.start));
+      });
+      detail.innerHTML = '';
+      const amount = document.createElement('strong');
+      amount.textContent = openRouterUsagePeriodLabel(point.start, openRouterUsageRange) + ' · ' + openRouterUsageExactAmount(point.cost);
+      const hit = document.createElement('span');
+      hit.textContent = openRouterUsageHitText(point);
+      detail.append(amount, hit);
+    };
     points.forEach(point => {
       const cost = openRouterUsageNumber(point.cost);
       const label = openRouterUsageLabel(point.start, openRouterUsageRange);
-      const bar = document.createElement('div');
+      const bar = document.createElement('button');
+      bar.type = 'button';
       bar.className = 'usage-bar';
-      bar.setAttribute('role', 'img');
-      bar.setAttribute('aria-label', label + '，' + openRouterUsageAmount(cost));
+      bar.dataset.usageStart = point.start;
+      bar.setAttribute('aria-pressed', String(point.start === openRouterUsageSelectedStart));
+      bar.setAttribute('aria-label', openRouterUsagePeriodLabel(point.start, openRouterUsageRange)
+        + '，' + openRouterUsageExactAmount(cost) + '，' + openRouterUsageHitText(point));
       const track = document.createElement('div');
       track.className = 'usage-bar-track';
       const fill = document.createElement('i');
@@ -10715,8 +10801,10 @@ function renderOpenRouterUsage() {
       tick.className = 'usage-bar-label';
       tick.textContent = label;
       bar.append(track, tick);
+      bar.onclick = () => selectPoint(point);
       chart.appendChild(bar);
     });
+    selectPoint(points.find(point => point.start === openRouterUsageSelectedStart) || points[points.length - 1]);
   }
 
   const notes = ['按 UTC 统计', '金额为当前 OpenRouter 密钥在 Dwell 中的用量'];
@@ -10769,6 +10857,7 @@ document.querySelectorAll('[data-usage-currency]').forEach(button => {
 document.querySelectorAll('[data-usage-range]').forEach(button => {
   button.onclick = () => {
     openRouterUsageRange = button.dataset.usageRange;
+    openRouterUsageSelectedStart = '';
     renderOpenRouterUsage();
   };
 });

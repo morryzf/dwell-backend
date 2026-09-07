@@ -106,7 +106,7 @@ def _month_start(value: datetime, delta: int = 0) -> datetime:
 
 
 def build_utc_cost_series(events: list[dict], *, now: datetime | None = None) -> dict:
-    """Build seven daily, eight weekly, and twelve monthly UTC buckets."""
+    """Build UTC cost buckets with request-level prompt-cache hit rates."""
 
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     day_start = current.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -117,14 +117,24 @@ def build_utc_cost_series(events: list[dict], *, now: datetime | None = None) ->
     weekly_starts = [week_start - timedelta(weeks=offset) for offset in range(7, -1, -1)]
     monthly_starts = [_month_start(month_start, -offset) for offset in range(11, -1, -1)]
 
-    daily = {start.date().isoformat(): 0.0 for start in daily_starts}
-    weekly = {start.date().isoformat(): 0.0 for start in weekly_starts}
-    monthly = {start.strftime("%Y-%m"): 0.0 for start in monthly_starts}
+    def empty_bucket() -> dict:
+        return {"cost": 0.0, "requests": 0, "cache_hits": 0}
+
+    daily = {start.date().isoformat(): empty_bucket() for start in daily_starts}
+    weekly = {start.date().isoformat(): empty_bucket() for start in weekly_starts}
+    monthly = {start.strftime("%Y-%m"): empty_bucket() for start in monthly_starts}
 
     oldest_day = daily_starts[0]
     oldest_week = weekly_starts[0]
     oldest_month = monthly_starts[0]
     history_total = 0.0
+
+    def add(bucket: dict, cost: float, observed: bool, hit: bool) -> None:
+        bucket["cost"] += cost
+        if observed:
+            bucket["requests"] += 1
+            bucket["cache_hits"] += int(hit)
+
     for event in events:
         cost = _number(event.get("cost"))
         try:
@@ -135,24 +145,42 @@ def build_utc_cost_series(events: list[dict], *, now: datetime | None = None) ->
             continue
         at = datetime.fromtimestamp(made, tz=timezone.utc)
         history_total += cost
+        observed = bool(event.get("cache_observed"))
+        try:
+            hit = observed and int(event.get("cached_tokens") or 0) > 0
+        except (TypeError, ValueError):
+            hit = False
         if at >= oldest_day:
             key = at.date().isoformat()
             if key in daily:
-                daily[key] += cost
+                add(daily[key], cost, observed, hit)
         if at >= oldest_week:
-            start = (at.replace(hour=0, minute=0, second=0, microsecond=0)
-                     - timedelta(days=at.weekday()))
-            key = start.date().isoformat()
+            bucket_start = (
+                at.replace(hour=0, minute=0, second=0, microsecond=0)
+                - timedelta(days=at.weekday())
+            )
+            key = bucket_start.date().isoformat()
             if key in weekly:
-                weekly[key] += cost
+                add(weekly[key], cost, observed, hit)
         if at >= oldest_month:
             key = at.strftime("%Y-%m")
             if key in monthly:
-                monthly[key] += cost
+                add(monthly[key], cost, observed, hit)
 
-    pack = lambda rows: [
-        {"start": start, "cost": round(cost, 8)} for start, cost in rows.items()
-    ]
+    def pack(rows: dict[str, dict]) -> list[dict]:
+        packed = []
+        for bucket_start, values in rows.items():
+            requests = int(values["requests"])
+            hits = int(values["cache_hits"])
+            packed.append({
+                "start": bucket_start,
+                "cost": round(values["cost"], 8),
+                "requests": requests,
+                "cache_hits": hits,
+                "cache_hit_rate": round(hits / requests * 100, 1) if requests else None,
+            })
+        return packed
+
     return {
         "timezone": "UTC",
         "daily": pack(daily),
@@ -160,7 +188,6 @@ def build_utc_cost_series(events: list[dict], *, now: datetime | None = None) ->
         "monthly": pack(monthly),
         "history_total": round(history_total, 8),
     }
-
 
 def parse_usd_cny_rate(payload: Any) -> tuple[float | None, str]:
     if not isinstance(payload, dict):
