@@ -3199,20 +3199,22 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     transition: opacity 180ms cubic-bezier(.23,1,.32,1);
   }
   .cache-glow-svg.on { opacity: 1; }
+  .cache-glow-aura {
+    fill: none; stroke: color-mix(in srgb, var(--accent) 92%, #f4bfd2);
+    stroke-width: 6; stroke-linecap: round; vector-effect: non-scaling-stroke;
+    opacity: .72; filter: url(#cacheGlowBlur);
+  }
   .cache-glow-line {
-    fill: none; stroke: color-mix(in srgb, var(--accent) 88%, #f5cbd9);
-    stroke-width: 1.55; stroke-linecap: round; vector-effect: non-scaling-stroke;
-    filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 48%, transparent));
+    fill: none; stroke: color-mix(in srgb, var(--accent) 90%, #f5cbd9);
+    stroke-width: 1.65; stroke-linecap: round; vector-effect: non-scaling-stroke;
   }
   .cache-glow-hit {
     fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke;
     pointer-events: stroke; cursor: pointer;
   }
   .cache-glow-svg:focus-visible { outline: none; }
-  .cache-glow-svg:focus-visible .cache-glow-line {
-    stroke-width: 2.2;
-    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 62%, transparent));
-  }
+  .cache-glow-svg:focus-visible .cache-glow-line { stroke-width: 2.2; }
+  .cache-glow-svg:focus-visible .cache-glow-aura { opacity: .9; }
   .cache-glow-hint {
     position: absolute; right: 12px; top: -34px; z-index: 5;
     padding: 5px 10px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
@@ -3290,6 +3292,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div id="doingLine"><span class="pill"><span class="w"></span><span class="en"></span><span class="t"></span></span></div>
   <div class="composer">
     <svg class="cache-glow-svg" id="cacheGlow" viewBox="0 0 100 60" preserveAspectRatio="none" role="button" tabindex="-1" aria-hidden="true" aria-label="缓存还在">
+      <defs><filter id="cacheGlowBlur" x="-35%" y="-35%" width="170%" height="170%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.6"></feGaussianBlur></filter></defs>
+      <path class="cache-glow-aura" id="cacheGlowAura" pathLength="100"></path>
       <path class="cache-glow-line" id="cacheGlowLine" pathLength="100"></path>
       <path class="cache-glow-hit" id="cacheGlowHit" pathLength="100"></path>
     </svg>
@@ -5437,6 +5441,7 @@ const CACHE_GLOW_MS = 5 * 60 * 1000;
 const CACHE_GLOW_STORAGE = 'dwellCacheGlow';
 const composerEl = document.querySelector('.composer');
 const cacheGlowEl = document.getElementById('cacheGlow');
+const cacheGlowAura = document.getElementById('cacheGlowAura');
 const cacheGlowLine = document.getElementById('cacheGlowLine');
 const cacheGlowHit = document.getElementById('cacheGlowHit');
 const cacheGlowHint = document.getElementById('cacheGlowHint');
@@ -5467,6 +5472,7 @@ function cacheGlowPath() {
     'V', bottom - r,
     'A', r, r, 0, 0, 1, right - r, bottom
   ].join(' ');
+  cacheGlowAura.setAttribute('d', path);
   cacheGlowLine.setAttribute('d', path);
   cacheGlowHit.setAttribute('d', path);
 }
@@ -5522,20 +5528,26 @@ function cacheGlowAnimate(end) {
   cacheGlowEl.setAttribute('aria-hidden', 'false');
   cacheGlowEl.setAttribute('tabindex', '0');
   const elapsedRatio = Math.min(1, Math.max(0, 1 - remaining / CACHE_GLOW_MS));
-  cacheGlowLine.style.transition = 'none';
-  cacheGlowLine.style.opacity = '1';
+  const glowStrokes = [cacheGlowAura, cacheGlowLine];
+  glowStrokes.forEach(stroke => {
+    stroke.style.transition = 'none';
+    stroke.style.opacity = '';
+    stroke.style.strokeDasharray = '100';
+  });
   if (cacheGlowReducedMotion.matches) {
-    cacheGlowLine.style.strokeDasharray = '100';
-    cacheGlowLine.style.strokeDashoffset = '0';
+    glowStrokes.forEach(stroke => { stroke.style.strokeDashoffset = '0'; });
     cacheGlowLine.getBoundingClientRect();
-    cacheGlowLine.style.transition = 'opacity ' + remaining + 'ms linear';
-    cacheGlowLine.style.opacity = '0';
+    glowStrokes.forEach(stroke => {
+      stroke.style.transition = 'opacity ' + remaining + 'ms linear';
+      stroke.style.opacity = '0';
+    });
   } else {
-    cacheGlowLine.style.strokeDasharray = '100';
-    cacheGlowLine.style.strokeDashoffset = String(elapsedRatio * 100);
+    glowStrokes.forEach(stroke => { stroke.style.strokeDashoffset = String(elapsedRatio * 100); });
     cacheGlowLine.getBoundingClientRect();
-    cacheGlowLine.style.transition = 'stroke-dashoffset ' + remaining + 'ms linear';
-    cacheGlowLine.style.strokeDashoffset = '100';
+    glowStrokes.forEach(stroke => {
+      stroke.style.transition = 'stroke-dashoffset ' + remaining + 'ms linear';
+      stroke.style.strokeDashoffset = '100';
+    });
   }
   clearInterval(cacheGlowTickTimer);
   cacheGlowTickTimer = setInterval(cacheGlowUpdateLabel, 1000);
@@ -5563,9 +5575,11 @@ function cacheGlowStop(clearStored, quick) {
   cacheGlowTickTimer = null;
   clearTimeout(cacheGlowHintTimer);
   cacheGlowHint.classList.remove('on');
-  cacheGlowLine.style.transition = quick ? 'none' : 'stroke-dashoffset 160ms cubic-bezier(.23,1,.32,1), opacity 160ms ease';
-  cacheGlowLine.style.strokeDashoffset = '100';
-  cacheGlowLine.style.opacity = '0';
+  [cacheGlowAura, cacheGlowLine].forEach(stroke => {
+    stroke.style.transition = quick ? 'none' : 'stroke-dashoffset 160ms cubic-bezier(.23,1,.32,1), opacity 160ms ease';
+    stroke.style.strokeDashoffset = '100';
+    stroke.style.opacity = '0';
+  });
   cacheGlowEl.classList.remove('on');
   cacheGlowEl.setAttribute('aria-hidden', 'true');
   cacheGlowEl.setAttribute('tabindex', '-1');
