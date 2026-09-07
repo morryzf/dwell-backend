@@ -1053,6 +1053,7 @@ def _heartbeat_tool_allowed(tool: dict, server: object) -> bool:
 async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
     selection = db.chat_model_get(chat_id)
     provider = db.provider_get(selection.get("provider_id") or "")
+    provider = _chat_cache_provider(provider, selection)
     if not provider or not provider.get("enabled") or not selection.get("model_id"):
         raise RuntimeError("主动接收消息的聊天还没有可用模型")
 
@@ -2067,17 +2068,36 @@ async def authmode():
     return {"ok": True, "mode": "password"}
 
 
+def _chat_prompt_cache_ttl(selection: dict, provider: dict | None) -> str:
+    """Resolve a chat override, falling back to the provider's existing default."""
+    override = str(selection.get("prompt_cache_ttl") or "").strip()
+    if override in {"off", "5m", "1h"}:
+        return override
+    configured = str((provider or {}).get("prompt_cache_ttl") or "off").strip()
+    return configured if configured in {"off", "5m", "1h"} else "off"
+
+
+def _chat_cache_provider(provider: dict | None, selection: dict) -> dict | None:
+    if not provider:
+        return None
+    prepared = dict(provider)
+    prepared["prompt_cache_ttl"] = _chat_prompt_cache_ttl(selection, provider)
+    return prepared
+
+
 @app.get("/api/model", dependencies=authed)
 async def model_get():
     chat_id = _get_or_create_current_chat()
     selection = db.chat_model_get(chat_id)
     providers = db.provider_list()
+    provider = db.provider_get(selection.get("provider_id") or "")
     return {
         "ok": True,
         # model/effort 保留给原 dwell 前端的读取逻辑；新增字段供新的设置界面使用。
         "model": selection["model_id"],
         "effort": selection["reasoning_effort"],
         "show_thinking": bool(selection.get("show_thinking", 1)),
+        "prompt_cache_ttl": _chat_prompt_cache_ttl(selection, provider),
         "provider_id": selection["provider_id"],
         "chat_id": chat_id,
         "providers": providers,
@@ -2942,6 +2962,11 @@ async def model_set(request: Request):
     model_id = str(payload.get("model", payload.get("model_id", current["model_id"])) or "").strip()[:200]
     effort = str(payload.get("effort", payload.get("reasoning_effort", current["reasoning_effort"])) or "").strip()[:30]
     show_thinking = bool(payload.get("show_thinking", current.get("show_thinking", 1)))
+    prompt_cache_ttl = str(
+        payload.get("prompt_cache_ttl", current.get("prompt_cache_ttl") or "") or ""
+    ).strip()
+    if prompt_cache_ttl not in {"", "off", "5m", "1h"}:
+        raise HTTPException(400, "缓存时长只能是关闭、5 分钟或 1 小时")
     if provider_id:
         provider = db.provider_get(provider_id)
         if not provider or not provider["enabled"]:
@@ -2950,10 +2975,18 @@ async def model_set(request: Request):
         raise HTTPException(400, "请选择模型")
     if model_id and not provider_id:
         raise HTTPException(400, "请先选择供应商")
-    db.chat_model_set(chat_id, provider_id, model_id, effort, show_thinking)
+    db.chat_model_set(
+        chat_id, provider_id, model_id, effort, show_thinking,
+        prompt_cache_ttl=prompt_cache_ttl,
+    )
+    provider = db.provider_get(provider_id) if provider_id else None
+    effective_cache_ttl = _chat_prompt_cache_ttl(
+        {**current, "prompt_cache_ttl": prompt_cache_ttl}, provider
+    )
     return {
         "ok": True, "provider_id": provider_id, "model": model_id,
         "effort": effort, "show_thinking": show_thinking,
+        "prompt_cache_ttl": effective_cache_ttl,
     }
 
 
@@ -3970,6 +4003,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     selection = db.chat_model_get(chat_id)
     show_thinking = bool(selection.get("show_thinking", 1))
     provider = db.provider_get(selection["provider_id"]) if selection["provider_id"] else None
+    provider = _chat_cache_provider(provider, selection)
     request_started = time.perf_counter()
     request_log_id = _start_system_log(
         "model_request",
