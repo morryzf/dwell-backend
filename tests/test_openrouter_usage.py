@@ -71,10 +71,14 @@ class OpenRouterSeriesTest(unittest.TestCase):
     def test_builds_utc_daily_weekly_and_monthly_buckets(self):
         now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
         events = [
-            {"made": int(datetime(2026, 9, 5, 1, tzinfo=timezone.utc).timestamp()), "cost": 0.2},
-            {"made": int(datetime(2026, 9, 1, 23, tzinfo=timezone.utc).timestamp()), "cost": 0.3},
-            {"made": int(datetime(2026, 8, 30, 23, tzinfo=timezone.utc).timestamp()), "cost": 0.4},
-            {"made": int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()), "cost": 1.0},
+            {"made": int(datetime(2026, 9, 5, 1, tzinfo=timezone.utc).timestamp()),
+             "cost": 0.2, "cache_observed": 1, "cached_tokens": 320},
+            {"made": int(datetime(2026, 9, 1, 23, tzinfo=timezone.utc).timestamp()),
+             "cost": 0.3, "cache_observed": 1, "cached_tokens": 0},
+            {"made": int(datetime(2026, 8, 30, 23, tzinfo=timezone.utc).timestamp()),
+             "cost": 0.4, "cache_observed": 0, "cached_tokens": 0},
+            {"made": int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()),
+             "cost": 1.0, "cache_observed": 0, "cached_tokens": 0},
         ]
 
         result = build_utc_cost_series(events, now=now)
@@ -83,9 +87,17 @@ class OpenRouterSeriesTest(unittest.TestCase):
         self.assertEqual(len(result["daily"]), 7)
         self.assertEqual(len(result["weekly"]), 8)
         self.assertEqual(len(result["monthly"]), 12)
-        self.assertEqual(result["daily"][-1], {"start": "2026-09-05", "cost": 0.2})
+        self.assertEqual(result["daily"][-1], {
+            "start": "2026-09-05", "cost": 0.2, "requests": 1,
+            "cache_hits": 1, "cache_hit_rate": 100.0,
+        })
         current_week = next(row for row in result["weekly"] if row["start"] == "2026-08-31")
         self.assertEqual(current_week["cost"], 0.5)
+        self.assertEqual(current_week["requests"], 2)
+        self.assertEqual(current_week["cache_hits"], 1)
+        self.assertEqual(current_week["cache_hit_rate"], 50.0)
+        legacy_week = next(row for row in result["weekly"] if row["start"] == "2026-08-24")
+        self.assertIsNone(legacy_week["cache_hit_rate"])
         self.assertEqual(result["history_total"], 1.9)
 
     def test_parses_frankfurter_v2_rate(self):
@@ -125,13 +137,23 @@ class OpenRouterUsageDatabaseTest(unittest.TestCase):
         self.assertEqual(db.provider_usage_backfill_legacy("provider-1", "hash-1"), 1)
         self.assertEqual(db.provider_usage_backfill_legacy("provider-1", "hash-1"), 0)
         db.provider_usage_event_add(
-            "provider-1", "hash-1", "message-2", "regenerate", 0.25, made=200
+            "provider-1", "hash-1", "message-2", "regenerate", 0.25, made=200,
+            input_tokens=900, cached_tokens=640, cache_observed=True,
         )
 
         rows = db.provider_usage_events("provider-1", "hash-1")
-        self.assertEqual(rows, [{"cost": 0.125, "made": 100}, {"cost": 0.25, "made": 200}])
+        self.assertEqual(rows, [
+            {"cost": 0.125, "made": 100, "input_tokens": 0,
+             "cached_tokens": 0, "cache_observed": 0},
+            {"cost": 0.25, "made": 200, "input_tokens": 900,
+             "cached_tokens": 640, "cache_observed": 1},
+        ])
         self.assertEqual(db.provider_usage_events("provider-1", "other-hash"), [])
-
+        with db.conn() as cx:
+            columns = {row["name"] for row in cx.execute(
+                "PRAGMA table_info(provider_usage_events)"
+            ).fetchall()}
+        self.assertTrue({"input_tokens", "cached_tokens", "cache_observed"} <= columns)
 
     def test_message_usage_preserves_subcent_cost_precision(self):
         with db.conn() as cx:

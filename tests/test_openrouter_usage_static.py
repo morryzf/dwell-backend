@@ -20,6 +20,7 @@ class OpenRouterUsageStaticTest(unittest.TestCase):
         self.assertIn('<div class="sheetWrap page" id="usageSheet">', HTML)
         for element_id in (
             "usageBalanceValue", "usageToday", "usageWeek", "usageMonth",
+            "usageCacheRate", "usageCacheMeta", "usageChartDetail",
             "usageChart", "usageRefresh", "usageNote",
         ):
             self.assertIn(f'id="{element_id}"', HTML)
@@ -41,6 +42,10 @@ class OpenRouterUsageStaticTest(unittest.TestCase):
         self.assertIn('role="group" aria-label="显示货币"', HTML)
         self.assertIn('role="group" aria-label="统计周期"', HTML)
         self.assertIn("bar.setAttribute('aria-label'", HTML)
+        self.assertIn("bar.setAttribute('aria-pressed'", HTML)
+        self.assertIn("bar.onclick = () => selectPoint(point)", HTML)
+        self.assertIn("openRouterUsageExactAmount", HTML)
+        self.assertIn("openRouterUsageHitText", HTML)
         self.assertIn("chart.setAttribute('aria-label'", HTML)
         self.assertIn("按 UTC 统计", HTML)
 
