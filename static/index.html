@@ -2734,6 +2734,53 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .drawer-chat-list .crow .ct { padding-top: 1px; font-size: 11px; }
   .drawer-chat-empty { padding: 18px 12px; color: var(--dim); font-size: 12px; text-align: center; }
 
+  /* Compact, open navigation: two columns use the drawer width without card chrome. */
+  .drawer-tool-grid,
+  .drawer-status-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 8px;
+    row-gap: 2px;
+  }
+  .drawer-tool-grid { padding: 8px 2px 2px; }
+  .drawer-status-grid {
+    margin-top: 12px;
+    padding: 8px 2px 0;
+  }
+  #drawer .nav .drawer-tool-grid .drawer-tool,
+  #drawer .nav .drawer-status-grid .drawer-tool {
+    min-width: 0;
+    min-height: 48px;
+    padding: 10px 12px;
+    gap: 10px;
+    border: 0 !important;
+    border-radius: 12px;
+    background: transparent !important;
+    color: var(--text);
+    box-shadow: none !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    transition: transform 110ms var(--ease-out), background-color 110ms ease, color 110ms ease;
+  }
+  #drawer .nav .drawer-tool .ic {
+    width: 18px;
+    height: 18px;
+    flex: none;
+  }
+  #drawer .nav .drawer-status-grid .drawer-tool {
+    min-height: 44px;
+    color: var(--dim);
+    font-size: 13px;
+  }
+  #drawer .nav .drawer-status-grid .drawer-tool .ic {
+    width: 16px;
+    height: 16px;
+  }
+  #drawer .nav .drawer-tool:active {
+    transform: scale(.97);
+    background: color-mix(in srgb, var(--accent-soft) 34%, transparent) !important;
+  }
+
   /* User-tunable message glass. My messages and Cloudy's messages keep
      separate light/dark profiles; thinking follows Cloudy's profile. */
   #log .bubble {
@@ -3396,14 +3443,18 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       <button class="assistant-choice" id="recGong" aria-pressed="false">另一位</button>
     </div>
     <div class="nav">
-      <button class="item" id="navTodo"><span class="ic" data-i="checkSquare"></span>待办</button>
-      <button class="item" id="navCal"><span class="ic" data-i="calendar"></span>日历</button>
-      <button class="item" id="navFocus"><span class="ic" data-i="clock"></span>专注</button>
-      <button class="item" id="navWall"><span class="ic" data-i="pen"></span>心事簿</button>
-      <button class="item" id="navNook"><span class="ic" data-i="bookOpen"></span>书房</button>
-      <button class="item" id="navRepo"><span class="ic" data-i="box"></span>仓库</button>
-      <button class="item" id="navHeartbeat"><span class="ic" data-i="activity"></span>心跳</button>
-      <button class="item" id="navUsage"><span class="ic" data-i="trend"></span>用量</button>
+      <div class="drawer-tool-grid" aria-label="功能">
+        <button class="item drawer-tool" id="navTodo"><span class="ic" data-i="checkSquare"></span>待办</button>
+        <button class="item drawer-tool" id="navCal"><span class="ic" data-i="calendar"></span>日历</button>
+        <button class="item drawer-tool" id="navFocus"><span class="ic" data-i="clock"></span>专注</button>
+        <button class="item drawer-tool" id="navWall"><span class="ic" data-i="pen"></span>心事簿</button>
+        <button class="item drawer-tool" id="navNook"><span class="ic" data-i="bookOpen"></span>书房</button>
+        <button class="item drawer-tool" id="navRepo"><span class="ic" data-i="box"></span>仓库</button>
+      </div>
+      <div class="drawer-status-grid" aria-label="状态">
+        <button class="item drawer-tool" id="navHeartbeat"><span class="ic" data-i="activity"></span>心跳</button>
+        <button class="item drawer-tool" id="navUsage"><span class="ic" data-i="trend"></span>用量</button>
+      </div>
       <div class="drawer-section-head">
         <span id="drawerChatHeading">Recents</span>
         <span class="drawer-section-actions">
