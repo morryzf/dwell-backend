@@ -39,6 +39,20 @@ class MemoryConsoleStaticTest(unittest.TestCase):
             self.html,
         )
 
+    def test_overview_uses_compact_scrollable_hierarchy(self):
+        self.assertIn(".mc-on-demand-note { font-size: 12px;", self.html)
+        self.assertIn("max-height: min(42dvh, 340px); overflow-y: auto;", self.html)
+        self.assertIn('.mc-summary-history > summary { color: var(--dim); font-size: 12px;', self.html)
+        self.assertIn(
+            ".mc-summary-primary-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));",
+            self.html,
+        )
+        self.assertIn('class="mc-stack mc-used-scroll"', self.html)
+        self.assertIn(
+            "mc-actions${state.enabled ? ' mc-summary-primary-actions' : ''}",
+            self.html,
+        )
+
     def test_openrouter_decimal_claude_ids_are_normalized(self):
         self.assertIn("function modelSlug(id)", self.html)
         self.assertIn("s.split('/').pop()", self.html)
