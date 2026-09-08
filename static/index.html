@@ -2503,6 +2503,15 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     border-color: rgba(158,112,133,.15) !important;
     box-shadow: 0 4px 13px rgba(86,58,71,.045), inset 0 1px rgba(255,255,255,.14) !important;
   }
+  /* The settings page owns the glass layer; its controls stay clear and solid. */
+  #settingsSheet .group,
+  #settingsSheet .ap-section,
+  #settingsSheet .ap-in,
+  #settingsSheet .ap-b,
+  #settingsSheet .model-catalog-action {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
   #settingsSheet .group-label { font-size: 13.5px; }
   #settingsSheet .group .grow { padding: 13px 16px; font-size: 15px; }
   #settingsSheet .group .grow .val { font-size: 14px; }
