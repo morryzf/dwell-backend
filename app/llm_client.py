@@ -245,7 +245,7 @@ def build_chat_payload(model_id: str, messages: list, tools: list | None = None,
     }
     if request_tools:
         payload["tools"] = request_tools
-    if ttl:
+    if ttl and str((provider or {}).get("provider_type") or "") == "openrouter":
         payload["session_id"] = str(session_id)[:256]
     if max_tokens is not None:
         payload["max_tokens"] = max(1, int(max_tokens))
