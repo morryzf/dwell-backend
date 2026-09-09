@@ -1,6 +1,14 @@
 import unittest
 
-from app.llm_client import _usage_dict, build_chat_payload, prompt_cache_enabled
+from app.llm_client import (
+    _anthropic_headers,
+    _anthropic_response_events,
+    _anthropic_url,
+    _usage_dict,
+    build_anthropic_payload,
+    build_chat_payload,
+    prompt_cache_enabled,
+)
 
 
 class ChatPayloadTest(unittest.TestCase):
@@ -142,6 +150,138 @@ class PromptCachePayloadTest(unittest.TestCase):
         self.assertNotIn("session_id", payload)
         self.assertTrue(prompt_cache_enabled(relay, "[CCMAX]claude-opus-4-6"))
         self.assertFalse(prompt_cache_enabled(relay, "[AG]gemini-3.5-flash"))
+
+
+class AnthropicMessagesPayloadTest(unittest.TestCase):
+    def setUp(self):
+        self.provider = {
+            "provider_type": "claude_compatible",
+            "prompt_cache_ttl": "1h",
+            "base_url": "https://relay.example/v1",
+        }
+
+    def test_converts_system_history_tools_and_cache_anchor(self):
+        messages = [
+            {"role": "system", "content": "stable instructions"},
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": "stable answer"},
+            {"role": "user", "content": "next question"},
+        ]
+        tools = [{
+            "type": "function",
+            "function": {
+                "name": "Lookup",
+                "description": "Look something up",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+            },
+        }]
+
+        payload = build_anthropic_payload(
+            "[CCMAX]claude-opus-4-6",
+            messages,
+            tools,
+            provider=self.provider,
+            session_id="dwell-chat:test",
+            reasoning_effort="high",
+        )
+
+        self.assertEqual(payload["system"], [{"type": "text", "text": "stable instructions"}])
+        self.assertEqual([item["role"] for item in payload["messages"]], [
+            "user", "assistant", "user",
+        ])
+        self.assertEqual(
+            payload["messages"][1]["content"][0]["cache_control"],
+            {"type": "ephemeral", "ttl": "1h"},
+        )
+        self.assertEqual(payload["tools"][0]["name"], "Lookup")
+        self.assertEqual(payload["tools"][0]["input_schema"]["type"], "object")
+        self.assertEqual(payload["thinking"], {"type": "adaptive"})
+        self.assertEqual(payload["output_config"], {"effort": "high"})
+        self.assertEqual(payload["max_tokens"], 4096)
+        self.assertEqual(messages[2]["content"], "stable answer")
+
+    def test_converts_tool_calls_results_and_images(self):
+        messages = [
+            {"role": "assistant", "content": "", "tool_calls": [{
+                "id": "tool-1",
+                "type": "function",
+                "function": {"name": "Lookup", "arguments": '{"query":"cat"}'},
+            }]},
+            {"role": "tool", "tool_call_id": "tool-1", "content": "found"},
+            {"role": "user", "content": [{
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,AAAA"},
+            }]},
+        ]
+
+        payload = build_anthropic_payload(
+            "claude-opus-4-6", messages, provider=self.provider,
+            session_id="dwell-chat:test",
+        )
+
+        tool_use = payload["messages"][0]["content"][0]
+        self.assertEqual(tool_use["type"], "tool_use")
+        self.assertEqual(tool_use["input"], {"query": "cat"})
+        tool_result = payload["messages"][1]["content"][0]
+        self.assertEqual(tool_result["type"], "tool_result")
+        image = payload["messages"][1]["content"][1]
+        self.assertEqual(image["source"], {
+            "type": "base64", "media_type": "image/png", "data": "AAAA",
+        })
+
+    def test_builds_native_endpoint_and_both_auth_modes(self):
+        self.assertEqual(
+            _anthropic_url("https://relay.example/v1/"),
+            "https://relay.example/v1/messages",
+        )
+        api_key_headers = _anthropic_headers("secret", "x-api-key")
+        self.assertEqual(api_key_headers["x-api-key"], "secret")
+        self.assertNotIn("Authorization", api_key_headers)
+        self.assertEqual(api_key_headers["anthropic-version"], "2023-06-01")
+
+        bearer_headers = _anthropic_headers("secret", "bearer")
+        self.assertEqual(bearer_headers["Authorization"], "Bearer secret")
+        self.assertNotIn("x-api-key", bearer_headers)
+
+
+class AnthropicStreamParsingTest(unittest.IsolatedAsyncioTestCase):
+    async def test_merges_usage_and_reassembles_tool_input(self):
+        class Response:
+            async def aiter_lines(self):
+                lines = [
+                    'data: {"type":"message_start","message":{"usage":{"input_tokens":1000,"cache_creation_input_tokens":700}}}',
+                    'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"h"}}',
+                    'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"i"}}',
+                    'data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":"o"}}',
+                    'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"k"}}',
+                    'data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"tool-1","name":"Lookup","input":{}}}',
+                    'data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":"}}',
+                    'data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\\"cat\\"}"}}',
+                    'data: {"type":"message_delta","usage":{"output_tokens":20,"cache_read_input_tokens":250}}',
+                    'data: {"type":"message_stop"}',
+                ]
+                for line in lines:
+                    yield line
+
+        events = [event async for event in _anthropic_response_events(Response())]
+
+        self.assertEqual(events[0], {"type": "thinking", "thinking": "h"})
+        self.assertEqual(events[1], {"type": "thinking", "thinking": "i"})
+        self.assertEqual(events[2:4], [
+            {"type": "text", "text": "o"},
+            {"type": "text", "text": "k"},
+        ])
+        self.assertEqual(events[-2]["calls"][0], {
+            "id": "tool-1", "name": "Lookup", "arguments": '{"query":"cat"}',
+        })
+        usage = events[-1]["usage"]
+        self.assertEqual(usage["input_tokens"], 1000)
+        self.assertEqual(usage["output_tokens"], 20)
+        self.assertEqual(usage["cache_write_tokens"], 700)
+        self.assertEqual(usage["cached_tokens"], 250)
 
 
 class UsageNormalizationTest(unittest.TestCase):

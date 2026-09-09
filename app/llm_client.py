@@ -257,10 +257,322 @@ def build_chat_payload(model_id: str, messages: list, tools: list | None = None,
     return payload
 
 
+def _anthropic_content_blocks(value) -> list[dict]:
+    """Convert OpenAI-compatible content into Anthropic message blocks."""
+    if isinstance(value, str):
+        return [{"type": "text", "text": value}] if value else []
+    if not isinstance(value, list):
+        return []
+
+    blocks: list[dict] = []
+    for part in value:
+        if isinstance(part, str):
+            if part:
+                blocks.append({"type": "text", "text": part})
+            continue
+        if not isinstance(part, dict):
+            continue
+        kind = str(part.get("type") or "text")
+        if kind == "text":
+            text_value = str(part.get("text") or "")
+            if not text_value:
+                continue
+            block = {"type": "text", "text": text_value}
+            if isinstance(part.get("cache_control"), dict):
+                block["cache_control"] = copy.deepcopy(part["cache_control"])
+            blocks.append(block)
+            continue
+        if kind == "image" and isinstance(part.get("source"), dict):
+            blocks.append({"type": "image", "source": copy.deepcopy(part["source"])})
+            continue
+        if kind != "image_url":
+            continue
+        image_url = part.get("image_url")
+        url = image_url.get("url") if isinstance(image_url, dict) else image_url
+        if not isinstance(url, str) or not url:
+            continue
+        if url.startswith("data:") and ";base64," in url:
+            metadata, data = url.split(",", 1)
+            media_type = metadata[5:].split(";", 1)[0] or "image/jpeg"
+            blocks.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": data},
+            })
+        elif url.startswith(("https://", "http://")):
+            blocks.append({
+                "type": "image",
+                "source": {"type": "url", "url": url},
+            })
+    return blocks
+
+
+def _anthropic_tool_input(arguments) -> dict:
+    if isinstance(arguments, dict):
+        return copy.deepcopy(arguments)
+    try:
+        parsed = json.loads(str(arguments or "{}"))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def build_anthropic_payload(model_id: str, messages: list, tools: list | None = None,
+                            max_tokens: int | None = None,
+                            reasoning_effort: str | None = None,
+                            thinking_enabled: bool = True,
+                            provider: dict | None = None,
+                            session_id: str | None = None) -> dict:
+    """Build a native Anthropic Messages request from the app's neutral history."""
+    ttl = prompt_cache_ttl(provider, model_id, session_id)
+    prepared_messages = _cacheable_messages(messages, ttl) if ttl else copy.deepcopy(messages)
+    system: list[dict] = []
+    request_messages: list[dict] = []
+
+    def append_message(role: str, blocks: list[dict]):
+        if not blocks:
+            return
+        if request_messages and request_messages[-1]["role"] == role:
+            request_messages[-1]["content"].extend(blocks)
+        else:
+            request_messages.append({"role": role, "content": blocks})
+
+    for message in prepared_messages:
+        role = str(message.get("role") or "")
+        if role == "system":
+            system.extend(
+                block for block in _anthropic_content_blocks(message.get("content"))
+                if block.get("type") == "text"
+            )
+            continue
+        if role == "tool":
+            tool_content = _anthropic_content_blocks(message.get("content"))
+            append_message("user", [{
+                "type": "tool_result",
+                "tool_use_id": str(message.get("tool_call_id") or ""),
+                "content": tool_content or [{"type": "text", "text": ""}],
+            }])
+            continue
+        if role not in {"user", "assistant"}:
+            continue
+
+        blocks = _anthropic_content_blocks(message.get("content"))
+        if role == "assistant":
+            for call in message.get("tool_calls") or []:
+                function = call.get("function") or {}
+                blocks.append({
+                    "type": "tool_use",
+                    "id": str(call.get("id") or ""),
+                    "name": str(function.get("name") or ""),
+                    "input": _anthropic_tool_input(function.get("arguments")),
+                })
+        append_message(role, blocks)
+
+    payload = {
+        "model": model_id,
+        "messages": request_messages,
+        "max_tokens": max(1, int(max_tokens)) if max_tokens is not None else 4096,
+        "stream": True,
+    }
+    if system:
+        payload["system"] = system
+    request_tools = _cacheable_tools(tools) if ttl else tools
+    if request_tools:
+        converted_tools = []
+        for tool in request_tools:
+            function = tool.get("function") or {}
+            converted = {
+                "name": str(function.get("name") or ""),
+                "input_schema": copy.deepcopy(
+                    function.get("parameters")
+                    or {"type": "object", "properties": {}}
+                ),
+            }
+            description = str(function.get("description") or "")
+            if description:
+                converted["description"] = description
+            converted_tools.append(converted)
+        payload["tools"] = converted_tools
+
+    effort = str(reasoning_effort or "").strip().lower()
+    model = str(model_id or "").lower()
+    if (
+        thinking_enabled
+        and effort in {"low", "medium", "high", "max"}
+        and ("4-6" in model or "4.6" in model)
+    ):
+        payload["thinking"] = {"type": "adaptive"}
+        payload["output_config"] = {"effort": effort}
+    return payload
+
+
+def _anthropic_url(base_url: str) -> str:
+    return str(base_url or "").rstrip("/") + "/messages"
+
+
+def _anthropic_headers(api_key: str, auth_mode: str) -> dict:
+    headers = {
+        "Accept": "text/event-stream",
+        "anthropic-version": "2023-06-01",
+    }
+    if auth_mode == "x-api-key":
+        headers["x-api-key"] = api_key
+    else:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+async def _anthropic_response_events(resp):
+    calls: dict[int, dict] = {}
+    raw_usage: dict = {}
+    async for line in resp.aiter_lines():
+        if not line or not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            event = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        event_type = str(event.get("type") or "")
+        if event_type == "error":
+            error = event.get("error") or {}
+            yield {
+                "type": "text",
+                "text": f"[供应商错误] {str(error.get('message') or 'Anthropic 流式请求失败')[:500]}",
+            }
+            return
+
+        event_usage = event.get("usage")
+        if isinstance(event_usage, dict):
+            raw_usage.update(event_usage)
+        message = event.get("message")
+        if isinstance(message, dict) and isinstance(message.get("usage"), dict):
+            raw_usage.update(message["usage"])
+
+        index = int(event.get("index") or 0)
+        if event_type == "content_block_start":
+            block = event.get("content_block") or {}
+            kind = str(block.get("type") or "")
+            if kind == "text" and block.get("text"):
+                yield {"type": "text", "text": str(block["text"])}
+            elif kind == "thinking" and block.get("thinking"):
+                yield {"type": "thinking", "thinking": str(block["thinking"])}
+            elif kind == "tool_use":
+                calls[index] = {
+                    "id": str(block.get("id") or ""),
+                    "name": str(block.get("name") or ""),
+                    "arguments": "",
+                    "initial_input": block.get("input"),
+                }
+            continue
+
+        if event_type != "content_block_delta":
+            continue
+        delta = event.get("delta") or {}
+        delta_type = str(delta.get("type") or "")
+        if delta_type == "text_delta":
+            text_value = str(delta.get("text") or "")
+            if text_value:
+                yield {"type": "text", "text": text_value}
+        elif delta_type == "thinking_delta":
+            thinking = str(delta.get("thinking") or "")
+            if thinking:
+                yield {"type": "thinking", "thinking": thinking}
+        elif delta_type == "input_json_delta":
+            call = calls.setdefault(index, {
+                "id": "", "name": "", "arguments": "", "initial_input": None,
+            })
+            call["arguments"] += str(delta.get("partial_json") or "")
+
+    if calls:
+        completed = []
+        for index in sorted(calls):
+            call = calls[index]
+            arguments = call["arguments"]
+            if not arguments:
+                arguments = json.dumps(
+                    call.get("initial_input") or {}, ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            completed.append({
+                "id": call["id"],
+                "name": call["name"],
+                "arguments": arguments,
+            })
+        yield {"type": "tool_calls", "calls": completed}
+    usage = _usage_dict(raw_usage)
+    if usage:
+        yield {"type": "usage", "usage": usage}
+
+
+async def _openai_response_events(resp):
+    calls: dict[int, dict] = {}
+    usage = {}
+    async for line in resp.aiter_lines():
+        if not line or not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            break
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        normalized_usage = _usage_dict(chunk.get("usage"))
+        if normalized_usage:
+            usage = normalized_usage
+        choices = chunk.get("choices") or []
+        if not choices:
+            continue
+        delta = choices[0].get("delta") or {}
+        for thinking in reasoning_texts(delta):
+            yield {"type": "thinking", "thinking": thinking}
+        for text_value in content_texts(delta.get("content")):
+            yield {"type": "text", "text": text_value}
+        for part in delta.get("tool_calls") or []:
+            index = int(part.get("index", 0))
+            call = calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
+            call["id"] += str(part.get("id") or "")
+            function = part.get("function") or {}
+            call["name"] += str(function.get("name") or "")
+            call["arguments"] += str(function.get("arguments") or "")
+    if calls:
+        yield {"type": "tool_calls", "calls": [calls[index] for index in sorted(calls)]}
+    if usage:
+        yield {"type": "usage", "usage": usage}
+
+
+async def _stream_openai(client, provider: dict, api_key: str, model_id: str,
+                         messages: list, tools: list | None, max_tokens: int | None,
+                         reasoning_effort: str | None, thinking_enabled: bool,
+                         session_id: str | None, fallback_reason: str = ""):
+    url = provider["base_url"].rstrip("/") + "/chat/completions"
+    payload = build_chat_payload(
+        model_id, messages, tools, max_tokens=max_tokens,
+        reasoning_effort=reasoning_effort, thinking_enabled=thinking_enabled,
+        provider=provider, session_id=session_id,
+    )
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "text/event-stream"}
+    async with client.stream("POST", url, headers=headers, json=payload) as resp:
+        if resp.status_code != 200:
+            body = (await resp.aread()).decode("utf-8", errors="ignore")[:500]
+            yield {"type": "text", "text": f"[供应商错误 {resp.status_code}] {body}"}
+            return
+        yield {
+            "type": "cache_status",
+            "protocol": "openai_compatible",
+            "auth_mode": "bearer",
+            "fallback_reason": fallback_reason,
+        }
+        async for event in _openai_response_events(resp):
+            yield event
+
+
 async def stream_chat(provider: dict, model_id: str, messages: list, tools: list | None = None,
                       max_tokens: int | None = None, reasoning_effort: str | None = None,
                       thinking_enabled: bool = True, session_id: str | None = None):
-    """以 OpenAI 兼容 SSE 请求聊天，yield 正文、thinking 或完整工具调用组。"""
+    """Stream chat through native Anthropic caching or the OpenAI-compatible path."""
     if not model_id:
         yield {"type": "text", "text": "[配置错误] 这个聊天还没有选择模型"}
         return
@@ -274,54 +586,69 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
         yield {"type": "text", "text": f"[配置错误] {exc}"}
         return
 
-    url = provider["base_url"].rstrip("/") + "/chat/completions"
-    payload = build_chat_payload(
-        model_id, messages, tools, max_tokens=max_tokens,
-        reasoning_effort=reasoning_effort, thinking_enabled=thinking_enabled,
-        provider=provider, session_id=session_id,
+    ttl = prompt_cache_ttl(provider, model_id, session_id)
+    use_native_anthropic = bool(
+        ttl and str(provider.get("provider_type") or "") == "claude_compatible"
     )
-    headers = {"Authorization": f"Bearer {api_key}", "Accept": "text/event-stream"}
+    timeout = httpx.Timeout(90.0, connect=20.0)
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=20.0)) as client:
-            async with client.stream("POST", url, headers=headers, json=payload) as resp:
-                if resp.status_code != 200:
-                    body = (await resp.aread()).decode("utf-8", errors="ignore")[:500]
-                    yield {"type": "text", "text": f"[供应商错误 {resp.status_code}] {body}"}
-                    return
-                calls: dict[int, dict] = {}
-                usage = {}
-                async for line in resp.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            if use_native_anthropic:
+                payload = build_anthropic_payload(
+                    model_id, messages, tools, max_tokens=max_tokens,
+                    reasoning_effort=reasoning_effort,
+                    thinking_enabled=thinking_enabled,
+                    provider=provider, session_id=session_id,
+                )
+                fallback_status = 0
+                for auth_mode in ("x-api-key", "bearer"):
+                    headers = _anthropic_headers(api_key, auth_mode)
+                    async with client.stream(
+                        "POST", _anthropic_url(provider["base_url"]),
+                        headers=headers, json=payload,
+                    ) as resp:
+                        if resp.status_code == 200:
+                            yield {
+                                "type": "cache_status",
+                                "protocol": "anthropic_messages",
+                                "auth_mode": auth_mode,
+                                "fallback_reason": "",
+                            }
+                            async for event in _anthropic_response_events(resp):
+                                yield event
+                            return
+                        fallback_status = resp.status_code
+                        body = (await resp.aread()).decode(
+                            "utf-8", errors="ignore"
+                        )[:500]
+                        if resp.status_code in {401, 403} and auth_mode == "x-api-key":
+                            continue
+                        if resp.status_code not in {401, 403, 404, 405}:
+                            yield {
+                                "type": "text",
+                                "text": f"[供应商错误 {resp.status_code}] {body}",
+                            }
+                            return
                         break
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    normalized_usage = _usage_dict(chunk.get("usage"))
-                    if normalized_usage:
-                        usage = normalized_usage
-                    choices = chunk.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta") or {}
-                    for thinking in reasoning_texts(delta):
-                        yield {"type": "thinking", "thinking": thinking}
-                    for text in content_texts(delta.get("content")):
-                        yield {"type": "text", "text": text}
-                    for part in delta.get("tool_calls") or []:
-                        index = int(part.get("index", 0))
-                        call = calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
-                        call["id"] += str(part.get("id") or "")
-                        fn = part.get("function") or {}
-                        call["name"] += str(fn.get("name") or "")
-                        call["arguments"] += str(fn.get("arguments") or "")
-                if calls:
-                    yield {"type": "tool_calls", "calls": [calls[index] for index in sorted(calls)]}
-                if usage:
-                    yield {"type": "usage", "usage": usage}
+
+                fallback_provider = {
+                    **provider,
+                    "provider_type": "generic",
+                    "prompt_cache_ttl": "off",
+                }
+                async for event in _stream_openai(
+                    client, fallback_provider, api_key, model_id, messages, tools,
+                    max_tokens, reasoning_effort, thinking_enabled, None,
+                    fallback_reason=f"native_http_{fallback_status}",
+                ):
+                    yield event
+                return
+
+            async for event in _stream_openai(
+                client, provider, api_key, model_id, messages, tools,
+                max_tokens, reasoning_effort, thinking_enabled, session_id,
+            ):
+                yield event
     except httpx.RequestError as exc:
         yield {"type": "text", "text": f"[网络错误] 无法连接供应商：{exc}"}
