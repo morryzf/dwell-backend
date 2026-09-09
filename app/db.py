@@ -490,6 +490,36 @@ def init_db():
                 "ALTER TABLE provider_profiles ADD COLUMN prompt_cache_ttl "
                 "TEXT NOT NULL DEFAULT 'off'"
             )
+
+        # Cache duration now belongs to each chat. Preserve the old provider default
+        # once for chats that had not chosen an override, then retire that default.
+        cache_scope_key = "cache_scope_per_chat_v1"
+        cache_scope_migrated = cx.execute(
+            "SELECT 1 FROM settings WHERE key=?", (cache_scope_key,)
+        ).fetchone()
+        if not cache_scope_migrated:
+            cx.execute(
+                """UPDATE chats
+                   SET prompt_cache_ttl=COALESCE(
+                       (SELECT CASE
+                           WHEN p.prompt_cache_ttl IN ('5m','1h') THEN p.prompt_cache_ttl
+                           ELSE 'off'
+                        END
+                        FROM provider_profiles p
+                        WHERE p.id=chats.provider_id),
+                       'off'
+                   )
+                   WHERE COALESCE(prompt_cache_ttl,'')=''"""
+            )
+            cx.execute(
+                "UPDATE chats SET prompt_cache_ttl='off' "
+                "WHERE prompt_cache_ttl NOT IN ('off','5m','1h')"
+            )
+            cx.execute("UPDATE provider_profiles SET prompt_cache_ttl='off'")
+            cx.execute(
+                "INSERT INTO settings (key,value) VALUES (?,?)",
+                (cache_scope_key, "1"),
+            )
         message_cols = {r["name"] for r in cx.execute("PRAGMA table_info(messages)").fetchall()}
         if "origin" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'chat'")
@@ -1120,7 +1150,7 @@ def chat_model_get(chat_id: str) -> dict:
         ).fetchone()
     return dict(row) if row else {
         "provider_id": "", "model_id": "", "reasoning_effort": "", "show_thinking": 1,
-        "prompt_cache_ttl": "",
+        "prompt_cache_ttl": "off",
     }
 
 
@@ -2159,12 +2189,8 @@ def provider_upsert(provider_id: str, name: str, base_url: str, api_key_box: str
         if provider_type in {"generic", "openrouter", "claude_compatible"}
         else "generic"
     )
-    prompt_cache_ttl = (
-        prompt_cache_ttl
-        if provider_type in {"openrouter", "claude_compatible"}
-        and prompt_cache_ttl in {"off", "5m", "1h"}
-        else "off"
-    )
+    # Kept in the row for backwards compatibility; cache duration is chat-scoped.
+    prompt_cache_ttl = "off"
     with conn() as cx:
         cx.execute(
             "INSERT INTO provider_profiles "

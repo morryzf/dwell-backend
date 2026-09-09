@@ -4491,8 +4491,14 @@ function usageSeconds(ms) {
 }
 function attachMessageUsage(el, message) {
   const usage = message && message.usage;
-  const total = Number(usage && usage.total_tokens) || 0;
-  if (!el || !message || message.role !== 'assistant' || total <= 0) return;
+  const billedTotal = Number(usage && usage.total_tokens) || 0;
+  const uncachedInput = Number(usage && usage.input_tokens) || 0;
+  const cached = Number(usage && usage.cached_tokens) || 0;
+  const cacheWrite = Number(usage && usage.cache_write_tokens) || 0;
+  const contextInput = Number(usage && usage.context_input_tokens)
+    || uncachedInput + cached + cacheWrite;
+  const total = contextInput + (Number(usage && usage.output_tokens) || 0);
+  if (!el || !message || message.role !== 'assistant' || (total <= 0 && billedTotal <= 0)) return;
   const rowEl = el.parentElement;
   if (!rowEl || rowEl.querySelector('.msg-usage')) return;
   rowEl.classList.add('has-usage');
@@ -4505,10 +4511,8 @@ function attachMessageUsage(el, message) {
   const pop = document.createElement('div');
   pop.className = 'msg-usage-pop';
   pop.setAttribute('role', 'status');
-  const cached = Number(usage.cached_tokens) || 0;
-  const cacheWrite = Number(usage.cache_write_tokens) || 0;
   const lines = [
-    ['↑', usageNumber(usage.input_tokens) + ' 输入'],
+    ['↑', usageNumber(uncachedInput) + (cached || cacheWrite ? ' 未缓存输入' : ' 输入')],
   ];
   if (cached > 0) lines.push(['↳', usageNumber(cached) + ' 缓存读取']);
   if (cacheWrite > 0) lines.push(['↟', usageNumber(cacheWrite) + ' 缓存写入']);
@@ -9570,11 +9574,8 @@ async function loadApi() {
     + `<div class="ap-lb">接口地址</div>`
     + `<input class="ap-in" id="apBase" placeholder="https://api.jumengai.net/v1">`
     + `<div class="ap-lb">连接类型</div><select class="ap-in" id="apProviderType">`
-    + `<option value="generic">通用 OpenAI 兼容</option><option value="claude_compatible">Claude 缓存中转</option><option value="openrouter">OpenRouter</option></select>`
-    + `<div class="ap-cache-options" id="apCacheOptions" hidden>`
-    + `<div class="ap-lb">Claude 提示缓存</div><select class="ap-in" id="apCacheTtl">`
-    + `<option value="off">关闭</option><option value="5m">5 分钟（推荐）</option><option value="1h">1 小时</option></select>`
-    + `<div class="ap-cache-help">只对 Claude 模型生效。请确认中转站支持并透传提示缓存字段。</div></div>`
+    + `<option value="generic">OpenAI 兼容</option><option value="claude_compatible">Anthropic Messages</option><option value="openrouter">OpenRouter</option></select>`
+    + `<div class="ap-cache-help">这里只决定怎样连接供应商；缓存时长在每间聊天的模型选择里设置。</div>`
     + `<div class="ap-lb">令牌</div>`
     + `<input class="ap-in" id="apTok" type="password" placeholder="已保存时留空；输入空值不会读取旧密钥">`
     + `<div class="ap-btns single"><button class="ap-b go" id="apSave">保存供应商</button></div>`
@@ -9587,18 +9588,10 @@ async function loadApi() {
   const msg = document.getElementById('apMsg');
   const profile = document.getElementById('apProfile');
   const providerType = document.getElementById('apProviderType');
-  const cacheOptions = document.getElementById('apCacheOptions');
-  const cacheTtl = document.getElementById('apCacheTtl');
   const syncProviderType = (userChanged = false) => {
     const openrouter = providerType.value === 'openrouter';
-    const cacheCapable = openrouter || providerType.value === 'claude_compatible';
-    cacheOptions.hidden = !cacheCapable;
-    if (!cacheCapable) cacheTtl.value = 'off';
     if (openrouter && userChanged && !document.getElementById('apBase').value.trim()) {
       document.getElementById('apBase').value = 'https://openrouter.ai/api/v1';
-    }
-    if (cacheCapable && userChanged && cacheTtl.value === 'off') {
-      cacheTtl.value = '5m';
     }
   };
   const fill = () => {
@@ -9606,7 +9599,6 @@ async function loadApi() {
     document.getElementById('apName').value = p ? p.name : '';
     document.getElementById('apBase').value = p ? p.base_url : '';
     providerType.value = p ? (p.provider_type || 'generic') : 'generic';
-    cacheTtl.value = p ? (p.prompt_cache_ttl || 'off') : 'off';
     document.getElementById('apTok').placeholder = p && p.has_key ? '已保存 · 不换就留空' : '粘贴 API 密钥';
     syncProviderType();
   };
@@ -9618,7 +9610,6 @@ async function loadApi() {
     name: document.getElementById('apName').value.trim(),
     base_url: document.getElementById('apBase').value.trim(),
     provider_type: providerType.value,
-    prompt_cache_ttl: ['openrouter', 'claude_compatible'].includes(providerType.value) ? cacheTtl.value : 'off',
     token: document.getElementById('apTok').value.trim(),
   });
   const say = (t, bad) => { msg.textContent = t; msg.className = 'ap-msg on' + (bad ? ' bad' : ''); };
@@ -11427,38 +11418,31 @@ function renderPromptCachePicker() {
     item => item.id === currentProviderId
   );
   const model = String(curModel || '').toLowerCase();
+  let openrouterHost = '';
+  try { openrouterHost = new URL(provider && provider.base_url || '').hostname.toLowerCase(); } catch (error) {}
   const cacheable = provider && model.includes('claude') && (
-    provider.provider_type === 'generic'
-    || provider.provider_type === 'claude_compatible'
-    || (provider.provider_type === 'openrouter' && model.startsWith('anthropic/'))
+    provider.provider_type === 'claude_compatible'
+    || (provider.provider_type === 'openrouter'
+      && openrouterHost === 'openrouter.ai'
+      && model.startsWith('anthropic/'))
   );
-  if (!cacheable) return;
-  const label = document.createElement('div');
-  label.className = 'group-label';
-  label.textContent = '缓存时长';
-  modelBody.appendChild(label);
-  const group = document.createElement('div');
-  group.className = 'group';
+  if (!cacheable) return null;
+  const select = document.createElement('select');
+  select.className = 'ap-in';
+  select.setAttribute('aria-label', '这间聊天的缓存时长');
   [
-    {id: 'off', name: '关闭'},
-    {id: '5m', name: '5 分钟'},
-    {id: '1h', name: '1 小时'},
+    {id: 'off', name: '缓存关闭'},
+    {id: '5m', name: '缓存 5 分钟'},
+    {id: '1h', name: '缓存 1 小时'},
   ].forEach(option => {
-    const row = document.createElement('button');
-    row.className = 'grow';
-    row.setAttribute('aria-pressed', String(curPromptCacheTtl === option.id));
-    const name = document.createElement('span');
-    name.textContent = option.name;
-    row.appendChild(name);
-    if (curPromptCacheTtl === option.id) {
-      const check = icEl('check', 17);
-      check.classList.add('ck');
-      row.appendChild(check);
-    }
-    row.onclick = () => setChatPromptCacheTtl(option.id, row);
-    group.appendChild(row);
+    const item = document.createElement('option');
+    item.value = option.id;
+    item.textContent = option.name;
+    item.selected = curPromptCacheTtl === option.id;
+    select.appendChild(item);
   });
-  modelBody.appendChild(group);
+  select.onchange = () => setChatPromptCacheTtl(select.value, select);
+  return select;
 }
 
 function renderProviderModelPicker() {
@@ -11467,7 +11451,10 @@ function renderProviderModelPicker() {
   const top = document.createElement('div'); top.className = 'catalog-bar';
   const change = document.createElement('button'); change.className = 'ap-b'; change.textContent = catalogMode === 'favorites' ? '浏览模型库' : '← 常用模型';
   change.onclick = () => { catalogMode = catalogMode === 'favorites' ? 'browse' : 'favorites'; renderProviderModelPicker(); };
-  top.appendChild(change); modelBody.appendChild(top);
+  top.appendChild(change);
+  const cachePicker = renderPromptCachePicker();
+  if (cachePicker) top.appendChild(cachePicker);
+  modelBody.appendChild(top);
   if (catalogMode === 'favorites') {
     const current = (catalogData.items || []).find(item => item.provider_id === currentProviderId && item.model_id === curModel)
       || (curModel ? { provider_id: currentProviderId, model_id: curModel } : null);
@@ -11484,7 +11471,6 @@ function renderProviderModelPicker() {
     } else {
       const group = document.createElement('div'); group.className = 'group'; favorites.forEach(item => group.appendChild(composerModelSwipeRow(item, true))); modelBody.appendChild(group);
     }
-    renderPromptCachePicker();
     return;
   }
   const select = document.createElement('select'); select.className = 'ap-in';
