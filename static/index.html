@@ -11427,9 +11427,10 @@ function renderPromptCachePicker() {
     item => item.id === currentProviderId
   );
   const model = String(curModel || '').toLowerCase();
-  const cacheable = provider && (
-    (provider.provider_type === 'openrouter' && model.startsWith('anthropic/'))
-    || (provider.provider_type === 'claude_compatible' && model.includes('claude'))
+  const cacheable = provider && model.includes('claude') && (
+    provider.provider_type === 'generic'
+    || provider.provider_type === 'claude_compatible'
+    || (provider.provider_type === 'openrouter' && model.startsWith('anthropic/'))
   );
   if (!cacheable) return;
   const label = document.createElement('div');

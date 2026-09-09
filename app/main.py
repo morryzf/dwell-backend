@@ -2081,7 +2081,16 @@ def _chat_cache_provider(provider: dict | None, selection: dict) -> dict | None:
     if not provider:
         return None
     prepared = dict(provider)
-    prepared["prompt_cache_ttl"] = _chat_prompt_cache_ttl(selection, provider)
+    ttl = _chat_prompt_cache_ttl(selection, provider)
+    prepared["prompt_cache_ttl"] = ttl
+    model = str(selection.get("model_id") or "").lower()
+    # Choosing a chat TTL is itself an explicit opt-in for a generic Claude relay.
+    if (
+        prepared.get("provider_type") == "generic"
+        and ttl in {"5m", "1h"}
+        and "claude" in model
+    ):
+        prepared["provider_type"] = "claude_compatible"
     return prepared
 
 
@@ -4400,17 +4409,16 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             "message": {"content": assistant_parts(full)}
         })
         _emit(chat_id, {"type": "result", "is_error": False})
-        cache_log_detail = ""
-        if cache_friendly:
-            cache_log_detail = {
-                "cache_ttl": str(provider.get("prompt_cache_ttl") or ""),
-                "usage_reported": usage_totals["total_tokens"] > 0,
-                "input_tokens": usage_totals["input_tokens"],
-                "cache_read_tokens": usage_totals["cached_tokens"],
-                "cache_write_tokens": usage_totals["cache_write_tokens"],
-                "cache_write_5m_tokens": usage_totals["cache_write_5m_tokens"],
-                "cache_write_1h_tokens": usage_totals["cache_write_1h_tokens"],
-            }
+        cache_log_detail = (
+            f"缓存：{'已开启' if cache_friendly else '未开启'} · "
+            f"TTL {str((provider or {}).get('prompt_cache_ttl') or 'off')} · "
+            f"usage：{'已返回' if usage_totals['total_tokens'] > 0 else '未返回'} · "
+            f"输入 {usage_totals['input_tokens']} · "
+            f"缓存写入 {usage_totals['cache_write_tokens']} · "
+            f"缓存读取 {usage_totals['cached_tokens']} · "
+            f"5m 写入 {usage_totals['cache_write_5m_tokens']} · "
+            f"1h 写入 {usage_totals['cache_write_1h_tokens']}"
+        )
         _finish_system_log(
             request_log_id, "success", request_started, detail=cache_log_detail
         )
