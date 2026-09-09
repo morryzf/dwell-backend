@@ -2154,10 +2154,15 @@ def provider_upsert(provider_id: str, name: str, base_url: str, api_key_box: str
     row = provider_get(provider_id) if provider_id else None
     provider_id = provider_id or new_id()
     box = row["api_key_box"] if row and api_key_box is None else (api_key_box or "")
-    provider_type = provider_type if provider_type in {"generic", "openrouter"} else "generic"
+    provider_type = (
+        provider_type
+        if provider_type in {"generic", "openrouter", "claude_compatible"}
+        else "generic"
+    )
     prompt_cache_ttl = (
         prompt_cache_ttl
-        if provider_type == "openrouter" and prompt_cache_ttl in {"off", "5m", "1h"}
+        if provider_type in {"openrouter", "claude_compatible"}
+        and prompt_cache_ttl in {"off", "5m", "1h"}
         else "off"
     )
     with conn() as cx:
