@@ -776,6 +776,16 @@ html[data-theme="dark"] .composer {
   .ap-section .ap-lb:first-of-type { margin-top: 12px; }
   .ap-cache-options[hidden] { display: none; }
   .ap-cache-help { margin: 7px 2px 0; color: var(--dim); font-size: 12.5px; line-height: 1.55; }
+  .ap-section-description { margin: 2px 0 0; color: var(--dim); font-size: 12.5px; line-height: 1.55; }
+  .provider-profile-list { margin-top: 12px; }
+  .provider-profile-row { transition: transform 140ms var(--ease-out), background-color 160ms ease; }
+  .provider-profile-row:active { transform: scale(.985); }
+  .provider-profile-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .provider-profile-empty { padding: 15px 16px; color: var(--dim); font-size: 13px; text-align: center; }
+  .provider-editor[hidden] { display: none; }
+  .provider-editor-heading { display: flex; align-items: baseline; gap: 8px; }
+  .provider-editor-heading small { color: var(--dim); font-size: 12px; font-weight: 500; }
+  .provider-editor .ap-btns { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); }
   .ap-in {
     display: block; width: 100%; min-height: 43px; padding: 9px 11px;
     border: 1px solid var(--line); border-radius: 11px; outline: 0;
@@ -9563,55 +9573,107 @@ async function loadApi() {
   const b = document.getElementById('apiBody');
   let st = { items: [] };
   try { st = await (await fetch('api/providers', { cache: 'no-store' })).json(); } catch (e) {}
-  const esc = s => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const profiles = st.items || [];
-  const choices = `<option value="">＋ 新供应商</option>` + profiles.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.has_key ? '' : '（未填密钥）'}</option>`).join('');
   b.innerHTML =
-    `<div class="sh-head"><h1>模型供应商</h1><div class="sub">每个聊天可自行选择；密钥只会保存到服务器。</div></div>`
-    + `<div class="ap-section"><div class="ap-section-title">供应商连接</div>`
-    + `<div class="ap-lb">已保存的供应商</div><select class="ap-in" id="apProfile">${choices}</select>`
-    + `<div class="ap-lb">名称</div><input class="ap-in" id="apName" placeholder="例如：聚梦 AG">`
-    + `<div class="ap-lb">接口地址</div>`
-    + `<input class="ap-in" id="apBase" placeholder="https://api.jumengai.net/v1">`
-    + `<div class="ap-lb">连接类型</div><select class="ap-in" id="apProviderType">`
-    + `<option value="generic">OpenAI 兼容</option><option value="claude_compatible">Anthropic Messages</option><option value="openrouter">OpenRouter</option></select>`
-    + `<div class="ap-cache-help">这里只决定怎样连接供应商；缓存时长在每间聊天的模型选择里设置。</div>`
-    + `<div class="ap-lb">令牌</div>`
-    + `<input class="ap-in" id="apTok" type="password" placeholder="已保存时留空；输入空值不会读取旧密钥">`
-    + `<div class="ap-btns single"><button class="ap-b go" id="apSave">保存供应商</button></div>`
-    + `<div class="ap-msg" id="apMsg"></div></div>`
-    + `<div class="ap-section"><div class="ap-section-title">模型目录</div><div class="sub">获取供应商的模型后，挑进常用模型；聊天页只显示常用项。</div>`
-    + `<div class="ap-btns single"><button class="ap-b" id="apOpenCatalog">管理模型与常用项</button></div></div>`
-    + `<div class="ap-note">密钥经服务器加密后保存，网页之后只能看到“已保存”，拿不回来。<br>`
-    + `保存后，到聊天输入框下方选择模型；「获取 / 刷新」模型即可验证供应商连接。</div>`;
+    '<div class="sh-head"><h1>模型供应商</h1><div class="sub">每个聊天可自行选择；密钥只会保存到服务器。</div></div>'
+    + '<div class="ap-section"><div class="ap-section-title">已保存的供应商</div>'
+    + '<div class="group provider-profile-list" id="apProviderList"></div>'
+    + '<div class="ap-btns single"><button class="ap-b" id="apAddProvider">＋ 添加供应商</button></div></div>'
+    + '<div class="ap-section provider-editor" id="apEditor" hidden>'
+    + '<div class="ap-section-title provider-editor-heading"><span id="apEditorTitle">供应商配置</span><small id="apEditorMeta"></small></div>'
+    + '<div class="ap-lb">名称</div><input class="ap-in" id="apName" placeholder="例如：聚梦 AG">'
+    + '<div class="ap-lb">接口地址</div>'
+    + '<input class="ap-in" id="apBase" placeholder="https://api.jumengai.net/v1">'
+    + '<div class="ap-lb">连接类型</div><select class="ap-in" id="apProviderType">'
+    + '<option value="generic">OpenAI 兼容</option><option value="claude_compatible">Anthropic Messages</option><option value="openrouter">OpenRouter</option></select>'
+    + '<div class="ap-cache-help">这里只决定怎样连接供应商；缓存时长在每间聊天的模型选择里设置。</div>'
+    + '<div class="ap-lb">令牌</div>'
+    + '<input class="ap-in" id="apTok" type="password" placeholder="粘贴 API 密钥">'
+    + '<div class="ap-btns"><button class="ap-b" id="apCancel">取消</button><button class="ap-b go" id="apSave">保存供应商</button></div>'
+    + '<div class="ap-msg" id="apMsg"></div></div>'
+    + '<div class="ap-section"><div class="ap-section-title">模型目录</div><div class="ap-section-description">获取供应商的模型后，挑进常用模型；聊天页只显示常用项。</div>'
+    + '<div class="ap-btns single"><button class="ap-b" id="apOpenCatalog">管理模型与常用项</button></div></div>'
+    + '<div class="ap-note">密钥经服务器加密后保存，网页之后只能看到“已保存”，拿不回来。<br>'
+    + '保存后，到聊天输入框下方选择模型；「获取 / 刷新」模型即可验证供应商连接。</div>';
 
   const msg = document.getElementById('apMsg');
-  const profile = document.getElementById('apProfile');
+  const list = document.getElementById('apProviderList');
+  const editor = document.getElementById('apEditor');
   const providerType = document.getElementById('apProviderType');
+  let editingProviderId = '';
+
   const syncProviderType = (userChanged = false) => {
     const openrouter = providerType.value === 'openrouter';
     if (openrouter && userChanged && !document.getElementById('apBase').value.trim()) {
       document.getElementById('apBase').value = 'https://openrouter.ai/api/v1';
     }
   };
-  const fill = () => {
-    const p = profiles.find(x => x.id === profile.value);
+  const closeEditor = () => {
+    editingProviderId = '';
+    editor.hidden = true;
+    msg.className = 'ap-msg';
+    msg.textContent = '';
+  };
+  const openProviderEditor = providerId => {
+    const p = profiles.find(item => item.id === providerId);
+    editingProviderId = p ? p.id : '';
+    document.getElementById('apEditorTitle').textContent = p ? p.name : '添加供应商';
+    document.getElementById('apEditorMeta').textContent = p ? '编辑配置' : '新连接';
     document.getElementById('apName').value = p ? p.name : '';
     document.getElementById('apBase').value = p ? p.base_url : '';
     providerType.value = p ? (p.provider_type || 'generic') : 'generic';
-    document.getElementById('apTok').placeholder = p && p.has_key ? '已保存 · 不换就留空' : '粘贴 API 密钥';
+    const token = document.getElementById('apTok');
+    token.value = '';
+    token.placeholder = p && p.has_key ? '已保存 · 不换就留空' : '粘贴 API 密钥';
+    msg.className = 'ap-msg';
+    msg.textContent = '';
+    editor.hidden = false;
     syncProviderType();
+    document.getElementById('apName').focus({preventScroll: true});
+    editor.scrollIntoView({block: 'nearest'});
   };
-  profile.onchange = fill;
+  const drawProviders = () => {
+    list.innerHTML = '';
+    if (!profiles.length) {
+      const empty = document.createElement('div');
+      empty.className = 'provider-profile-empty';
+      empty.textContent = '还没有保存供应商';
+      list.appendChild(empty);
+      return;
+    }
+    profiles.forEach(p => {
+      const row = document.createElement('button');
+      row.className = 'grow provider-profile-row';
+      row.type = 'button';
+      row.setAttribute('aria-label', '编辑供应商 ' + p.name);
+      const name = document.createElement('span');
+      name.className = 'provider-profile-name';
+      name.textContent = p.name;
+      const chev = document.createElement('span');
+      chev.className = 'chev';
+      chev.textContent = '›';
+      row.append(name, chev);
+      row.onclick = () => openProviderEditor(p.id);
+      list.appendChild(row);
+    });
+  };
+
   providerType.onchange = () => syncProviderType(true);
-  fill();
-  const vals = () => ({
-    id: profile.value,
-    name: document.getElementById('apName').value.trim(),
-    base_url: document.getElementById('apBase').value.trim(),
-    provider_type: providerType.value,
-    token: document.getElementById('apTok').value.trim(),
-  });
+  document.getElementById('apAddProvider').onclick = () => openProviderEditor('');
+  document.getElementById('apCancel').onclick = closeEditor;
+  drawProviders();
+
+  const vals = () => {
+    const value = {
+      id: editingProviderId,
+      name: document.getElementById('apName').value.trim(),
+      base_url: document.getElementById('apBase').value.trim(),
+      provider_type: providerType.value,
+    };
+    const token = document.getElementById('apTok').value.trim();
+    if (token || !editingProviderId) value.token = token;
+    return value;
+  };
   const say = (t, bad) => { msg.textContent = t; msg.className = 'ap-msg on' + (bad ? ' bad' : ''); };
 
   document.getElementById('apSave').onclick = async () => {
@@ -9624,7 +9686,7 @@ async function loadApi() {
       setTimeout(loadApi, 800);
     } catch (e) { say('没存上：' + e.message, true); }
   };
-  document.getElementById('apOpenCatalog').onclick = () => { sheets.api.classList.remove('open'); openProviderModelPicker('browse'); };
+  document.getElementById('apOpenCatalog').onclick = () => openProviderModelPicker('browse', 'settings');
 }
 
 /* 外观：日间 / 夜间直接切换，状态栏也同步换色。 */
@@ -11273,6 +11335,7 @@ reasoningBtn.onclick = openReasoningSheet;
 
 /* ---------- 供应商模型库：常用在前，完整目录按需打开 ---------- */
 let catalogMode = 'favorites';
+let catalogOrigin = 'chat';
 let catalogData = { providers: [], items: [], favorites: [] };
 let catalogProviderId = '';
 let currentProviderId = '';
@@ -11447,15 +11510,18 @@ function renderPromptCachePicker() {
 
 function renderProviderModelPicker() {
   modelBody.innerHTML = '';
-  modelTitle.textContent = catalogMode === 'favorites' ? '切换模型' : '模型目录';
-  const top = document.createElement('div'); top.className = 'catalog-bar';
-  const change = document.createElement('button'); change.className = 'ap-b'; change.textContent = catalogMode === 'favorites' ? '浏览模型库' : '← 常用模型';
-  change.onclick = () => { catalogMode = catalogMode === 'favorites' ? 'browse' : 'favorites'; renderProviderModelPicker(); };
-  top.appendChild(change);
-  const cachePicker = renderPromptCachePicker();
-  if (cachePicker) top.appendChild(cachePicker);
-  modelBody.appendChild(top);
-  if (catalogMode === 'favorites') {
+  const settingsCatalog = catalogOrigin === 'settings';
+  modelTitle.textContent = settingsCatalog ? '模型目录' : (catalogMode === 'favorites' ? '切换模型' : '模型目录');
+  if (!settingsCatalog) {
+    const top = document.createElement('div'); top.className = 'catalog-bar';
+    const change = document.createElement('button'); change.className = 'ap-b'; change.textContent = catalogMode === 'favorites' ? '浏览模型库' : '← 常用模型';
+    change.onclick = () => { catalogMode = catalogMode === 'favorites' ? 'browse' : 'favorites'; renderProviderModelPicker(); };
+    top.appendChild(change);
+    const cachePicker = renderPromptCachePicker();
+    if (cachePicker) top.appendChild(cachePicker);
+    modelBody.appendChild(top);
+  }
+  if (!settingsCatalog && catalogMode === 'favorites') {
     const current = (catalogData.items || []).find(item => item.provider_id === currentProviderId && item.model_id === curModel)
       || (curModel ? { provider_id: currentProviderId, model_id: curModel } : null);
     if (current) {
@@ -11492,9 +11558,16 @@ function renderProviderModelPicker() {
   manual.querySelector('#catalogManualSave').onclick = async () => { const model_id = manual.querySelector('#catalogManualModel').value.trim(); if (!model_id) return; try { const r=await (await fetch('api/model-catalog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:catalogProviderId,model_id,favorite:true,manual:true})})).json(); if(!r.ok) throw new Error(r.detail||'没有保存'); await getModelCatalog(); renderProviderModelPicker(); } catch(e) { note('（手动添加失败：'+e.message+'）','err'); } };
   modelBody.appendChild(manual);
 }
-async function openProviderModelPicker(mode = 'favorites') {
-  catalogMode = mode; modelTitle.textContent = '模型'; modelBody.innerHTML = '<div class="gnote">正在打开模型目录…</div>'; modelSheetEl.classList.add('open');
-  modelBack.innerHTML = ''; modelBack.appendChild(icEl('x', 16)); modelBack.onclick = () => modelSheetEl.classList.remove('open');
+async function openProviderModelPicker(mode = 'favorites', origin = 'chat') {
+  catalogOrigin = origin;
+  catalogMode = origin === 'settings' ? 'browse' : mode;
+  modelTitle.textContent = origin === 'settings' ? '模型目录' : '模型';
+  modelBody.innerHTML = '<div class="gnote">正在打开模型目录…</div>';
+  modelSheetEl.classList.add('open');
+  const settingsCatalog = catalogOrigin === 'settings';
+  modelBack.innerHTML = '';
+  modelBack.appendChild(icEl(settingsCatalog ? 'chevL' : 'x', 16));
+  modelBack.onclick = () => modelSheetEl.classList.remove('open');
   try {
     const selection = await (await fetch('api/model', {cache:'no-store'})).json();
     currentProviderId = selection.provider_id || '';
@@ -11504,7 +11577,7 @@ async function openProviderModelPicker(mode = 'favorites') {
     renderProviderModelPicker();
   } catch (e) { modelBody.innerHTML = '<div class="gnote">模型目录没拿到：' + instructionEsc(e.message) + '</div>'; }
 }
-pill.onclick = () => openProviderModelPicker('favorites');
+pill.onclick = () => openProviderModelPicker('favorites', 'chat');
 
 /* ---------- 添加照片和文件 ---------- */
 document.getElementById('plusBtn').onclick = () => sheets.add.classList.add('open');
