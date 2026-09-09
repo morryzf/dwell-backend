@@ -4196,6 +4196,9 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         **{key: 0.0 for key in cost_usage_keys},
     }
     usage_key_hash = ""
+    cache_protocol = ""
+    cache_auth_mode = ""
+    cache_fallback_reason = ""
     if provider and provider.get("provider_type") == "openrouter":
         try:
             _, usage_key_hash = _openrouter_credentials(provider)
@@ -4312,6 +4315,10 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     consume_stream_chunk(chunk)
                 elif event["type"] == "tool_calls":
                     calls.extend(event["calls"])
+                elif event["type"] == "cache_status":
+                    cache_protocol = str(event.get("protocol") or "")
+                    cache_auth_mode = str(event.get("auth_mode") or "")
+                    cache_fallback_reason = str(event.get("fallback_reason") or "")
                 elif event["type"] == "usage":
                     round_usage = event.get("usage") or {}
             model_duration_ms += max(1, int((time.perf_counter() - round_started) * 1000))
@@ -4409,9 +4416,17 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             "message": {"content": assistant_parts(full)}
         })
         _emit(chat_id, {"type": "result", "is_error": False})
+        cache_active = cache_friendly and not cache_fallback_reason
+        protocol_label = {
+            "anthropic_messages": "Anthropic Messages",
+            "openai_compatible": "OpenAI 兼容",
+        }.get(cache_protocol, cache_protocol or "未知")
         cache_log_detail = (
-            f"缓存：{'已开启' if cache_friendly else '未开启'} · "
+            f"缓存：{'已开启' if cache_active else '未开启'} · "
             f"TTL {str((provider or {}).get('prompt_cache_ttl') or 'off')} · "
+            f"协议 {protocol_label} · "
+            f"鉴权 {cache_auth_mode or '未知'} · "
+            f"回退 {cache_fallback_reason or '无'} · "
             f"usage：{'已返回' if usage_totals['total_tokens'] > 0 else '未返回'} · "
             f"输入 {usage_totals['input_tokens']} · "
             f"缓存写入 {usage_totals['cache_write_tokens']} · "

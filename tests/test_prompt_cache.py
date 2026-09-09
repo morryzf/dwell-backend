@@ -105,6 +105,10 @@ class PromptCacheIntegrationSourceTest(unittest.TestCase):
         self.assertIn('prepared["provider_type"] = "claude_compatible"', self.main)
         self.assertIn('f"缓存：{', self.main)
         self.assertIn("usage：", self.main)
+        self.assertIn('event["type"] == "cache_status"', self.main)
+        self.assertIn('"anthropic_messages": "Anthropic Messages"', self.main)
+        self.assertIn("cache_fallback_reason", self.main)
+        self.assertIn("回退 {cache_fallback_reason or '无'}", self.main)
 
 
 if __name__ == "__main__":
