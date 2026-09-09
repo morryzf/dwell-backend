@@ -2068,29 +2068,37 @@ async def authmode():
     return {"ok": True, "mode": "password"}
 
 
+def _chat_cache_supported(provider: dict | None, model_id: str) -> bool:
+    """Whether this saved transport can honor Claude prompt-cache controls."""
+    if not provider:
+        return False
+    provider_type = str(provider.get("provider_type") or "")
+    model = str(model_id or "").lower()
+    if provider_type == "claude_compatible":
+        return "claude" in model
+    if provider_type == "openrouter":
+        host = (urlparse(str(provider.get("base_url") or "")).hostname or "").lower()
+        return host == "openrouter.ai" and model.startswith("anthropic/")
+    return False
+
+
 def _chat_prompt_cache_ttl(selection: dict, provider: dict | None) -> str:
-    """Resolve a chat override, falling back to the provider's existing default."""
-    override = str(selection.get("prompt_cache_ttl") or "").strip()
-    if override in {"off", "5m", "1h"}:
-        return override
-    configured = str((provider or {}).get("prompt_cache_ttl") or "off").strip()
-    return configured if configured in {"off", "5m", "1h"} else "off"
+    """Resolve the explicit per-chat TTL; provider profiles never supply a default."""
+    ttl = str(selection.get("prompt_cache_ttl") or "off").strip()
+    if ttl not in {"off", "5m", "1h"}:
+        return "off"
+    if ttl != "off" and not _chat_cache_supported(
+        provider, str(selection.get("model_id") or "")
+    ):
+        return "off"
+    return ttl
 
 
 def _chat_cache_provider(provider: dict | None, selection: dict) -> dict | None:
     if not provider:
         return None
     prepared = dict(provider)
-    ttl = _chat_prompt_cache_ttl(selection, provider)
-    prepared["prompt_cache_ttl"] = ttl
-    model = str(selection.get("model_id") or "").lower()
-    # Choosing a chat TTL is itself an explicit opt-in for a generic Claude relay.
-    if (
-        prepared.get("provider_type") == "generic"
-        and ttl in {"5m", "1h"}
-        and "claude" in model
-    ):
-        prepared["provider_type"] = "claude_compatible"
+    prepared["prompt_cache_ttl"] = _chat_prompt_cache_ttl(selection, provider)
     return prepared
 
 
@@ -2159,17 +2167,9 @@ async def providers_upsert(request: Request):
     ).strip()
     if provider_type not in {"generic", "openrouter", "claude_compatible"}:
         raise HTTPException(400, "未知的供应商类型")
-    prompt_cache_ttl = str(
-        payload.get(
-            "prompt_cache_ttl",
-            (existing or {}).get("prompt_cache_ttl") or "off",
-        )
-    ).strip()
-    if prompt_cache_ttl not in {"off", "5m", "1h"}:
-        raise HTTPException(400, "缓存时长只能是关闭、5 分钟或 1 小时")
-    if provider_type == "generic":
-        prompt_cache_ttl = "off"
-    elif provider_type == "openrouter" and (
+    # Cache duration is selected per chat, never as a provider-side default.
+    prompt_cache_ttl = "off"
+    if provider_type == "openrouter" and (
         (urlparse(base_url).hostname or "").lower() != "openrouter.ai"
     ):
         raise HTTPException(400, "OpenRouter 类型必须使用 openrouter.ai 的接口地址")
@@ -2974,10 +2974,11 @@ async def model_set(request: Request):
     effort = str(payload.get("effort", payload.get("reasoning_effort", current["reasoning_effort"])) or "").strip()[:30]
     show_thinking = bool(payload.get("show_thinking", current.get("show_thinking", 1)))
     prompt_cache_ttl = str(
-        payload.get("prompt_cache_ttl", current.get("prompt_cache_ttl") or "") or ""
+        payload.get("prompt_cache_ttl", current.get("prompt_cache_ttl") or "off") or "off"
     ).strip()
-    if prompt_cache_ttl not in {"", "off", "5m", "1h"}:
+    if prompt_cache_ttl not in {"off", "5m", "1h"}:
         raise HTTPException(400, "缓存时长只能是关闭、5 分钟或 1 小时")
+    provider = None
     if provider_id:
         provider = db.provider_get(provider_id)
         if not provider or not provider["enabled"]:
@@ -2986,13 +2987,13 @@ async def model_set(request: Request):
         raise HTTPException(400, "请选择模型")
     if model_id and not provider_id:
         raise HTTPException(400, "请先选择供应商")
+    effective_cache_ttl = _chat_prompt_cache_ttl(
+        {**current, "model_id": model_id, "prompt_cache_ttl": prompt_cache_ttl},
+        provider,
+    )
     db.chat_model_set(
         chat_id, provider_id, model_id, effort, show_thinking,
-        prompt_cache_ttl=prompt_cache_ttl,
-    )
-    provider = db.provider_get(provider_id) if provider_id else None
-    effective_cache_ttl = _chat_prompt_cache_ttl(
-        {**current, "prompt_cache_ttl": prompt_cache_ttl}, provider
+        prompt_cache_ttl=effective_cache_ttl,
     )
     return {
         "ok": True, "provider_id": provider_id, "model": model_id,
@@ -4186,7 +4187,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     reply_started = time.perf_counter()
     model_duration_ms = 0
     token_usage_keys = (
-        "input_tokens", "output_tokens", "total_tokens", "cached_tokens",
+        "input_tokens", "context_input_tokens", "output_tokens", "total_tokens", "cached_tokens",
         "cache_write_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens",
         "reasoning_tokens",
     )
@@ -4417,18 +4418,26 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         })
         _emit(chat_id, {"type": "result", "is_error": False})
         cache_active = cache_friendly and not cache_fallback_reason
+        if usage_totals["cached_tokens"] > 0:
+            cache_outcome = "已命中"
+        elif usage_totals["cache_write_tokens"] > 0:
+            cache_outcome = "已建立"
+        elif cache_active:
+            cache_outcome = "已请求，未命中"
+        else:
+            cache_outcome = "未启用"
         protocol_label = {
             "anthropic_messages": "Anthropic Messages",
             "openai_compatible": "OpenAI 兼容",
         }.get(cache_protocol, cache_protocol or "未知")
         cache_log_detail = (
-            f"缓存：{'已开启' if cache_active else '未开启'} · "
+            f"缓存：{cache_outcome} · "
             f"TTL {str((provider or {}).get('prompt_cache_ttl') or 'off')} · "
             f"协议 {protocol_label} · "
             f"鉴权 {cache_auth_mode or '未知'} · "
             f"回退 {cache_fallback_reason or '无'} · "
             f"usage：{'已返回' if usage_totals['total_tokens'] > 0 else '未返回'} · "
-            f"输入 {usage_totals['input_tokens']} · "
+            f"未缓存输入 {usage_totals['input_tokens']} · "
             f"缓存写入 {usage_totals['cache_write_tokens']} · "
             f"缓存读取 {usage_totals['cached_tokens']} · "
             f"5m 写入 {usage_totals['cache_write_5m_tokens']} · "

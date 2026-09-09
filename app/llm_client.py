@@ -134,6 +134,7 @@ def _usage_dict(raw) -> dict:
 
     usage = {
         "input_tokens": input_tokens,
+        "context_input_tokens": input_tokens + cached_tokens + cache_write_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "cached_tokens": cached_tokens,
