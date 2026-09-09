@@ -393,15 +393,6 @@ def build_anthropic_payload(model_id: str, messages: list, tools: list | None = 
             converted_tools.append(converted)
         payload["tools"] = converted_tools
 
-    effort = str(reasoning_effort or "").strip().lower()
-    model = str(model_id or "").lower()
-    if (
-        thinking_enabled
-        and effort in {"low", "medium", "high", "max"}
-        and ("4-6" in model or "4.6" in model)
-    ):
-        payload["thinking"] = {"type": "adaptive"}
-        payload["output_config"] = {"effort": effort}
     return payload
 
 

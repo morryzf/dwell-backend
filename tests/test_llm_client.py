@@ -198,8 +198,6 @@ class AnthropicMessagesPayloadTest(unittest.TestCase):
         )
         self.assertEqual(payload["tools"][0]["name"], "Lookup")
         self.assertEqual(payload["tools"][0]["input_schema"]["type"], "object")
-        self.assertEqual(payload["thinking"], {"type": "adaptive"})
-        self.assertEqual(payload["output_config"], {"effort": "high"})
         self.assertEqual(payload["max_tokens"], 4096)
         self.assertEqual(messages[2]["content"], "stable answer")
 
