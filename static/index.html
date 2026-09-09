@@ -782,10 +782,6 @@ html[data-theme="dark"] .composer {
   .provider-profile-row:active { transform: scale(.985); }
   .provider-profile-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .provider-profile-empty { padding: 15px 16px; color: var(--dim); font-size: 13px; text-align: center; }
-  .provider-editor[hidden] { display: none; }
-  .provider-editor-heading { display: flex; align-items: baseline; gap: 8px; }
-  .provider-editor-heading small { color: var(--dim); font-size: 12px; font-weight: 500; }
-  .provider-editor .ap-btns { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); }
   .ap-in {
     display: block; width: 100%; min-height: 43px; padding: 9px 11px;
     border: 1px solid var(--line); border-radius: 11px; outline: 0;
@@ -2770,7 +2766,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     color: var(--text);
     text-align: left;
     font-family: "Ephesis", cursive;
-    font-size: 18px;
+    font-size: 20px;
     line-height: 1;
     box-shadow: none !important;
     -webkit-backdrop-filter: none;
@@ -3619,8 +3615,9 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="sheet">
     <div class="grabber"></div>
     <div class="head">
-      <button class="hbtn" data-close="api"><span class="ic" data-i="x"></span></button>
-      <div class="ht">模型供应商</div>
+      <button class="hbtn" id="apiBack" data-close="api"><span class="ic" data-i="x"></span></button>
+      <div class="ht" id="apiTitle">模型供应商</div>
+      <div class="hspace"></div>
     </div>
     <div class="body" id="apiBody"></div>
   </div>
@@ -9569,18 +9566,21 @@ async function loadHealth() {
   } catch { body.innerHTML = '<div class="gnote">读不到，等会儿再看</div>'; }
 }
 
-async function loadApi() {
+function setApiHeader(title, backToList = false) {
+  const back = document.getElementById('apiBack');
+  document.getElementById('apiTitle').textContent = title;
+  back.innerHTML = '';
+  back.appendChild(icEl(backToList ? 'chevL' : 'x', 16));
+  back.onclick = backToList ? loadApi : () => sheets.api.classList.remove('open');
+}
+
+function openProviderEditorPage(provider) {
+  const p = provider || null;
+  const editingProviderId = p ? p.id : '';
   const b = document.getElementById('apiBody');
-  let st = { items: [] };
-  try { st = await (await fetch('api/providers', { cache: 'no-store' })).json(); } catch (e) {}
-  const profiles = st.items || [];
+  setApiHeader(p ? p.name : '添加供应商', true);
   b.innerHTML =
-    '<div class="sh-head"><h1>模型供应商</h1><div class="sub">每个聊天可自行选择；密钥只会保存到服务器。</div></div>'
-    + '<div class="ap-section"><div class="ap-section-title">已保存的供应商</div>'
-    + '<div class="group provider-profile-list" id="apProviderList"></div>'
-    + '<div class="ap-btns single"><button class="ap-b" id="apAddProvider">＋ 添加供应商</button></div></div>'
-    + '<div class="ap-section provider-editor" id="apEditor" hidden>'
-    + '<div class="ap-section-title provider-editor-heading"><span id="apEditorTitle">供应商配置</span><small id="apEditorMeta"></small></div>'
+    '<div class="ap-section">'
     + '<div class="ap-lb">名称</div><input class="ap-in" id="apName" placeholder="例如：聚梦 AG">'
     + '<div class="ap-lb">接口地址</div>'
     + '<input class="ap-in" id="apBase" placeholder="https://api.jumengai.net/v1">'
@@ -9589,58 +9589,77 @@ async function loadApi() {
     + '<div class="ap-cache-help">这里只决定怎样连接供应商；缓存时长在每间聊天的模型选择里设置。</div>'
     + '<div class="ap-lb">令牌</div>'
     + '<input class="ap-in" id="apTok" type="password" placeholder="粘贴 API 密钥">'
-    + '<div class="ap-btns"><button class="ap-b" id="apCancel">取消</button><button class="ap-b go" id="apSave">保存供应商</button></div>'
-    + '<div class="ap-msg" id="apMsg"></div></div>'
+    + '<div class="ap-btns single"><button class="ap-b go" id="apSave">保存供应商</button></div>'
+    + '<div class="ap-msg" id="apMsg"></div></div>';
+  b.scrollTop = 0;
+
+  document.getElementById('apName').value = p ? p.name : '';
+  document.getElementById('apBase').value = p ? p.base_url : '';
+  const providerType = document.getElementById('apProviderType');
+  providerType.value = p ? (p.provider_type || 'generic') : 'generic';
+  const token = document.getElementById('apTok');
+  token.placeholder = p && p.has_key ? '已保存 · 不换就留空' : '粘贴 API 密钥';
+
+  providerType.onchange = () => {
+    if (providerType.value === 'openrouter' && !document.getElementById('apBase').value.trim()) {
+      document.getElementById('apBase').value = 'https://openrouter.ai/api/v1';
+    }
+  };
+  const msg = document.getElementById('apMsg');
+  const say = (text, bad) => {
+    msg.textContent = text;
+    msg.className = 'ap-msg on' + (bad ? ' bad' : '');
+  };
+  document.getElementById('apSave').onclick = async () => {
+    say('正在安全保存…');
+    try {
+      const value = {
+        id: editingProviderId,
+        name: document.getElementById('apName').value.trim(),
+        base_url: document.getElementById('apBase').value.trim(),
+        provider_type: providerType.value,
+      };
+      const nextToken = token.value.trim();
+      if (nextToken || !editingProviderId) value.token = nextToken;
+      const response = await (await fetch('api/providers', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(value),
+      })).json();
+      if (!response.ok) throw new Error(response.detail || '服务器没有保存');
+      say('保存好了');
+      setTimeout(loadApi, 650);
+    } catch (error) {
+      say('没存上：' + error.message, true);
+    }
+  };
+}
+
+async function loadApi() {
+  const b = document.getElementById('apiBody');
+  setApiHeader('模型供应商');
+  b.innerHTML = '<div class="gnote">正在读取供应商…</div>';
+  let st = { items: [] };
+  try { st = await (await fetch('api/providers', { cache: 'no-store' })).json(); } catch (e) {}
+  const profiles = st.items || [];
+  b.innerHTML =
+    '<div class="sh-head"><h1>模型供应商</h1><div class="sub">每个聊天可自行选择；密钥只会保存到服务器。</div></div>'
+    + '<div class="ap-section"><div class="ap-section-title">已保存的供应商</div>'
+    + '<div class="group provider-profile-list" id="apProviderList"></div>'
+    + '<div class="ap-btns single"><button class="ap-b" id="apAddProvider">＋ 添加供应商</button></div></div>'
     + '<div class="ap-section"><div class="ap-section-title">模型目录</div><div class="ap-section-description">获取供应商的模型后，挑进常用模型；聊天页只显示常用项。</div>'
     + '<div class="ap-btns single"><button class="ap-b" id="apOpenCatalog">管理模型与常用项</button></div></div>'
     + '<div class="ap-note">密钥经服务器加密后保存，网页之后只能看到“已保存”，拿不回来。<br>'
     + '保存后，到聊天输入框下方选择模型；「获取 / 刷新」模型即可验证供应商连接。</div>';
+  b.scrollTop = 0;
 
-  const msg = document.getElementById('apMsg');
   const list = document.getElementById('apProviderList');
-  const editor = document.getElementById('apEditor');
-  const providerType = document.getElementById('apProviderType');
-  let editingProviderId = '';
-
-  const syncProviderType = (userChanged = false) => {
-    const openrouter = providerType.value === 'openrouter';
-    if (openrouter && userChanged && !document.getElementById('apBase').value.trim()) {
-      document.getElementById('apBase').value = 'https://openrouter.ai/api/v1';
-    }
-  };
-  const closeEditor = () => {
-    editingProviderId = '';
-    editor.hidden = true;
-    msg.className = 'ap-msg';
-    msg.textContent = '';
-  };
-  const openProviderEditor = providerId => {
-    const p = profiles.find(item => item.id === providerId);
-    editingProviderId = p ? p.id : '';
-    document.getElementById('apEditorTitle').textContent = p ? p.name : '添加供应商';
-    document.getElementById('apEditorMeta').textContent = p ? '编辑配置' : '新连接';
-    document.getElementById('apName').value = p ? p.name : '';
-    document.getElementById('apBase').value = p ? p.base_url : '';
-    providerType.value = p ? (p.provider_type || 'generic') : 'generic';
-    const token = document.getElementById('apTok');
-    token.value = '';
-    token.placeholder = p && p.has_key ? '已保存 · 不换就留空' : '粘贴 API 密钥';
-    msg.className = 'ap-msg';
-    msg.textContent = '';
-    editor.hidden = false;
-    syncProviderType();
-    document.getElementById('apName').focus({preventScroll: true});
-    editor.scrollIntoView({block: 'nearest'});
-  };
-  const drawProviders = () => {
-    list.innerHTML = '';
-    if (!profiles.length) {
-      const empty = document.createElement('div');
-      empty.className = 'provider-profile-empty';
-      empty.textContent = '还没有保存供应商';
-      list.appendChild(empty);
-      return;
-    }
+  if (!profiles.length) {
+    const empty = document.createElement('div');
+    empty.className = 'provider-profile-empty';
+    empty.textContent = '还没有保存供应商';
+    list.appendChild(empty);
+  } else {
     profiles.forEach(p => {
       const row = document.createElement('button');
       row.className = 'grow provider-profile-row';
@@ -9653,39 +9672,12 @@ async function loadApi() {
       chev.className = 'chev';
       chev.textContent = '›';
       row.append(name, chev);
-      row.onclick = () => openProviderEditor(p.id);
+      row.onclick = () => openProviderEditorPage(p);
       list.appendChild(row);
     });
-  };
+  }
 
-  providerType.onchange = () => syncProviderType(true);
-  document.getElementById('apAddProvider').onclick = () => openProviderEditor('');
-  document.getElementById('apCancel').onclick = closeEditor;
-  drawProviders();
-
-  const vals = () => {
-    const value = {
-      id: editingProviderId,
-      name: document.getElementById('apName').value.trim(),
-      base_url: document.getElementById('apBase').value.trim(),
-      provider_type: providerType.value,
-    };
-    const token = document.getElementById('apTok').value.trim();
-    if (token || !editingProviderId) value.token = token;
-    return value;
-  };
-  const say = (t, bad) => { msg.textContent = t; msg.className = 'ap-msg on' + (bad ? ' bad' : ''); };
-
-  document.getElementById('apSave').onclick = async () => {
-    say('正在安全保存…');
-    try {
-      const v = vals();
-      const r = await (await fetch('api/providers', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(v) })).json();
-      if (!r.ok) throw new Error(r.detail || '服务器没有保存');
-      say('保存好了 · 到聊天输入框下方选择这个供应商的模型');
-      setTimeout(loadApi, 800);
-    } catch (e) { say('没存上：' + e.message, true); }
-  };
+  document.getElementById('apAddProvider').onclick = () => openProviderEditorPage(null);
   document.getElementById('apOpenCatalog').onclick = () => openProviderModelPicker('browse', 'settings');
 }
 
