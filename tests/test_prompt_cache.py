@@ -47,6 +47,15 @@ class ProviderPromptCacheDatabaseTest(unittest.TestCase):
 
         self.assertEqual(saved["prompt_cache_ttl"], "off")
 
+    def test_claude_compatible_relay_retains_cache_ttl(self):
+        saved = db.provider_upsert(
+            "", "Claude relay", "https://relay.example/v1", "encrypted", True,
+            provider_type="claude_compatible", prompt_cache_ttl="1h",
+        )
+
+        self.assertEqual(saved["provider_type"], "claude_compatible")
+        self.assertEqual(saved["prompt_cache_ttl"], "1h")
+
     def test_chat_cache_ttl_round_trips_independently(self):
         first = db.chat_add("First")
         second = db.chat_add("Second")
@@ -78,6 +87,7 @@ class PromptCacheIntegrationSourceTest(unittest.TestCase):
         self.assertIn('id="apProviderType"', self.ui)
         self.assertIn('id="apCacheTtl"', self.ui)
         self.assertIn('value="5m">5 分钟（推荐）', self.ui)
+        self.assertIn('value="claude_compatible">Claude 缓存中转', self.ui)
         self.assertIn("https://openrouter.ai/api/v1", self.ui)
 
     def test_chat_cache_ttl_is_exposed_and_applied_to_both_request_paths(self):
@@ -88,6 +98,9 @@ class PromptCacheIntegrationSourceTest(unittest.TestCase):
         self.assertIn("function setChatPromptCacheTtl(ttl, button)", self.ui)
         self.assertIn("{id: '5m', name: '5 分钟'}", self.ui)
         self.assertIn("{id: '1h', name: '1 小时'}", self.ui)
+        self.assertIn('"cache_write_tokens"', self.main)
+        self.assertIn("缓存写入", self.ui)
+        self.assertIn("缓存读取", self.ui)
 
 
 if __name__ == "__main__":
