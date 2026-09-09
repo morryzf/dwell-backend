@@ -157,17 +157,20 @@ def _usage_dict(raw) -> dict:
 
 def prompt_cache_ttl(provider: dict | None, model_id: str,
                      session_id: str | None = None) -> str:
-    """Return an explicit OpenRouter Claude cache TTL, or an empty string."""
+    """Return an explicit Claude cache TTL for a verified, opt-in provider."""
     if not provider or not session_id:
         return ""
-    if str(provider.get("provider_type") or "") != "openrouter":
+    provider_type = str(provider.get("provider_type") or "")
+    if provider_type not in {"openrouter", "claude_compatible"}:
         return ""
     if str(provider.get("prompt_cache_ttl") or "off") not in {"5m", "1h"}:
         return ""
     host = (urlparse(str(provider.get("base_url") or "")).hostname or "").lower()
-    if host != "openrouter.ai":
-        return ""
-    if not str(model_id or "").lower().startswith("anthropic/"):
+    model = str(model_id or "").lower()
+    if provider_type == "openrouter":
+        if host != "openrouter.ai" or not model.startswith("anthropic/"):
+            return ""
+    elif "claude" not in model:
         return ""
     return str(provider["prompt_cache_ttl"])
 
@@ -226,7 +229,7 @@ def build_chat_payload(model_id: str, messages: list, tools: list | None = None,
                        thinking_enabled: bool = True,
                        provider: dict | None = None,
                        session_id: str | None = None) -> dict:
-    """Build one request, adding guarded OpenRouter cache fields when configured.
+    """Build one request, adding guarded Claude cache fields when configured.
 
     Generic providers retain the exact provider-neutral request shape.
     """
