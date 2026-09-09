@@ -102,7 +102,7 @@ class PromptCacheIntegrationSourceTest(unittest.TestCase):
         self.assertIn("缓存写入", self.ui)
         self.assertIn("缓存读取", self.ui)
         self.assertIn("provider.provider_type === 'generic'", self.ui)
-        self.assertIn('prepared["provider_type"] = "claude_compatible"',', self.main)
+        self.assertIn('prepared["provider_type"] = "claude_compatible"', self.main)
         self.assertIn('f"缓存：{', self.main)
         self.assertIn("usage：", self.main)
 
