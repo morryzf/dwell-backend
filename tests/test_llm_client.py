@@ -139,7 +139,7 @@ class PromptCachePayloadTest(unittest.TestCase):
             payload["messages"][0]["content"][0]["cache_control"],
             {"type": "ephemeral"},
         )
-        self.assertEqual(payload["session_id"], "dwell-chat:test")
+        self.assertNotIn("session_id", payload)
         self.assertTrue(prompt_cache_enabled(relay, "[CCMAX]claude-opus-4-6"))
         self.assertFalse(prompt_cache_enabled(relay, "[AG]gemini-3.5-flash"))
 
