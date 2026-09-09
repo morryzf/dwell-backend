@@ -9630,7 +9630,7 @@ async function loadApi() {
     editor.hidden = false;
     syncProviderType();
     document.getElementById('apName').focus({preventScroll: true});
-    editor.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    editor.scrollIntoView({block: 'nearest'});
   };
   const drawProviders = () => {
     list.innerHTML = '';
@@ -9663,13 +9663,17 @@ async function loadApi() {
   document.getElementById('apCancel').onclick = closeEditor;
   drawProviders();
 
-  const vals = () => ({
-    id: editingProviderId,
-    name: document.getElementById('apName').value.trim(),
-    base_url: document.getElementById('apBase').value.trim(),
-    provider_type: providerType.value,
-    token: document.getElementById('apTok').value.trim(),
-  });
+  const vals = () => {
+    const value = {
+      id: editingProviderId,
+      name: document.getElementById('apName').value.trim(),
+      base_url: document.getElementById('apBase').value.trim(),
+      provider_type: providerType.value,
+    };
+    const token = document.getElementById('apTok').value.trim();
+    if (token || !editingProviderId) value.token = token;
+    return value;
+  };
   const say = (t, bad) => { msg.textContent = t; msg.className = 'ap-msg on' + (bad ? ' bad' : ''); };
 
   document.getElementById('apSave').onclick = async () => {
