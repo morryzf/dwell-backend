@@ -631,7 +631,7 @@ html[data-theme="dark"] .composer {
   }
   .assistant-choice > span {
     display: inline-flex; align-items: center; justify-content: center;
-    min-height: 36px; padding: 0 18px; border-radius: 999px;
+    min-height: 36px; padding: 0 18px; border-radius: 11px;
     transition: transform 110ms var(--ease-out), background-color 160ms ease,
       color 160ms ease, box-shadow 160ms ease;
   }
@@ -2751,14 +2751,17 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   #drawer .nav .drawer-tool-grid .drawer-tool {
     min-width: 0;
     min-height: 48px;
-    justify-content: center;
-    padding: 10px 8px;
+    justify-content: flex-start;
+    padding: 10px 12px;
     gap: 10px;
     border: 0 !important;
     border-radius: 12px;
     background: transparent !important;
     color: var(--text);
-    text-align: center;
+    text-align: left;
+    font-family: "Ephesis", cursive;
+    font-size: 18px;
+    line-height: 1;
     box-shadow: none !important;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -3433,18 +3436,18 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     <div class="brand">Cloudy Studio</div>
     <div class="assistant-switch" role="group" aria-label="选择助手">
       <button class="assistant-choice on" id="recGu" aria-pressed="true"><span>Cloudy</span></button>
-      <button class="assistant-choice" id="recGong" aria-pressed="false"><span>另一位</span></button>
+      <button class="assistant-choice" id="recGong" aria-pressed="false"><span>Other</span></button>
     </div>
     <div class="nav">
       <div class="drawer-tool-grid" aria-label="功能">
-        <button class="item drawer-tool" id="navTodo"><span class="ic" data-i="checkSquare"></span>待办</button>
-        <button class="item drawer-tool" id="navCal"><span class="ic" data-i="calendar"></span>日历</button>
-        <button class="item drawer-tool" id="navFocus"><span class="ic" data-i="clock"></span>专注</button>
-        <button class="item drawer-tool" id="navWall"><span class="ic" data-i="pen"></span>心事簿</button>
-        <button class="item drawer-tool" id="navNook"><span class="ic" data-i="bookOpen"></span>书房</button>
-        <button class="item drawer-tool" id="navRepo"><span class="ic" data-i="box"></span>仓库</button>
-        <button class="item drawer-tool" id="navHeartbeat"><span class="ic" data-i="activity"></span>心跳</button>
-        <button class="item drawer-tool" id="navUsage"><span class="ic" data-i="trend"></span>用量</button>
+        <button class="item drawer-tool" id="navTodo"><span class="ic" data-i="checkSquare"></span>Tasks</button>
+        <button class="item drawer-tool" id="navCal"><span class="ic" data-i="calendar"></span>Calendar</button>
+        <button class="item drawer-tool" id="navFocus"><span class="ic" data-i="clock"></span>Focus</button>
+        <button class="item drawer-tool" id="navWall"><span class="ic" data-i="pen"></span>Journal</button>
+        <button class="item drawer-tool" id="navNook"><span class="ic" data-i="bookOpen"></span>Library</button>
+        <button class="item drawer-tool" id="navRepo"><span class="ic" data-i="box"></span>Archive</button>
+        <button class="item drawer-tool" id="navHeartbeat"><span class="ic" data-i="activity"></span>Heartbeat</button>
+        <button class="item drawer-tool" id="navUsage"><span class="ic" data-i="trend"></span>Usage</button>
       </div>
       <div class="drawer-section-head">
         <span id="drawerChatHeading">Recents</span>
