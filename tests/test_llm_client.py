@@ -122,6 +122,27 @@ class PromptCachePayloadTest(unittest.TestCase):
         self.assertTrue(prompt_cache_enabled(self.provider, "anthropic/claude-sonnet-4"))
         self.assertFalse(prompt_cache_enabled(self.provider, "openai/gpt-5"))
 
+    def test_opt_in_claude_compatible_relay_uses_the_same_cache_marker(self):
+        relay = {
+            "provider_type": "claude_compatible",
+            "prompt_cache_ttl": "5m",
+            "base_url": "https://relay.example/v1",
+        }
+        payload = build_chat_payload(
+            "[CCMAX]claude-opus-4-6",
+            [{"role": "assistant", "content": "stable answer"}],
+            provider=relay,
+            session_id="dwell-chat:test",
+        )
+
+        self.assertEqual(
+            payload["messages"][0]["content"][0]["cache_control"],
+            {"type": "ephemeral"},
+        )
+        self.assertNotIn("session_id", payload)
+        self.assertTrue(prompt_cache_enabled(relay, "[CCMAX]claude-opus-4-6"))
+        self.assertFalse(prompt_cache_enabled(relay, "[AG]gemini-3.5-flash"))
+
 
 class UsageNormalizationTest(unittest.TestCase):
     def test_normalizes_openrouter_cache_and_cost_metrics(self):

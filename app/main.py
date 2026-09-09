@@ -2148,7 +2148,7 @@ async def providers_upsert(request: Request):
     provider_type = str(
         payload.get("provider_type", (existing or {}).get("provider_type") or "generic")
     ).strip()
-    if provider_type not in {"generic", "openrouter"}:
+    if provider_type not in {"generic", "openrouter", "claude_compatible"}:
         raise HTTPException(400, "未知的供应商类型")
     prompt_cache_ttl = str(
         payload.get(
@@ -2158,9 +2158,11 @@ async def providers_upsert(request: Request):
     ).strip()
     if prompt_cache_ttl not in {"off", "5m", "1h"}:
         raise HTTPException(400, "缓存时长只能是关闭、5 分钟或 1 小时")
-    if provider_type != "openrouter":
+    if provider_type == "generic":
         prompt_cache_ttl = "off"
-    elif (urlparse(base_url).hostname or "").lower() != "openrouter.ai":
+    elif provider_type == "openrouter" and (
+        (urlparse(base_url).hostname or "").lower() != "openrouter.ai"
+    ):
         raise HTTPException(400, "OpenRouter 类型必须使用 openrouter.ai 的接口地址")
 
     # token 未传时，更新名称/地址不会动已有密钥；传空字符串则明确清除密钥。
@@ -4398,7 +4400,20 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             "message": {"content": assistant_parts(full)}
         })
         _emit(chat_id, {"type": "result", "is_error": False})
-        _finish_system_log(request_log_id, "success", request_started)
+        cache_log_detail = ""
+        if cache_friendly:
+            cache_log_detail = {
+                "cache_ttl": str(provider.get("prompt_cache_ttl") or ""),
+                "usage_reported": usage_totals["total_tokens"] > 0,
+                "input_tokens": usage_totals["input_tokens"],
+                "cache_read_tokens": usage_totals["cached_tokens"],
+                "cache_write_tokens": usage_totals["cache_write_tokens"],
+                "cache_write_5m_tokens": usage_totals["cache_write_5m_tokens"],
+                "cache_write_1h_tokens": usage_totals["cache_write_1h_tokens"],
+            }
+        _finish_system_log(
+            request_log_id, "success", request_started, detail=cache_log_detail
+        )
         # 每 50 条旧消息自动生成待确认记忆卡；可见摘要只响应用户按钮。
         _queue_automatic_memory_cards(chat_id)
     except asyncio.CancelledError:

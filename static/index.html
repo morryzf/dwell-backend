@@ -4506,13 +4506,17 @@ function attachMessageUsage(el, message) {
   pop.className = 'msg-usage-pop';
   pop.setAttribute('role', 'status');
   const cached = Number(usage.cached_tokens) || 0;
-  const inputText = usageNumber(usage.input_tokens) + ' 输入' + (cached > 0 ? '（' + usageNumber(cached) + ' 缓存）' : '');
+  const cacheWrite = Number(usage.cache_write_tokens) || 0;
   const lines = [
-    ['↑', inputText],
+    ['↑', usageNumber(usage.input_tokens) + ' 输入'],
+  ];
+  if (cached > 0) lines.push(['↳', usageNumber(cached) + ' 缓存读取']);
+  if (cacheWrite > 0) lines.push(['↟', usageNumber(cacheWrite) + ' 缓存写入']);
+  lines.push(
     ['↓', usageNumber(usage.output_tokens) + ' 输出'],
     ['ϟ', (Number(usage.tokens_per_second) || 0).toFixed(1) + ' tokens/s'],
     ['◷', usageSeconds(usage.duration_ms)],
-  ];
+  );
   for (const [mark, value] of lines) {
     const line = document.createElement('div');
     line.className = 'usage-line';
@@ -9566,11 +9570,11 @@ async function loadApi() {
     + `<div class="ap-lb">接口地址</div>`
     + `<input class="ap-in" id="apBase" placeholder="https://api.jumengai.net/v1">`
     + `<div class="ap-lb">连接类型</div><select class="ap-in" id="apProviderType">`
-    + `<option value="generic">通用 OpenAI 兼容</option><option value="openrouter">OpenRouter</option></select>`
+    + `<option value="generic">通用 OpenAI 兼容</option><option value="claude_compatible">Claude 缓存中转</option><option value="openrouter">OpenRouter</option></select>`
     + `<div class="ap-cache-options" id="apCacheOptions" hidden>`
     + `<div class="ap-lb">Claude 提示缓存</div><select class="ap-in" id="apCacheTtl">`
     + `<option value="off">关闭</option><option value="5m">5 分钟（推荐）</option><option value="1h">1 小时</option></select>`
-    + `<div class="ap-cache-help">只对 anthropic/ 开头的 Claude 模型生效。5 分钟适合普通聊天；1 小时适合频繁聊天或主动功能。</div></div>`
+    + `<div class="ap-cache-help">只对 Claude 模型生效。请确认中转站支持并透传提示缓存字段。</div></div>`
     + `<div class="ap-lb">令牌</div>`
     + `<input class="ap-in" id="apTok" type="password" placeholder="已保存时留空；输入空值不会读取旧密钥">`
     + `<div class="ap-btns single"><button class="ap-b go" id="apSave">保存供应商</button></div>`
@@ -9587,13 +9591,14 @@ async function loadApi() {
   const cacheTtl = document.getElementById('apCacheTtl');
   const syncProviderType = (userChanged = false) => {
     const openrouter = providerType.value === 'openrouter';
-    cacheOptions.hidden = !openrouter;
-    if (!openrouter) cacheTtl.value = 'off';
-    if (openrouter && userChanged) {
-      if (!document.getElementById('apBase').value.trim()) {
-        document.getElementById('apBase').value = 'https://openrouter.ai/api/v1';
-      }
-      if (cacheTtl.value === 'off') cacheTtl.value = '5m';
+    const cacheCapable = openrouter || providerType.value === 'claude_compatible';
+    cacheOptions.hidden = !cacheCapable;
+    if (!cacheCapable) cacheTtl.value = 'off';
+    if (openrouter && userChanged && !document.getElementById('apBase').value.trim()) {
+      document.getElementById('apBase').value = 'https://openrouter.ai/api/v1';
+    }
+    if (cacheCapable && userChanged && cacheTtl.value === 'off') {
+      cacheTtl.value = '5m';
     }
   };
   const fill = () => {
@@ -9613,7 +9618,7 @@ async function loadApi() {
     name: document.getElementById('apName').value.trim(),
     base_url: document.getElementById('apBase').value.trim(),
     provider_type: providerType.value,
-    prompt_cache_ttl: providerType.value === 'openrouter' ? cacheTtl.value : 'off',
+    prompt_cache_ttl: ['openrouter', 'claude_compatible'].includes(providerType.value) ? cacheTtl.value : 'off',
     token: document.getElementById('apTok').value.trim(),
   });
   const say = (t, bad) => { msg.textContent = t; msg.className = 'ap-msg on' + (bad ? ' bad' : ''); };
@@ -11421,8 +11426,12 @@ function renderPromptCachePicker() {
   const provider = (catalogData.providers || []).find(
     item => item.id === currentProviderId
   );
-  if (!provider || provider.provider_type !== 'openrouter'
-      || !String(curModel || '').toLowerCase().startsWith('anthropic/')) return;
+  const model = String(curModel || '').toLowerCase();
+  const cacheable = provider && (
+    (provider.provider_type === 'openrouter' && model.startsWith('anthropic/'))
+    || (provider.provider_type === 'claude_compatible' && model.includes('claude'))
+  );
+  if (!cacheable) return;
   const label = document.createElement('div');
   label.className = 'group-label';
   label.textContent = '缓存时长';
