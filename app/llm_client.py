@@ -101,9 +101,10 @@ def _usage_dict(raw) -> dict:
     """Normalize token, prompt-cache, and cost metrics without estimating them."""
     if not isinstance(raw, dict):
         return {}
-    input_tokens = _token_count(raw.get("prompt_tokens", raw.get("input_tokens")))
+    reported_input_tokens = _token_count(
+        raw.get("prompt_tokens", raw.get("input_tokens"))
+    )
     output_tokens = _token_count(raw.get("completion_tokens", raw.get("output_tokens")))
-    total_tokens = _token_count(raw.get("total_tokens")) or input_tokens + output_tokens
     input_details = raw.get("prompt_tokens_details") or raw.get("input_tokens_details") or {}
     output_details = raw.get("completion_tokens_details") or raw.get("output_tokens_details") or {}
     cache_creation = raw.get("cache_creation") or {}
@@ -129,12 +130,29 @@ def _usage_dict(raw) -> dict:
         (output_details.get("reasoning_tokens") if isinstance(output_details, dict) else 0)
         or raw.get("reasoning_tokens")
     )
+
+    # OpenAI-compatible usage reports prompt_tokens as the whole prompt and
+    # exposes cache reads/writes as subsets. Native Anthropic usage reports
+    # input_tokens only for the uncached tail, with cache tokens alongside it.
+    if "prompt_tokens" in raw:
+        context_input_tokens = reported_input_tokens
+        input_tokens = max(
+            0, reported_input_tokens - cached_tokens - cache_write_tokens
+        )
+    else:
+        input_tokens = reported_input_tokens
+        context_input_tokens = input_tokens + cached_tokens + cache_write_tokens
+    total_tokens = (
+        _token_count(raw.get("total_tokens"))
+        if "prompt_tokens" in raw
+        else 0
+    ) or context_input_tokens + output_tokens
     if total_tokens <= 0:
         return {}
 
     usage = {
         "input_tokens": input_tokens,
-        "context_input_tokens": input_tokens + cached_tokens + cache_write_tokens,
+        "context_input_tokens": context_input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "cached_tokens": cached_tokens,

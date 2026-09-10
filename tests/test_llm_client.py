@@ -277,6 +277,8 @@ class AnthropicStreamParsingTest(unittest.IsolatedAsyncioTestCase):
         })
         usage = events[-1]["usage"]
         self.assertEqual(usage["input_tokens"], 1000)
+        self.assertEqual(usage["context_input_tokens"], 1950)
+        self.assertEqual(usage["total_tokens"], 1970)
         self.assertEqual(usage["output_tokens"], 20)
         self.assertEqual(usage["cache_write_tokens"], 700)
         self.assertEqual(usage["cached_tokens"], 250)
@@ -298,7 +300,8 @@ class UsageNormalizationTest(unittest.TestCase):
         })
 
         self.assertEqual(usage, {
-            "input_tokens": 1200,
+            "input_tokens": 50,
+            "context_input_tokens": 1200,
             "output_tokens": 80,
             "total_tokens": 1280,
             "cached_tokens": 900,
@@ -322,7 +325,9 @@ class UsageNormalizationTest(unittest.TestCase):
             },
         })
 
-        self.assertEqual(usage["total_tokens"], 1020)
+        self.assertEqual(usage["input_tokens"], 1000)
+        self.assertEqual(usage["context_input_tokens"], 1940)
+        self.assertEqual(usage["total_tokens"], 1960)
         self.assertEqual(usage["cached_tokens"], 700)
         self.assertEqual(usage["cache_write_tokens"], 240)
         self.assertEqual(usage["cache_write_5m_tokens"], 40)

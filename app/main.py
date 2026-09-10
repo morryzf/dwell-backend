@@ -4335,7 +4335,11 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     db.provider_usage_event_add(
                         provider["id"], usage_key_hash, current_message_id,
                         request_kind, round_usage.get("cost") or 0,
-                        input_tokens=round_usage.get("input_tokens") or 0,
+                        input_tokens=(
+                            round_usage.get("context_input_tokens")
+                            or round_usage.get("input_tokens")
+                            or 0
+                        ),
                         cached_tokens=round_usage.get("cached_tokens") or 0,
                         cache_observed="cached_tokens" in round_usage,
                     )
