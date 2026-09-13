@@ -2543,6 +2543,33 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     box-shadow: 0 8px 22px rgba(12,8,10,.14), inset 0 1px rgba(255,235,244,.09) !important;
   }
 
+  /* Primary actions stay distinct from translucent secondary controls. */
+  .sheet .ap-b.go {
+    color: #fff !important;
+    background: linear-gradient(145deg, #a6657d, #875064) !important;
+    border-color: rgba(118, 63, 84, .72) !important;
+    box-shadow: 0 7px 17px rgba(111, 62, 82, .22), inset 0 1px rgba(255,255,255,.20) !important;
+    transition: transform 140ms var(--ease-out), filter 160ms ease, box-shadow 160ms ease;
+  }
+  .sheet .ap-b.go:active { transform: scale(.97); }
+  @media (hover: hover) and (pointer: fine) {
+    .sheet .ap-b.go:hover { filter: brightness(1.06); }
+  }
+  html[data-theme="dark"] .sheet .ap-b.go {
+    color: #35272d !important;
+    background: linear-gradient(145deg, #efc4d2, #d8a0b4) !important;
+    border-color: rgba(255,224,235,.42) !important;
+    box-shadow: 0 7px 18px rgba(0,0,0,.22), inset 0 1px rgba(255,255,255,.24) !important;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) .sheet .ap-b.go {
+      color: #35272d !important;
+      background: linear-gradient(145deg, #efc4d2, #d8a0b4) !important;
+      border-color: rgba(255,224,235,.42) !important;
+      box-shadow: 0 7px 18px rgba(0,0,0,.22), inset 0 1px rgba(255,255,255,.24) !important;
+    }
+  }
+
   /* Header controls and composer toggles share the same quiet glass language. */
   header .iconbtn {
     background: linear-gradient(145deg, rgba(255,255,255,.25), rgba(235,199,215,.12)) !important;
