@@ -10132,8 +10132,6 @@ function renderMessageStyleSettings() {
   });
   body.querySelectorAll('[data-style-tab]').forEach(btn => btn.onclick = () => {
     messageStyleTab = btn.dataset.styleTab;
-    wearTheme(messageStyleTab);
-    applyMessageStyleMode(messageStyleTab);
     renderMessageStyleSettings();
   });
 
@@ -10156,7 +10154,8 @@ function renderMessageStyleSettings() {
     input.addEventListener('input', () => {
       current[spec.key] = spec.type === 'color' ? input.value : Number(input.value);
       writeMessageRoleStyle(preview.style, messageStyleRole, current);
-      applyMessageStyleMode(messageStyleTab); saveMessageStyles();
+      if (messageStyleTab === effectiveMessageStyleMode()) applyMessageStyles();
+      saveMessageStyles();
     });
     controls.appendChild(wrap);
   });
@@ -10165,7 +10164,8 @@ function renderMessageStyleSettings() {
   body.querySelector('#messageStyleCopy').onclick = () => {
     messageStyleState[otherRole][messageStyleTab] = cloneMessageStyle(current);
     writeMessageRoleStyle(preview.style, otherRole, messageStyleState[otherRole][messageStyleTab]);
-    applyMessageStyleMode(messageStyleTab); saveMessageStyles();
+    if (messageStyleTab === effectiveMessageStyleMode()) applyMessageStyles();
+    saveMessageStyles();
     const copy = body.querySelector('#messageStyleCopy');
     copy.textContent = '已经复制给' + otherLabel;
     setTimeout(() => {
