@@ -2846,6 +2846,13 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   #log .row:not(.me) > .toolline .chev { color: inherit; font-size: inherit; }
   #log .row:not(.me) > .toolline .lbl { text-align: left; }
 
+  /* Keep this sheet opaque so its own glass layer does not become a backdrop
+     root and change the blur sampled by the nested message preview. */
+  #messageStyleSheet .sheet {
+    background: var(--bg) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
   .msg-style-preview {
     position: sticky; z-index: 3; top: -1px; min-height: 160px; padding: 16px 13px 13px;
     border-radius: 20px; overflow: hidden; box-sizing: border-box;
@@ -2879,6 +2886,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       linear-gradient(180deg, var(--msg-preview-mask-top), var(--msg-preview-mask-bottom)),
       var(--chat-bg-image);
     background-size: cover;
+    background-attachment: fixed;
   }
   .msg-preview-cloudy, .msg-preview-me, .msg-preview-think {
     max-width: 82%; padding: 7px 11px; box-sizing: border-box; font-size: 12.5px;
@@ -2889,6 +2897,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     border: var(--msg-cloudy-border-width) solid var(--msg-cloudy-border); border-radius: var(--msg-cloudy-radius);
     -webkit-backdrop-filter: blur(var(--msg-cloudy-blur)) saturate(1.45);
     backdrop-filter: blur(var(--msg-cloudy-blur)) saturate(1.45);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 6px 20px rgba(72,54,64,.075);
   }
   .msg-preview-me {
     align-self: flex-end; position: relative; text-align: left;
@@ -2896,6 +2905,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     border: var(--msg-me-border-width) solid var(--msg-me-border); border-radius: var(--msg-me-radius);
     -webkit-backdrop-filter: blur(var(--msg-me-blur)) saturate(1.45);
     backdrop-filter: blur(var(--msg-me-blur)) saturate(1.45);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 6px 20px rgba(72,54,64,.075);
   }
   .msg-preview-target {
     cursor: pointer; transition: transform 150ms ease, box-shadow 180ms ease;
