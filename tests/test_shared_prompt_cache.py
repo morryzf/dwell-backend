@@ -153,6 +153,33 @@ class SharedPromptCacheBehaviorTest(unittest.TestCase):
         self.assertEqual(grown[-1]["rowid"], 115)
         setting_set.assert_not_called()
 
+    def test_cache_history_ignores_the_empty_reply_placeholder(self):
+        rows = [
+            {"rowid": rowid, "role": "user", "content": str(rowid)}
+            for rowid in range(1, 151)
+        ] + [{"rowid": 151, "role": "assistant", "content": ""}]
+        with (
+            patch.object(main.db, "message_list", return_value=rows),
+            patch.object(main.db, "setting_get", return_value="1"),
+            patch.object(main.db, "setting_set") as setting_set,
+        ):
+            selected = main._chat_history_rows("chat-1", cache_friendly=True)
+
+        self.assertEqual(len(selected), main.CACHE_HISTORY_MAX_MESSAGES)
+        self.assertEqual(selected[0]["rowid"], 1)
+        setting_set.assert_not_called()
+
+    def test_cache_checkpoint_is_recorded_at_150_persisted_messages(self):
+        with (
+            patch.object(main.db, "setting_get", return_value="11"),
+            patch.object(
+                main.db, "message_cache_history_count",
+                return_value=main.CACHE_HISTORY_MAX_MESSAGES,
+            ),
+        ):
+            self.assertTrue(main._cache_history_checkpoint_reached("chat-1", True))
+            self.assertFalse(main._cache_history_checkpoint_reached("chat-1", False))
+
     def test_cache_history_window_rotates_only_at_the_hard_limit(self):
         rows = [
             {"rowid": rowid, "role": "user", "content": str(rowid)}

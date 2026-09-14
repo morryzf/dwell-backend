@@ -1340,6 +1340,18 @@ def message_last_made(chat_id: str, role: str = "") -> int:
     return int(row["made"] if row else 0)
 
 
+def message_cache_history_count(chat_id: str, start_rowid: int) -> int:
+    """Count persisted prompt-history messages from a cache anchor."""
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT COUNT(*) AS total FROM messages "
+            "WHERE chat_id=? AND rowid>=? AND role IN ('user','assistant','system') "
+            "AND content<>''",
+            (chat_id, max(0, int(start_rowid))),
+        ).fetchone()
+    return int(row["total"] if row else 0)
+
+
 def find_everywhere(query: str, limit: int = 80) -> list[dict]:
     """按最近更新时间翻聊天与 Dwell 里可见的文字。数据库很小，LIKE 足够稳。"""
     query = query.strip()[:60]
@@ -2457,6 +2469,8 @@ def message_usage_update(msg_id: str, usage: dict) -> bool:
             else:
                 clean[key] = value
     if isinstance(usage, dict):
+        if usage.get("cache_checkpoint") is True:
+            clean["cache_checkpoint"] = True
         tts_turn_id = usage.get("tts_turn_id")
         if isinstance(tts_turn_id, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,120}", tts_turn_id):
             clean["tts_turn_id"] = tts_turn_id
