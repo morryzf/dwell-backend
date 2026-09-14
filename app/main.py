@@ -60,7 +60,7 @@ MEMORY_TAIL_MESSAGES = 80
 MEMORY_CARD_UPDATE_MIN_MESSAGES = 50
 MEMORY_SEGMENT_MESSAGES = 50
 CACHE_HISTORY_TARGET_MESSAGES = 100
-CACHE_HISTORY_MAX_MESSAGES = 160
+CACHE_HISTORY_MAX_MESSAGES = 150
 
 MEMORY_CARD_TYPES = {
     "stable_fact": "稳定事实",
@@ -908,17 +908,40 @@ def _chat_history_rows(chat_id: str, cache_friendly: bool) -> list[dict]:
         start_rowid = max(0, int(db.setting_get(setting_key, "0") or 0))
     except (TypeError, ValueError):
         start_rowid = 0
-    anchored = [
+    cacheable_rows = [
         row for row in rows
+        if row.get("content") and row.get("role") in {"user", "assistant", "system"}
+    ]
+    anchored = [
+        row for row in cacheable_rows
         if start_rowid and int(row.get("rowid") or 0) >= start_rowid
     ]
-    if anchored and len(anchored) <= CACHE_HISTORY_MAX_MESSAGES:
+    anchor_is_loaded = any(
+        int(row.get("rowid") or 0) == start_rowid for row in cacheable_rows
+    )
+    if anchor_is_loaded and anchored and len(anchored) <= CACHE_HISTORY_MAX_MESSAGES:
         return anchored
 
-    selected = rows[-CACHE_HISTORY_TARGET_MESSAGES:]
+    selected = cacheable_rows[-CACHE_HISTORY_TARGET_MESSAGES:]
     if selected:
         db.setting_set(setting_key, str(int(selected[0]["rowid"])))
     return selected
+
+
+def _cache_history_checkpoint_reached(chat_id: str, cache_friendly: bool) -> bool:
+    if not cache_friendly:
+        return False
+    try:
+        start_rowid = max(
+            0, int(db.setting_get(f"prompt_cache_history_start:{chat_id}", "0") or 0)
+        )
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        start_rowid
+        and db.message_cache_history_count(chat_id, start_rowid)
+        >= CACHE_HISTORY_MAX_MESSAGES
+    )
 
 
 def _chat_history_messages(chat_id: str, cache_friendly: bool = False) -> list[dict]:
@@ -4404,6 +4427,11 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         full = "".join(buf).strip()
         if full:
             db.message_update(current_message_id, full)
+        cache_checkpoint_reached = _cache_history_checkpoint_reached(
+            chat_id, cache_friendly and not cache_fallback_reason
+        )
+        if cache_checkpoint_reached:
+            usage_totals["cache_checkpoint"] = True
         if usage_totals["total_tokens"] > 0:
             duration_ms = max(1, int((time.perf_counter() - reply_started) * 1000))
             usage_totals["duration_ms"] = duration_ms
@@ -4416,10 +4444,16 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             # Split replies persist as several messages; this id lets voice join one full reply.
             usage_totals["tts_turn_id"] = tts_turn_id
             db.message_usage_update(current_message_id, usage_totals)
+        elif cache_checkpoint_reached:
+            db.message_usage_update(current_message_id, usage_totals)
         _emit(chat_id, {
             "type": "assistant",
             "message": {"content": assistant_parts(full)}
         })
+        if cache_checkpoint_reached:
+            _emit(chat_id, {
+                "type": "cache_checkpoint", "message_id": current_message_id,
+            })
         _emit(chat_id, {"type": "result", "is_error": False})
         cache_active = cache_friendly and not cache_fallback_reason
         if usage_totals["cached_tokens"] > 0:
