@@ -6,6 +6,22 @@ from app import push_service
 
 
 class PushDiagnosticsTest(unittest.TestCase):
+    def test_vapid_subject_never_falls_back_to_localhost(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(
+                push_service._vapid_subject(),
+                "https://dwell-morry.zeabur.app",
+            )
+        with patch.dict("os.environ", {"VAPID_SUBJECT": "mailto:dwell@localhost"}):
+            self.assertEqual(
+                push_service._vapid_subject(),
+                "https://dwell-morry.zeabur.app",
+            )
+
+    def test_vapid_subject_accepts_a_public_contact_uri(self):
+        with patch.dict("os.environ", {"VAPID_SUBJECT": "mailto:push@example.com"}):
+            self.assertEqual(push_service._vapid_subject(), "mailto:push@example.com")
+
     def test_failure_exposes_only_host_and_exception_kind(self):
         subscription = {
             "endpoint": "https://web.push.apple.com/QH/private-token?secret=yes",

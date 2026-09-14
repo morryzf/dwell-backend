@@ -21,6 +21,8 @@ from pywebpush import WebPushException, webpush
 
 from . import db
 
+DEFAULT_VAPID_SUBJECT = "https://dwell-morry.zeabur.app"
+
 
 def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
@@ -51,6 +53,20 @@ def ensure_vapid_keys() -> tuple[str, str]:
 
 def public_key() -> str:
     return ensure_vapid_keys()[0]
+
+
+def _vapid_subject() -> str:
+    """Return a public contact URI accepted by Apple Push."""
+    configured = os.environ.get("VAPID_SUBJECT", "").strip()
+    if configured:
+        parsed = urlsplit(configured)
+        if parsed.scheme == "https" and parsed.hostname not in {None, "localhost"}:
+            return configured
+        if parsed.scheme == "mailto" and "@" in parsed.path:
+            domain = parsed.path.rsplit("@", 1)[-1].lower()
+            if domain and domain != "localhost" and "." in domain:
+                return configured
+    return DEFAULT_VAPID_SUBJECT
 
 
 def _subscriptions() -> list[dict[str, Any]]:
@@ -144,7 +160,7 @@ def _failure_summary(failures: list[dict[str, Any]]) -> str:
 
 def _send_sync(title: str, body: str, url: str) -> dict[str, Any]:
     _public, private_key = ensure_vapid_keys()
-    subject = os.environ.get("VAPID_SUBJECT", "mailto:dwell@localhost").strip()
+    subject = _vapid_subject()
     payload = json.dumps({
         "title": title[:80] or "Cloudy",
         "body": body[:240],
