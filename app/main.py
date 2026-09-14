@@ -3301,7 +3301,12 @@ async def subscribe(request: Request):
         "以后 Cloudy 主动发消息时，会在这里告诉你。",
         "/?from=push",
     )
-    return {"ok": True, "subscriptions": count, "push": result}
+    return {
+        "ok": bool(result["sent"]), "subscriptions": count, "push": result,
+        "detail": "" if result["sent"] else (
+            result.get("diagnostic") or "订阅已经保存，但测试通知没有发出去"
+        ),
+    }
 
 
 @app.post("/api/unsubscribe", dependencies=authed)
@@ -3322,7 +3327,12 @@ async def push_test():
     )
     if not result["subscriptions"]:
         raise HTTPException(409, "还没有手机订阅通知")
-    return {"ok": bool(result["sent"]), **result}
+    return {
+        "ok": bool(result["sent"]), **result,
+        "detail": "" if result["sent"] else (
+            result.get("diagnostic") or "推送服务没有接受这条通知"
+        ),
+    }
 
 
 @app.post("/api/rewake", dependencies=authed)
