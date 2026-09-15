@@ -3415,7 +3415,7 @@ async def chats_del(chat_id: str):
 
 
 _REPLY_SPLIT_RE = re.compile(
-    r"<dwell-split>|\n[ \t]*(?=\S)|(?<=[。！？!?…])[ \t]+(?=\S)"
+    r"<dwell-split>|\r?\n[ \t]*\r?\n+(?=\S)"
 )
 
 
@@ -3868,14 +3868,27 @@ async def messages_regenerate(message_id: str):
     task = _running_tasks.get(chat_id)
     if task and not task.done():
         raise HTTPException(409, "这间聊天正在生成，请等它结束后再试")
-    if message["content"]:
-        db.message_version_add(message_id, message["content"], "regenerated")
-    db.message_update(message_id, "")
-    db.message_thinking_update(message_id, "")
-    _emit(chat_id, {"type": "system", "subtype": "regenerating", "message_id": message_id})
-    task = asyncio.create_task(_run_ai_reply(chat_id, message_id, request_kind="regenerate"))
+    reply_messages = db.message_assistant_reply_turn(message_id)
+    anchor = reply_messages[0] if reply_messages else message
+    reply_ids = [item["id"] for item in reply_messages] or [message_id]
+    previous_reply = "\n\n".join(
+        str(item.get("content") or "").strip() for item in reply_messages
+        if str(item.get("content") or "").strip()
+    )
+    if previous_reply:
+        db.message_version_add(anchor["id"], previous_reply, "regenerated")
+    for reply_id in reply_ids:
+        _tts_remove_message_cache(chat_id, reply_id)
+    db.message_delete_many([reply_id for reply_id in reply_ids if reply_id != anchor["id"]])
+    db.message_update(anchor["id"], "")
+    db.message_thinking_update(anchor["id"], "")
+    _emit(chat_id, {
+        "type": "system", "subtype": "regenerating",
+        "message_id": anchor["id"], "message_ids": reply_ids,
+    })
+    task = asyncio.create_task(_run_ai_reply(chat_id, anchor["id"], request_kind="regenerate"))
     _running_tasks[chat_id] = task
-    return {"ok": True, "id": message_id}
+    return {"ok": True, "id": anchor["id"], "replaced_ids": reply_ids}
 
 # ---------------------------------------------------------------- 聊天：发送 / 停止 / 长轮询
 
@@ -4298,8 +4311,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 boundary_at = marker_at
                 boundary_end = marker_at + len(split_marker)
 
-            # 模型不输出特殊标记也没关系：换行，以及中文句末标点后的单空格，
-            # 都能成为分条边界。围栏代码内部始终保持完整。
+            # 模型不输出特殊标记也没关系：自然空行也能成为分条边界。
+            # 普通空格与单个换行保留在同一气泡，围栏代码内部始终保持完整。
             for match in natural_split.finditer(split_pending):
                 if match.group(0) == split_marker:
                     continue
