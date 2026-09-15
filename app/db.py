@@ -1307,6 +1307,33 @@ def message_assistant_turn(message_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def message_assistant_reply_turn(message_id: str) -> list[dict]:
+    """Return every persisted bubble produced by the same assistant reply."""
+    selected = message_get(message_id)
+    if not selected or selected.get("role") != "assistant":
+        return []
+    candidates = message_assistant_turn(message_id)
+    try:
+        selected_usage = json.loads(selected.get("usage_json") or "{}")
+        turn_id = str(selected_usage.get("tts_turn_id") or "")
+    except (TypeError, json.JSONDecodeError):
+        turn_id = ""
+    if turn_id:
+        matched = []
+        for item in candidates:
+            try:
+                usage = json.loads(item.get("usage_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if str(usage.get("tts_turn_id") or "") == turn_id:
+                matched.append(item)
+        if matched:
+            return matched
+    # Older split replies predate turn metadata; their user-message boundaries
+    # are the only durable grouping signal available.
+    return candidates or [selected]
+
+
 def message_list(chat_id: str, limit: int = 400, before: int | None = None) -> list:
     with conn() as cx:
         if before:
