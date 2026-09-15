@@ -5538,7 +5538,13 @@ function handle(d) {
   if (d.type === 'system' && d.subtype === 'switched') { setArmed(false); log.innerHTML = ''; guEl = null; earliestSeq = null; olderBtn = null; note(d.text); return; }
   if (d.type === 'system' && d.subtype === 'regenerating') {
     regeneratingMessageId = d.message_id || '';
-    document.querySelector('#log .row[data-message-id="' + CSS.escape(regeneratingMessageId) + '"]')?.remove();
+    const replacedIds = Array.isArray(d.message_ids) && d.message_ids.length
+      ? d.message_ids : [regeneratingMessageId];
+    for (const id of replacedIds) {
+      if (!id) continue;
+      document.querySelectorAll('#log .row[data-message-id="' + CSS.escape(id) + '"]')
+        .forEach(row => row.remove());
+    }
     guEl = null; endThink(); closeGroup(); setBusy(true); petSet('thinking'); return;
   }
   if (d.type === 'tool_call' && d.tool) { addToolUse(d.tool); return; }
