@@ -1,14 +1,69 @@
-"""Small, local relevance ranker for approved Dwell memory cards.
+"""Relevance ranker for Dwell memory cards.
 
-The ranker is intentionally deterministic: selecting memory must not add a second
-model request, leak cards to another provider, or make every reply noticeably slower.
+Supports two modes:
+- Vector (embedding) retrieval: cosine similarity + importance/freshness modifiers.
+  Used when both the query and the card have embeddings.
+- Keyword fallback: the original term-overlap scoring, used for cards without embeddings
+  or when no embedding model is configured.
 """
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import date, datetime
 
+
+def _valid_on(card: dict, today: date) -> bool:
+    if str(card.get("status") or "active") != "active":
+        return False
+    valid_until = str(card.get("valid_until") or "").strip()
+    if not valid_until:
+        return True
+    try:
+        return datetime.strptime(valid_until, "%Y-%m-%d").date() >= today
+    except ValueError:
+        return False
+
+
+# ---- Vector retrieval ----
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    if len(a) != len(b) or not a:
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def _vector_score(card: dict, query_embedding: list[float], now: datetime) -> float:
+    card_embedding = card.get("embedding")
+    if not card_embedding or not query_embedding:
+        return 0.0
+    similarity = _cosine_similarity(query_embedding, card_embedding)
+    if similarity < 0.25:
+        return 0.0
+    score = similarity * 10.0
+    score += {"high": 0.8, "normal": 0.3, "low": 0.0}.get(
+        str(card.get("importance")), 0.0
+    )
+    try:
+        age_days = max(0, (now - datetime.fromtimestamp(int(card.get("updated") or 0))).days)
+    except (TypeError, ValueError, OSError):
+        age_days = 9999
+    if age_days <= 30:
+        score += 0.35
+    elif age_days <= 180:
+        score += 0.12
+    if str(card.get("retention")) == "fading":
+        score -= 0.2
+    return round(score, 4)
+
+
+# ---- Keyword fallback ----
 
 TOPIC_HINTS = {
     "identity": ("名字", "年龄", "生日", "性格", "身份", "自己", "关于我"),
@@ -46,25 +101,13 @@ def _normalized(text: object) -> str:
 def _terms(text: object) -> set[str]:
     raw = str(text or "").casefold()
     terms = {word for word in re.findall(r"[a-z0-9_]{2,}", raw)}
-    for chunk in re.findall(r"[\u3400-\u9fff]{2,}", raw):
+    for chunk in re.findall(r"[㐀-鿿]{2,}", raw):
         for size in (2, 3):
             terms.update(chunk[index:index + size] for index in range(len(chunk) - size + 1))
     return {term for term in terms if term not in COMMON_CJK_GRAMS}
 
 
-def _valid_on(card: dict, today: date) -> bool:
-    if str(card.get("status") or "active") != "active":
-        return False
-    valid_until = str(card.get("valid_until") or "").strip()
-    if not valid_until:
-        return True
-    try:
-        return datetime.strptime(valid_until, "%Y-%m-%d").date() >= today
-    except ValueError:
-        return False
-
-
-def _score(card: dict, query: str, query_terms: set[str], now: datetime) -> float:
+def _keyword_score(card: dict, query: str, query_terms: set[str], now: datetime) -> float:
     content = str(card.get("content") or "").strip()
     if not content:
         return 0.0
@@ -74,20 +117,15 @@ def _score(card: dict, query: str, query_terms: set[str], now: datetime) -> floa
     normalized_query, normalized_content = _normalized(query), _normalized(content)
     if len(normalized_content) >= 4 and normalized_content in normalized_query:
         score += 5.0
-
     topic_hits = 0
     for topic in card.get("topics") or []:
         hints = TOPIC_HINTS.get(str(topic), ())
         if any(hint in normalized_query for hint in hints):
             topic_hits += 1
     score += min(2, topic_hits) * 2.4
-
     memory_type = str(card.get("memory_type") or "")
     if any(hint in normalized_query for hint in TYPE_HINTS.get(memory_type, ())):
         score += 1.4
-
-    # Importance and freshness can reorder relevant cards, but never make an
-    # unrelated card eligible by themselves.
     if score <= 0:
         return 0.0
     score += {"high": 0.8, "normal": 0.3, "low": 0.0}.get(str(card.get("importance")), 0.0)
@@ -104,10 +142,21 @@ def _score(card: dict, query: str, query_terms: set[str], now: datetime) -> floa
     return round(score, 4)
 
 
+# ---- Public API ----
+
 def select_memory_cards(
-    cards: list[dict], context: str, *, limit: int = 5, now: datetime | None = None
+    cards: list[dict],
+    context: str,
+    *,
+    limit: int = 5,
+    now: datetime | None = None,
+    query_embedding: list[float] | None = None,
 ) -> list[dict]:
-    """Return at most ``limit`` relevant, active and unexpired cards."""
+    """Return at most ``limit`` relevant, active and unexpired cards.
+
+    When ``query_embedding`` is provided, cards with embeddings use vector
+    scoring; cards without embeddings fall back to keyword scoring.
+    """
     now = now or datetime.now()
     query = str(context or "").strip()
     if not query:
@@ -117,7 +166,10 @@ def select_memory_cards(
     for card in cards:
         if not _valid_on(card, now.date()):
             continue
-        score = _score(card, query, query_terms, now)
+        if query_embedding and card.get("embedding"):
+            score = _vector_score(card, query_embedding, now)
+        else:
+            score = _keyword_score(card, query, query_terms, now)
         if score <= 0:
             continue
         ranked.append({**card, "selection_score": score})
@@ -130,4 +182,3 @@ def select_memory_cards(
         )
     )
     return ranked[: max(0, min(5, int(limit)))]
-

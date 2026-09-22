@@ -32,6 +32,7 @@ from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_
 from app.web_tools import WebToolError, web_fetch, web_search
 from app.kelivo_import import KelivoImportError, import_conversation as kelivo_import_conversation, preview as kelivo_preview
 from app.memory_retrieval import select_memory_cards
+from app.embedding_client import get_embedding, get_embeddings_batch
 from app.openrouter_usage import build_utc_cost_series, fetch_openrouter_snapshot, parse_usd_cny_rate
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
@@ -2738,6 +2739,99 @@ async def long_context_model_set(request: Request):
     return {"ok": True, "provider_id": provider_id, "model_id": model_id, "provider_name": provider["name"]}
 
 
+def _embedding_model() -> tuple[dict | None, str]:
+    raw = db.setting_get("embedding_model", "")
+    if not raw:
+        return None, ""
+    try:
+        saved = json.loads(raw)
+        provider_id = str(saved.get("provider_id") or "").strip()
+        model_id = str(saved.get("model_id") or "").strip()
+        if provider_id and model_id:
+            provider = db.provider_get(provider_id)
+            if provider and provider.get("enabled"):
+                return provider, model_id
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return None, ""
+
+
+async def _embed_text(text: str) -> list[float] | None:
+    provider, model_id = _embedding_model()
+    if not provider:
+        return None
+    return await get_embedding(provider, model_id, text)
+
+
+async def _embed_memory_card(card_id: str, content: str) -> None:
+    embedding = await _embed_text(content)
+    if embedding:
+        db.memory_card_set_embedding(card_id, embedding)
+
+
+@app.get("/api/embedding-model", dependencies=authed)
+async def embedding_model_get():
+    provider, model_id = _embedding_model()
+    providers = [item for item in db.provider_list() if item["enabled"]]
+    provider_map = {item["id"]: item for item in providers}
+    items = [_model_catalog_item(item, provider_map) for item in db.provider_model_list()
+             if item["provider_id"] in provider_map]
+    return {
+        "ok": True,
+        "provider_id": (provider or {}).get("id", ""),
+        "model_id": model_id,
+        "configured": provider is not None,
+        "provider_name": (provider or {}).get("name", ""),
+        "providers": providers,
+        "items": items,
+    }
+
+
+@app.post("/api/embedding-model", dependencies=authed)
+async def embedding_model_set(request: Request):
+    payload = await _read_json(request)
+    provider_id = str(payload.get("provider_id") or "").strip()
+    model_id = str(payload.get("model_id") or "").strip()[:200]
+    if not provider_id and not model_id:
+        db.setting_set("embedding_model", "")
+        return {"ok": True, "provider_id": "", "model_id": "", "provider_name": "", "configured": False}
+    provider = db.provider_get(provider_id)
+    if not provider or not provider.get("enabled"):
+        raise HTTPException(400, "请选择一个已启用的供应商")
+    db.setting_set("embedding_model", json.dumps(
+        {"provider_id": provider_id, "model_id": model_id}, ensure_ascii=False
+    ))
+    return {"ok": True, "provider_id": provider_id, "model_id": model_id,
+            "provider_name": provider["name"], "configured": True}
+
+
+@app.post("/api/embedding-backfill", dependencies=authed)
+async def embedding_backfill(request: Request):
+    """Generate embeddings for all cards in a chat that don't have one yet."""
+    payload = await _read_json(request)
+    chat_id = str(payload.get("chat_id") or "").strip()
+    if not chat_id:
+        chat_id = _get_or_create_current_chat()
+    provider, model_id = _embedding_model()
+    if not provider:
+        raise HTTPException(400, "还没有设置 embedding 模型")
+    cards = db.memory_cards_without_embedding(chat_id)
+    if not cards:
+        return {"ok": True, "processed": 0}
+    texts = [c["content"] for c in cards]
+    BATCH = 50
+    processed = 0
+    for i in range(0, len(texts), BATCH):
+        batch_texts = texts[i:i + BATCH]
+        batch_cards = cards[i:i + BATCH]
+        embeddings = await get_embeddings_batch(provider, model_id, batch_texts)
+        for card, emb in zip(batch_cards, embeddings):
+            if emb:
+                db.memory_card_set_embedding(card["id"], emb)
+                processed += 1
+    return {"ok": True, "processed": processed, "total": len(cards)}
+
+
 @app.post("/api/model-catalog", dependencies=authed)
 async def model_catalog_upsert(request: Request):
     payload = await _read_json(request)
@@ -3644,6 +3738,16 @@ async def memory_card_drafts_accept_all(chat_id: str):
             items.append(db.memory_card_draft_accept(chat_id, draft_id, chosen))
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+    provider, model_id = _embedding_model()
+    if provider and items:
+        async def _backfill_batch():
+            texts = [c["content"] for c in items if c]
+            ids = [c["id"] for c in items if c]
+            embeddings = await get_embeddings_batch(provider, model_id, texts)
+            for card_id, emb in zip(ids, embeddings):
+                if emb:
+                    db.memory_card_set_embedding(card_id, emb)
+        asyncio.create_task(_backfill_batch())
     return {
         "ok": True,
         "accepted": len(items),
@@ -3667,6 +3771,8 @@ async def memory_card_draft_accept(chat_id: str, draft_id: str, request: Request
         card = db.memory_card_draft_accept(chat_id, draft_id, clean)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if card:
+        asyncio.create_task(_embed_memory_card(card["id"], card["content"]))
     return {"ok": True, "item": card, "state": _memory_card_review_state(chat_id)}
 
 
@@ -3696,6 +3802,8 @@ async def memory_card_put(chat_id: str, card_id: str, request: Request):
         card = db.memory_card_update(chat_id, card_id, clean)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if card and "content" in payload:
+        asyncio.create_task(_embed_memory_card(card["id"], card["content"]))
     return {"ok": True, "item": card}
 
 
@@ -4082,9 +4190,11 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     memory_query = _memory_card_query(history, watch_context)
     selected_memory_cards = []
     if db.memory_card_injection_enabled(chat_id):
+        query_emb = await _embed_text(memory_query)
         selected_memory_cards = select_memory_cards(
-            db.memory_card_list(chat_id), memory_query, limit=5,
+            db.memory_card_embeddings(chat_id), memory_query, limit=5,
             now=db.cn_now().replace(tzinfo=None),
+            query_embedding=query_emb,
         )
     # Re-generating the same response replaces its earlier audit; an empty
     # selection removes stale “last used” information for that response.

@@ -565,6 +565,9 @@ def init_db():
                 "INSERT INTO settings (key,value) VALUES (?,?)",
                 (cleanup_key, "1"),
             )
+        mc_cols = {r["name"] for r in cx.execute("PRAGMA table_info(memory_cards)").fetchall()}
+        if "embedding_json" not in mc_cols:
+            cx.execute("ALTER TABLE memory_cards ADD COLUMN embedding_json TEXT NOT NULL DEFAULT ''")
         # 已经产出过卡片或候选卡片的旧分段，不再重复调用模型。
         cx.execute(
             """INSERT OR IGNORE INTO memory_card_segment_runs
@@ -1883,6 +1886,41 @@ def memory_card_update(chat_id: str, card_id: str, chosen: dict) -> dict:
     if not cur.rowcount:
         raise ValueError("没有找到这张记忆卡片")
     return memory_card_get(chat_id, card_id)
+
+
+def memory_card_set_embedding(card_id: str, embedding: list[float]) -> None:
+    raw = json.dumps(embedding, separators=(",", ":"))
+    with conn() as cx:
+        cx.execute("UPDATE memory_cards SET embedding_json=? WHERE id=?", (raw, card_id))
+
+
+def memory_card_embeddings(chat_id: str) -> list[dict]:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT id,content,embedding_json,importance,retention,valid_until,status,updated "
+            "FROM memory_cards WHERE chat_id=? AND status<>'archived'",
+            (chat_id,),
+        ).fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        raw = d.pop("embedding_json", "") or ""
+        try:
+            d["embedding"] = json.loads(raw) if raw else None
+        except (TypeError, json.JSONDecodeError):
+            d["embedding"] = None
+        result.append(d)
+    return result
+
+
+def memory_cards_without_embedding(chat_id: str) -> list[dict]:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT id,content FROM memory_cards WHERE chat_id=? "
+            "AND status<>'archived' AND (embedding_json IS NULL OR embedding_json='')",
+            (chat_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def memory_card_unprocessed_segments(chat_id: str) -> list[dict]:
