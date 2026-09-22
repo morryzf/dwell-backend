@@ -245,8 +245,8 @@ html[data-theme="dark"] .glass,
   #log {
     flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
     /* Header is deliberately translucent, but the first message must never begin beneath it. */
-    padding: calc(116px + env(safe-area-inset-top)) 18px 150px;
-    display: flex; flex-direction: column; gap: 14px;
+    padding: calc(116px + env(safe-area-inset-top)) 18px 160px;
+    display: flex; flex-direction: column; gap: 20px;
   }
   /* 顶上那颗「看更早的」——老账都在，按一下捞 400 行 */
   #olderBtn {
@@ -270,14 +270,14 @@ html[data-theme="dark"] .glass,
   .bubble {
     background: var(--user-bubble); border-radius: 18px; padding: 8px 14px;
     max-width: 85%; white-space: pre-wrap; word-break: break-word; line-height: 1.55;
-    font-family: "Noto Serif SC", "Songti SC", serif; font-size: 15.5px;
+    font-size: 14.5px;
   }
   #log .gu {
     display: inline-block; max-width: 85%; padding: 8px 14px;
     background: var(--panel); border: 1px solid var(--line);
     border-radius: 18px 18px 18px 6px;
     white-space: pre-wrap; word-break: break-word; line-height: 1.55;
-    font-family: "Noto Serif SC", "Songti SC", serif; font-size: 15.5px;
+    font-size: 14.5px;
   }
   #log .gu img.chatimg, .bubble img.chatimg {
     width: auto; max-width: min(220px, 70%); max-height: min(220px, 28vh);
@@ -704,7 +704,7 @@ html[data-theme="dark"] .composer {
   /* 换行，不然他的思维链会被挤成气泡旁边一条窄柱（8/3 截图当场看出来的） */
   
   #gongBody { display: flex; flex-direction: column; gap: 18px; }
-  #gongBody .gu, #gongBody .bubble { font-size: 15.5px; line-height: 1.75; }
+  #gongBody .gu, #gongBody .bubble { font-size: 14.5px; line-height: 1.75; }
   #gongFoot {
     flex: none; display: flex; align-items: flex-end; gap: 9px;
     padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
