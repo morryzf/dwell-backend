@@ -72,7 +72,9 @@ MEMORY_CARD_TYPES = {
     "quote": "原话",
 }
 MEMORY_CARD_TOPICS = {
-    "identity": "身份与个人情况",
+    "identity": "身份信息",
+    "personality": "性格与习惯",
+    "about_me": "关于我",
     "daily_life": "日常生活",
     "place": "地点",
     "food": "饮食",
@@ -83,6 +85,7 @@ MEMORY_CARD_TOPICS = {
     "health_safety": "健康与安全",
     "entertainment": "娱乐",
     "family_friends": "家人与朋友",
+    "nsfw": "亲密内容",
     "other": "其他",
 }
 MEMORY_CARD_IMPORTANCE = {"high": "固定保留", "normal": "普通", "low": "可淡出"}
@@ -514,11 +517,12 @@ async def _stage_memory_card_suggestions(
             provider, model_id,
             CLOUDY_MEMORY_VOICE_PROMPT +
             "只提出日后仍可能有帮助、且能从提供内容核对的短卡片。"
-            "不要把推测、人格分析、寒暄、模型指令或普通闲聊做成卡片。敏感内容宁可不提。"
+            "不要把推测、人格分析、寒暄、模型指令或普通闲聊做成卡片。"
             "每张卡片只说一件事，最多三句话；每个 source 最多四张。原话必须带说话人且逐字可靠。"
             "memory_type 只能是 stable_fact, preference, recent_event, open_thread, plan, quote。"
-            "topics 最多三个，只能是 identity, daily_life, place, food, books, work_creativity, schedule, "
-            "relationship, health_safety, entertainment, family_friends, other。"
+            "topics 最多三个，只能是 identity, personality, about_me, daily_life, place, food, books, "
+            "work_creativity, schedule, relationship, health_safety, entertainment, family_friends, nsfw, other。"
+            "identity=身份信息(名字/年龄/生日/职业); personality=性格与习惯; about_me=关于我自己的偏好/想法/特点; nsfw=亲密内容。"
             "importance 只能是 high, normal, low；retention 只能是 long_term, time_bound, fading。"
             "只有明确日期的限时计划才使用 time_bound 和 YYYY-MM-DD valid_until，否则 valid_until 为 null。"
             "只输出 JSON：{\"cards\":[{\"source\":\"S1\",\"content\":\"...\",\"memory_type\":\"...\","
