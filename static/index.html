@@ -246,8 +246,10 @@ html[data-theme="dark"] .glass,
     flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
     /* Header is deliberately translucent, but the first message must never begin beneath it. */
     padding: calc(116px + env(safe-area-inset-top)) 18px 160px;
-    display: flex; flex-direction: column; gap: 20px;
+    display: flex; flex-direction: column; gap: 6px;
   }
+  .row.me + .row:not(.me) { margin-top: 16px; }
+  .row:not(.me) + .row.me { margin-top: 16px; }
   /* 顶上那颗「看更早的」——老账都在，按一下捞 400 行 */
   #olderBtn {
     align-self: center; border: none; cursor: pointer;
@@ -4472,20 +4474,37 @@ document.addEventListener('keydown', event => {
 });
 
 function addMe(text, message) {
-  const r = row('me');
-  const b = document.createElement('div');
-  b.className = 'bubble';
-  const copy = document.createElement('div');
-  copy.textContent = text;
-  b.appendChild(copy);
-  r.appendChild(b);
-  renderRich(copy);
-  appendMessageImages(b, message && message.images);
-  setupUserMessageFold(copy, b);
-  if (message) attachMessageActions(b, message);
+  var segments = String(text).split(/\n{2,}/);
+  if (segments.length <= 1) segments = [text];
+  var lastBubble;
+  segments.forEach(function(seg, i) {
+    seg = seg.trim();
+    if (!seg && !((message && message.images || []).length && i === segments.length - 1)) return;
+    var r = row('me');
+    var b = document.createElement('div');
+    b.className = 'bubble';
+    var copy = document.createElement('div');
+    copy.textContent = seg;
+    b.appendChild(copy);
+    r.appendChild(b);
+    renderRich(copy);
+    setupUserMessageFold(copy, b);
+    if (i === segments.length - 1) appendMessageImages(b, message && message.images);
+    if (i === 0 && message) attachMessageActions(b, message);
+    lastBubble = b;
+  });
+  if (!lastBubble) {
+    var r = row('me');
+    var b = document.createElement('div');
+    b.className = 'bubble';
+    b.textContent = text;
+    r.appendChild(b);
+    if (message) attachMessageActions(b, message);
+    lastBubble = b;
+  }
   scroll(true);
   guEl = null; endThink(); closeGroup();
-  return b;
+  return lastBubble;
 }
 
 function addProactiveDivider(messageId) {
