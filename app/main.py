@@ -32,7 +32,7 @@ from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_
 from app.web_tools import WebToolError, web_fetch, web_search
 from app.kelivo_import import KelivoImportError, import_conversation as kelivo_import_conversation, preview as kelivo_preview
 from app.memory_retrieval import select_memory_cards
-from app.embedding_client import get_embedding, get_embeddings_batch
+from app.embedding_client import get_embedding, get_embeddings_batch, last_error as embedding_last_error
 from app.openrouter_usage import build_utc_cost_series, fetch_openrouter_snapshot, parse_usd_cny_rate
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
@@ -2825,12 +2825,21 @@ async def embedding_backfill(request: Request):
         batch_texts = texts[i:i + BATCH]
         batch_cards = cards[i:i + BATCH]
         embeddings = await get_embeddings_batch(provider, model_id, batch_texts)
-        for card, emb in zip(batch_cards, embeddings):
-            if emb:
-                db.memory_card_set_embedding(card["id"], emb)
-                processed += 1
+        if all(e is None for e in embeddings) and batch_texts:
+            for card_item, text_item in zip(batch_cards, batch_texts):
+                emb = await get_embedding(provider, model_id, text_item)
+                if emb:
+                    db.memory_card_set_embedding(card_item["id"], emb)
+                    processed += 1
+        else:
+            for card_item, emb in zip(batch_cards, embeddings):
+                if emb:
+                    db.memory_card_set_embedding(card_item["id"], emb)
+                    processed += 1
+    failed = len(cards) - processed
+    error = embedding_last_error() if failed else ""
     return {"ok": True, "processed": processed, "total": len(cards),
-            "failed": len(cards) - processed}
+            "failed": failed, "error": error}
 
 
 @app.post("/api/model-catalog", dependencies=authed)
