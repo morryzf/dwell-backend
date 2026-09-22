@@ -7153,10 +7153,17 @@ async function openSearchChatHit(hit) {
     setTitle(chat.name);
     cacheGlowSetChat(chat.id);
     refreshInstructionButton(); refreshMcpChatButton();
-    const upto = await loadSaid(hit.message_id);
-    if (upto) cursor = upto;
-    document.querySelector('#log .row[data-message-id="' + CSS.escape(hit.message_id) + '"]')
-      ?.scrollIntoView({ block: 'center' });
+    var latestUpto = await loadSaid();
+    if (latestUpto) cursor = latestUpto;
+    var focusEl = document.querySelector('#log .row[data-message-id="' + CSS.escape(hit.message_id) + '"]');
+    if (focusEl) {
+      focusEl.scrollIntoView({ block: 'center' });
+    } else {
+      var focusUpto = await loadSaid(hit.message_id);
+      if (focusUpto) cursor = focusUpto;
+      document.querySelector('#log .row[data-message-id="' + CSS.escape(hit.message_id) + '"]')
+        ?.scrollIntoView({ block: 'center' });
+    }
     poll();
   } catch { note('（没能打开这句话，再试一次）', 'err'); }
 }
