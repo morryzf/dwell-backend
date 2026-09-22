@@ -2829,7 +2829,8 @@ async def embedding_backfill(request: Request):
             if emb:
                 db.memory_card_set_embedding(card["id"], emb)
                 processed += 1
-    return {"ok": True, "processed": processed, "total": len(cards)}
+    return {"ok": True, "processed": processed, "total": len(cards),
+            "failed": len(cards) - processed}
 
 
 @app.post("/api/model-catalog", dependencies=authed)

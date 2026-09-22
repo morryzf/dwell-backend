@@ -34,7 +34,9 @@ async def get_embedding(
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=10.0)) as client:
             resp = await client.post(url, headers=headers, json=body)
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                log.warning("embedding request HTTP %s: %s", resp.status_code, resp.text[:500])
+                return None
             data = resp.json()
             embedding = data["data"][0]["embedding"]
             return [float(v) for v in embedding]
@@ -63,7 +65,9 @@ async def get_embeddings_batch(
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=10.0)) as client:
             resp = await client.post(url, headers=headers, json=body)
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                log.warning("batch embedding HTTP %s: %s", resp.status_code, resp.text[:500])
+                return [None] * len(texts)
             data = resp.json()
             items = sorted(data["data"], key=lambda d: d["index"])
             return [[float(v) for v in item["embedding"]] for item in items]
