@@ -1,10 +1,8 @@
 """Relevance ranker for Dwell memory cards.
 
-Supports two modes:
-- Vector (embedding) retrieval: cosine similarity + importance/freshness modifiers.
-  Used when both the query and the card have embeddings.
-- Keyword fallback: the original term-overlap scoring, used for cards without embeddings
-  or when no embedding model is configured.
+Hybrid retrieval via Reciprocal Rank Fusion (RRF):
+- When both vector and keyword scores are available, fuse rankings from both.
+- Falls back to keyword-only when no query embedding is provided.
 """
 
 from __future__ import annotations
@@ -39,28 +37,14 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _vector_score(card: dict, query_embedding: list[float], now: datetime) -> float:
+def _vector_score(card: dict, query_embedding: list[float]) -> float:
     card_embedding = card.get("embedding")
     if not card_embedding or not query_embedding:
         return 0.0
     similarity = _cosine_similarity(query_embedding, card_embedding)
     if similarity < 0.25:
         return 0.0
-    score = similarity * 10.0
-    score += {"high": 0.8, "normal": 0.3, "low": 0.0}.get(
-        str(card.get("importance")), 0.0
-    )
-    try:
-        age_days = max(0, (now - datetime.fromtimestamp(int(card.get("updated") or 0))).days)
-    except (TypeError, ValueError, OSError):
-        age_days = 9999
-    if age_days <= 30:
-        score += 0.35
-    elif age_days <= 180:
-        score += 0.12
-    if str(card.get("retention")) == "fading":
-        score -= 0.2
-    return round(score, 4)
+    return round(similarity, 6)
 
 
 # ---- Keyword fallback ----
@@ -107,7 +91,7 @@ def _terms(text: object) -> set[str]:
     return {term for term in terms if term not in COMMON_CJK_GRAMS}
 
 
-def _keyword_score(card: dict, query: str, query_terms: set[str], now: datetime) -> float:
+def _keyword_score(card: dict, query: str, query_terms: set[str]) -> float:
     content = str(card.get("content") or "").strip()
     if not content:
         return 0.0
@@ -126,20 +110,37 @@ def _keyword_score(card: dict, query: str, query_terms: set[str], now: datetime)
     memory_type = str(card.get("memory_type") or "")
     if any(hint in normalized_query for hint in TYPE_HINTS.get(memory_type, ())):
         score += 1.4
-    if score <= 0:
-        return 0.0
-    score += {"high": 0.8, "normal": 0.3, "low": 0.0}.get(str(card.get("importance")), 0.0)
+    return round(score, 4)
+
+
+# ---- Importance / freshness boost (shared by both paths) ----
+
+def _meta_boost(card: dict, now: datetime) -> float:
+    boost = {"high": 0.8, "normal": 0.3, "low": 0.0}.get(
+        str(card.get("importance")), 0.0
+    )
     try:
         age_days = max(0, (now - datetime.fromtimestamp(int(card.get("updated") or 0))).days)
     except (TypeError, ValueError, OSError):
         age_days = 9999
     if age_days <= 30:
-        score += 0.35
+        boost += 0.35
     elif age_days <= 180:
-        score += 0.12
+        boost += 0.12
     if str(card.get("retention")) == "fading":
-        score -= 0.2
-    return round(score, 4)
+        boost -= 0.2
+    return boost
+
+
+# ---- RRF fusion ----
+
+_RRF_K = 60
+
+
+def _rrf_rank(scored: list[tuple[str, float]]) -> dict[str, int]:
+    """Return {card_id: 1-based rank} from a list of (card_id, score), descending."""
+    sorted_items = sorted(scored, key=lambda t: -t[1])
+    return {card_id: rank for rank, (card_id, _) in enumerate(sorted_items, 1)}
 
 
 # ---- Public API ----
@@ -154,25 +155,54 @@ def select_memory_cards(
 ) -> list[dict]:
     """Return at most ``limit`` relevant, active and unexpired cards.
 
-    When ``query_embedding`` is provided, cards with embeddings use vector
-    scoring; cards without embeddings fall back to keyword scoring.
+    Uses RRF to fuse vector and keyword rankings when both are available.
+    Falls back to keyword-only when no query embedding is provided.
     """
     now = now or datetime.now()
     query = str(context or "").strip()
     if not query:
         return []
     query_terms = _terms(query)
-    ranked = []
+
+    valid_cards: dict[str, dict] = {}
+    vec_scores: list[tuple[str, float]] = []
+    kw_scores: list[tuple[str, float]] = []
+
     for card in cards:
         if not _valid_on(card, now.date()):
             continue
-        if query_embedding and card.get("embedding"):
-            score = _vector_score(card, query_embedding, now)
-        else:
-            score = _keyword_score(card, query, query_terms, now)
-        if score <= 0:
+        cid = str(card.get("id") or "")
+        if not cid:
             continue
-        ranked.append({**card, "selection_score": score})
+        valid_cards[cid] = card
+
+        kw = _keyword_score(card, query, query_terms)
+        if kw > 0:
+            kw_scores.append((cid, kw))
+
+        if query_embedding:
+            vs = _vector_score(card, query_embedding)
+            if vs > 0:
+                vec_scores.append((cid, vs))
+
+    if not kw_scores and not vec_scores:
+        return []
+
+    kw_rank = _rrf_rank(kw_scores) if kw_scores else {}
+    vec_rank = _rrf_rank(vec_scores) if vec_scores else {}
+    all_ids = set(kw_rank) | set(vec_rank)
+
+    ranked = []
+    for cid in all_ids:
+        rrf = 0.0
+        if cid in vec_rank:
+            rrf += 1.0 / (_RRF_K + vec_rank[cid])
+        if cid in kw_rank:
+            rrf += 1.0 / (_RRF_K + kw_rank[cid])
+        card = valid_cards[cid]
+        score = rrf + _meta_boost(card, now) * 0.001
+        ranked.append({**card, "selection_score": round(score, 6)})
+
     ranked.sort(
         key=lambda item: (
             -float(item["selection_score"]),
