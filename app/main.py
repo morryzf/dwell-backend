@@ -699,6 +699,89 @@ async def _generate_unprocessed_memory_card_suggestions(
     return True
 
 
+RETAG_BATCH = 20
+
+
+async def _retag_memory_cards(chat_id: str, provider: dict, model_id: str) -> int:
+    """按当前主题词表给已有卡片重新分类，只对改动的卡片落待确认建议。
+
+    词表后来加了 personality / about_me / nsfw，identity 也收窄了，但早先生成的
+    卡片还按老词表打的标。这一趟把它们过一遍——只动 topics，正文、类型、重要性
+    一概不碰，改动仍然要逐条确认。
+    """
+    cards = [
+        card for card in db.memory_card_list(chat_id)
+        if str(card.get("status") or "active") == "active"
+    ]
+    if not cards:
+        return 0
+
+    topic_lines = "、".join(f"{key}={label}" for key, label in MEMORY_CARD_TOPICS.items())
+    system = (
+        "你在给已有的记忆卡片重新分类。只判断 topics，不要改写、总结或评价卡片正文。"
+        f"topics 只能从这份词表里选，每张卡最多三个：{topic_lines}。"
+        "口径：identity 只放身份信息（名字/年龄/生日/职业/背景）；"
+        "personality 放性格、习惯、脾气、怪癖；"
+        "about_me 放关于 Cloudy 自己的偏好、想法、特点——卡片是第一人称写的，"
+        "说「我喜欢…」「我想…」而主语是 Cloudy 自己的，归这里；"
+        "nsfw 放亲密内容。"
+        "只输出确实需要改的卡片：现有 topics 已经合适的一律不要输出。"
+        "只输出 JSON：{\"cards\":[{\"id\":\"...\",\"topics\":[\"...\"]}]}。"
+    )
+
+    proposals: list[dict] = []
+    for start in range(0, len(cards), RETAG_BATCH):
+        batch = cards[start:start + RETAG_BATCH]
+        payload = {"cards": [{
+            "id": card["id"],
+            "content": str(card.get("content") or "")[:600],
+            "current_topics": card.get("topics") or [],
+        } for card in batch]}
+        known = {card["id"]: card for card in batch}
+        try:
+            data = await _memory_json_completion(
+                provider, model_id, system,
+                json.dumps(payload, ensure_ascii=False)[:30000],
+            )
+        except (ValueError, RuntimeError):
+            continue   # 一批没读懂就跳过这批，别让整趟失败
+        for raw in (data.get("cards") or []):
+            if not isinstance(raw, dict):
+                continue
+            current = known.get(str(raw.get("id") or ""))
+            if not current:
+                continue
+            topics = [
+                str(topic) for topic in (raw.get("topics") or [])
+                if str(topic) in MEMORY_CARD_TOPICS
+            ][:3]
+            if not topics or topics == list(current.get("topics") or []):
+                continue   # 没变就不占一条待确认
+            proposals.append({"card_id": current["id"], "topics": topics})
+
+    return db.memory_card_stage_retags(chat_id, proposals)
+
+
+async def _run_memory_card_retag(chat_id: str) -> None:
+    task_started = time.perf_counter()
+    task_log_id = _start_system_log("memory_task", "memory_card_retag", chat_id=chat_id)
+    task_status = "success"
+    task_detail: object = ""
+    try:
+        selection, provider, _explicit = _long_context_model(chat_id)
+        if not provider or not provider.get("enabled") or not selection.get("model_id"):
+            raise RuntimeError("重新分类前，请先选择可用的长期上下文模型")
+        await _retag_memory_cards(chat_id, provider, selection["model_id"])
+        db.memory_card_state_set(chat_id, "review", generated=True)
+    except Exception as exc:
+        task_status = "error"
+        task_detail = exc
+        db.memory_card_state_set(chat_id, "error", str(exc), generated=True)
+    finally:
+        _finish_system_log(task_log_id, task_status, task_started, detail=task_detail)
+        _memory_card_tasks.pop(chat_id, None)
+
+
 async def _refresh_memory_card_suggestions(chat_id: str) -> None:
     """为已有分段补建候选卡片，供控制台按钮手动触发。"""
     task_started = time.perf_counter()
@@ -3858,6 +3941,22 @@ async def memory_cards_generate(chat_id: str):
     db.memory_card_state_set(chat_id, "queued")
     task = asyncio.create_task(_refresh_memory_card_suggestions(chat_id))
     _memory_card_tasks[chat_id] = task
+    return {"ok": True, "started": True, "state": db.memory_card_state_get(chat_id)}
+
+
+@app.post("/api/chats/{chat_id}/memory-cards/retag", dependencies=authed)
+async def memory_cards_retag(chat_id: str):
+    """按当前主题词表给已有卡片重新分类；只落待确认建议，正式卡片不动。"""
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    summary_task = _memory_tasks.get(chat_id)
+    if summary_task and not summary_task.done():
+        raise HTTPException(409, "长期上下文正在整理，请完成后再重新分类")
+    task = _memory_card_tasks.get(chat_id)
+    if task and not task.done():
+        return {"ok": True, "started": False, "state": db.memory_card_state_get(chat_id)}
+    db.memory_card_state_set(chat_id, "queued")
+    _memory_card_tasks[chat_id] = asyncio.create_task(_run_memory_card_retag(chat_id))
     return {"ok": True, "started": True, "state": db.memory_card_state_get(chat_id)}
 
 

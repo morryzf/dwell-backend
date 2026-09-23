@@ -3300,6 +3300,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   }
   .interface-glass-reset:active { transform: scale(.97); background: color-mix(in srgb, var(--panel) 62%, transparent); }
   .glass-effect-label { margin-top: 16px; }
+  .mc-retag { margin-top: 6px; font-size: 11.5px; color: var(--dim); }
 </style>
 <style>
   /* sigillo 回执卡。四态：封面 → 表单 → 封缄面 → 只读回执。
@@ -11143,8 +11144,15 @@ function memoryCardForm(item, taxonomy, kind) {
     <div class="ap-msg" data-memory-msg></div>
   </form>`;
 }
-function memoryCardView(item, taxonomy, kind, recentIds) {
+function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
   const type = (taxonomy.types || {})[item.memory_type] || item.memory_type;
+  // 重新分类的建议：只改 topics，把原来的标签一并显示出来，好判断这一改值不值。
+  const retagOf = (kind === 'draft' && item.action === 'update' && currentById)
+    ? currentById[item.target_card_id] : null;
+  const topicName = topic => instructionEsc((taxonomy.topics || {})[topic] || topic);
+  const retagLine = retagOf
+    ? `<div class="mc-retag">原主题：${(retagOf.topics || []).map(topicName).join('、') || '（无）'}</div>`
+    : '';
   const topicTags = (item.topics || []).map(topic => `<span class="mc-tag">${instructionEsc((taxonomy.topics || {})[topic] || topic)}</span>`).join('');
   const importance = (taxonomy.importance || {})[item.importance] || item.importance;
   const retention = (taxonomy.retention || {})[item.retention] || item.retention;
@@ -11156,7 +11164,7 @@ function memoryCardView(item, taxonomy, kind, recentIds) {
   else if (kind === 'used') actions = '';
   else if (archived) actions = `<button class="mc-btn" data-memory-restore="${instructionEsc(item.id)}">恢复</button><button class="mc-btn quiet danger" data-memory-delete-permanent="${instructionEsc(item.id)}">永久删除</button>`;
   else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button><button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
-  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${instructionEsc(item.content || '')}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}</div>${kind !== 'used' ? `<div class="mc-source">${instructionEsc(memorySource(item))}</div>` : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
+  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${instructionEsc(item.content || '')}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}</div>${retagLine}${kind !== 'used' ? `<div class="mc-source">${instructionEsc(memorySource(item))}</div>` : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
 }
 function memoryEmpty(title, text, button) {
   return `<div class="mc-empty"><strong>${instructionEsc(title)}</strong>${instructionEsc(text)}${button || ''}</div>`;
@@ -11253,11 +11261,12 @@ async function loadLongContext() {
     if(!summaryResponse.ok||!summary.ok)throw new Error(summary.detail||'摘要没有读取到'); if(!modelResponse.ok||!model.ok)throw new Error(model.detail||'模型没有读取到'); if(!cardsResponse.ok||!cards.ok)throw new Error(cards.detail||'记忆卡没有读取到'); if(!embeddingResponse.ok||!embeddingModel.ok)throw new Error(embeddingModel.detail||'向量模型没有读取到');
     const active=(cards.items||[]).filter(item=>item.status!=='archived'), archived=(cards.items||[]).filter(item=>item.status==='archived'), drafts=cards.drafts||[], cardWorking=cards.state&&['queued','running'].includes(cards.state.status);
     const recentIds=new Set(((cards.last_injection||{}).items||[]).map(item=>item.id));
+    const cardById=Object.fromEntries((cards.items||[]).map(item=>[item.id,item]));
     const tabs=[['overview','总览',''],['review','待确认',drafts.length],['cards','记忆卡',active.length],['archive','归档',archived.length]];
     const tabHtml=tabs.map(([id,label,count])=>`<button class="mc-tab" role="tab" aria-selected="${memoryConsoleTab===id}" data-memory-tab="${id}">${label}${count!==''?`<span class="mc-count">${count}</span>`:''}</button>`).join('');
     let panel='';
     if(memoryConsoleTab==='overview') panel=memoryOverviewHtml(summary,model,cards,embeddingModel,sigilloState);
-    if(memoryConsoleTab==='review') panel=`<div class="mc-toolbar"><button class="mc-btn primary" id="memoryGenerate" ${cardWorking?'disabled':''}>${cardWorking?'正在整理…':'生成未处理分段的记忆卡草稿'}</button>${drafts.length?`<button class="mc-btn" id="memoryAcceptAll" ${cardWorking?'disabled':''}>采用全部（${drafts.length}）</button>`:''}</div>${cards.state&&cards.state.error?`<div class="ap-msg on bad">${instructionEsc(cards.state.error)}</div>`:''}${drafts.length?`<div class="mc-stack">${drafts.map(item=>memoryCardView(item,cards.taxonomy,'draft')).join('')}</div>`:memoryEmpty(cardWorking?'正在整理候选':'没有待确认内容',cardWorking?'完成后会自动出现在这里。':'可以让模型检查尚未处理的新分段；任何候选都要由你逐条采用。')}`;
+    if(memoryConsoleTab==='review') panel=`<div class="mc-toolbar"><button class="mc-btn primary" id="memoryGenerate" ${cardWorking?'disabled':''}>${cardWorking?'正在整理…':'生成未处理分段的记忆卡草稿'}</button><button class="mc-btn" id="memoryRetag" ${cardWorking?'disabled':''}>按新主题重新分类</button>${drafts.length?`<button class="mc-btn" id="memoryAcceptAll" ${cardWorking?'disabled':''}>采用全部（${drafts.length}）</button>`:''}</div>${cards.state&&cards.state.error?`<div class="ap-msg on bad">${instructionEsc(cards.state.error)}</div>`:''}${drafts.length?`<div class="mc-stack">${drafts.map(item=>memoryCardView(item,cards.taxonomy,'draft',null,cardById)).join('')}</div>`:memoryEmpty(cardWorking?'正在整理候选':'没有待确认内容',cardWorking?'完成后会自动出现在这里。':'可以让模型检查尚未处理的新分段；任何候选都要由你逐条采用。')}`;
     if(memoryConsoleTab==='cards') panel=`<div class="mc-toolbar"><input class="ap-in" id="memorySearch" type="search" placeholder="搜索记忆内容" value="${instructionEsc(memoryConsoleQuery)}"><select class="ap-in" id="memoryFilter"><option value="all">全部状态</option><option value="active" ${memoryConsoleFilter==='active'?'selected':''}>可被挑选</option><option value="hidden" ${memoryConsoleFilter==='hidden'?'selected':''}>已隐藏</option><option value="high" ${memoryConsoleFilter==='high'?'selected':''}>固定保留</option></select></div>${active.length?`<div class="mc-stack">${active.map(item=>memoryCardView(item,cards.taxonomy,'card',recentIds)).join('')}</div><div class="mc-empty" id="memoryFilteredEmpty" hidden><strong>没有符合条件的记忆</strong>换个关键词或筛选条件看看。</div>`:memoryEmpty('还没有正式记忆卡','先到“待确认”生成候选，并逐条采用。')}`;
     if(memoryConsoleTab==='archive') panel=archived.length?`<div class="mc-stack">${archived.map(item=>memoryCardView(item,cards.taxonomy,'card')).join('')}</div>`:memoryEmpty('归档是空的','归档后的记忆会留在这里，可以随时恢复。');
     body.innerHTML=`<div class="mc-intro"><h1>${instructionEsc(chat.name||'新对话')}</h1><p>总览维持这段关系的连续性；记忆卡把重要细节拆成可以管理的小条目。</p><div class="mc-safety${cards.injection_enabled?'':' off'}"><span class="ic" data-i="${cards.injection_enabled?'check':'x'}"></span><span>${cards.injection_enabled?'按需记忆已开启：每轮最多带入 5 条相关卡片；隐藏、归档和过期内容会自动排除。':'按需记忆已暂停：AI 仍会看到长期摘要和最近原文，但不会看到记忆卡。'}</span></div></div><div class="mc-tabs" role="tablist" aria-label="记忆管理">${tabHtml}</div><section class="mc-panel" role="tabpanel">${panel}</section>`;
@@ -11265,6 +11274,7 @@ async function loadLongContext() {
     body.querySelectorAll('[data-memory-tab]').forEach(button=>button.onclick=()=>{memoryConsoleTab=button.dataset.memoryTab;loadLongContext();});
     if(memoryConsoleTab==='overview')wireMemoryOverview(chat,summary,cards,embeddingModel,sigilloState);
     if(memoryConsoleTab!=='overview')wireMemoryCards(chat,cards,cards.items||[]);
+    const retag=document.getElementById('memoryRetag'); if(retag&&!cardWorking)retag.onclick=async()=>{if(!confirm('按当前主题词表把已有记忆卡过一遍？只会生成待确认建议，正式卡片不变。'))return;retag.disabled=true;retag.textContent='正在分类…';try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/retag',{method:'POST'});loadLongContext();}catch(e){retag.disabled=false;retag.textContent='按新主题重新分类';alert('没有开始：'+e.message);}};
     const generate=document.getElementById('memoryGenerate'); if(generate&&!cardWorking)generate.onclick=async()=>{generate.disabled=true;generate.textContent='正在开始…';try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/generate',{method:'POST'});loadLongContext();}catch(e){generate.disabled=false;generate.textContent='生成未处理分段的记忆卡草稿';alert('没有开始：'+e.message);}};
     const acceptAll=document.getElementById('memoryAcceptAll'); if(acceptAll&&!cardWorking)acceptAll.onclick=async()=>{if(!confirm('采用全部 '+drafts.length+' 条待确认记忆？它们会直接按当前内容成为正式记忆卡。'))return;acceptAll.disabled=true;acceptAll.textContent='正在采用…';try{const result=await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/accept-all',{method:'POST'});note('（已采用 '+result.accepted+' 条记忆）');document.querySelectorAll('.mc-card').forEach(c=>removeMemoryCard(c,'review'));updateMemoryTabCount('cards',result.accepted);acceptAll.remove();}catch(e){acceptAll.disabled=false;acceptAll.textContent='采用全部（'+drafts.length+'）';alert('没有全部采用：'+e.message);}};
     const search=document.getElementById('memorySearch'), filter=document.getElementById('memoryFilter');
