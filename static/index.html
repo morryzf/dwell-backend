@@ -3301,6 +3301,19 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .interface-glass-reset:active { transform: scale(.97); background: color-mix(in srgb, var(--panel) 62%, transparent); }
   .glass-effect-label { margin-top: 16px; }
   .mc-retag { margin-top: 6px; font-size: 11.5px; color: var(--dim); }
+  .mc-used-fold { margin-bottom: 12px; }
+  .mc-used-fold > summary { color: var(--dim); font-size: 12px; cursor: pointer; padding: 4px 0; }
+  /* 设置页的滑块开关行。滑块本体复用全局的 .sw（和专注页那两个同一套）。 */
+  .mc-switch-row {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    padding: 8px 0; text-align: left; background: none; border: 0;
+    color: var(--text); font: inherit; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mc-switch-text { flex: 1; min-width: 0; }
+  .mc-switch-row .mc-switch-label { margin: 0; }
+  .mc-switch-hint { display: block; margin-top: 3px; font-size: 11.5px; line-height: 1.55; color: var(--dim); }
+  .mc-switch-row .sw { transition: background .28s, opacity .2s; }
 </style>
 <style>
   /* sigillo 回执卡。四态：封面 → 表单 → 封缄面 → 只读回执。
@@ -11117,7 +11130,7 @@ async function currentChatForMemory() {
   return (data.items || []).find(item => item.current) || null;
 }
 function stopLongContextPoll() { if (longContextPoll) { clearTimeout(longContextPoll); longContextPoll = null; } }
-let memoryConsoleTab = 'overview';
+let memoryConsoleTab = 'cards';
 let memoryConsoleQuery = '';
 let memoryConsoleFilter = 'all';
 
@@ -11169,37 +11182,47 @@ function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
 function memoryEmpty(title, text, button) {
   return `<div class="mc-empty"><strong>${instructionEsc(title)}</strong>${instructionEsc(text)}${button || ''}</div>`;
 }
-function memoryOverviewHtml(state, modelState, cardState, embeddingState, sigilloState) {
+function memorySwitchRow(label, hint, id, on) {
+  return `<button class="mc-switch-row" id="${id}" type="button" aria-pressed="${on ? 'true' : 'false'}">`
+    + `<span class="mc-switch-text"><span class="ap-section-title mc-switch-label">${label}</span>`
+    + (hint ? `<small class="mc-switch-hint">${hint}</small>` : '')
+    + `</span><span class="sw${on ? ' on' : ''}"></span></button>`;
+}
+
+function memorySummaryHtml(state) {
   const working = state.status === 'queued' || state.status === 'running';
   const reviewing = !!state.has_draft;
-  const generated = state.generated_at ? memoryDate(state.generated_at) : '尚未保存';
+  const generated = state.generated_at ? memoryDate(state.generated_at) : '还未生成';
   const draftGenerated = state.draft_generated_at ? memoryDate(state.draft_generated_at) : '';
-  const status = working ? '正在整理。完成后只会生成待确认草稿。' : reviewing ? '有一份新摘要等待确认；当前仍使用原来的正式摘要。' : state.status === 'error' ? ('没有生成成功：' + (state.error || '未知错误')) : (state.overview ? '正式摘要已启用。只有点击更新摘要时才会重新整理。' : '还没有正式摘要；摘要只会在你点击生成时整理。');
-  const modelOptions = (modelState.items || []).filter(item => item.favorite).map(item => `<option value="${instructionEsc(item.provider_id)}::${instructionEsc(item.model_id)}" ${(item.provider_id === modelState.provider_id && item.model_id === modelState.model_id) ? 'selected' : ''}>${instructionEsc(item.provider_name || '供应商')} · ${instructionEsc(item.model_id)}</option>`).join('');
-  const versions = (state.versions || []).map(item => `<details class="mc-summary-history" style="margin-top:10px"><summary>${instructionEsc(memoryDate(item.made) || '较早版本')} · ${instructionEsc(item.reason || '历史版本')}</summary><div class="gnote mc-summary-history-text" style="white-space:pre-wrap;margin-top:8px;max-height:260px;overflow:auto">${instructionEsc(item.overview || '')}</div><div class="mc-actions"><button class="mc-btn longContextRestore" data-version="${instructionEsc(item.id)}">恢复这一版</button></div></details>`).join('');
+  const status = working ? '正在整理。完成后只会生成待确认草稿。' : reviewing ? '有一份新摘要等待确认，当前仍使用原来的正式摘要。' : state.status === 'error' ? ('没有生成成功：' + (state.error || '未知错误')) : (state.overview ? '正式摘要已启用。只有点击更新摘要时才会重新整理。' : '还没有正式摘要。摘要只在你点击时生成。');
+  const versions = (state.versions || []).map(item => `<details class="mc-summary-history" style="margin-top:10px"><summary>${instructionEsc(memoryDate(item.made) || '历史版本')} · ${instructionEsc(item.reason || '历史版本')}</summary><div class="gnote mc-summary-history-text" style="white-space:pre-wrap;margin-top:8px;max-height:260px;overflow:auto">${instructionEsc(item.overview || '')}</div><div class="mc-actions"><button class="mc-btn longContextRestore" data-version="${instructionEsc(item.id)}">恢复这一版</button></div></details>`).join('');
   const blocked = working || reviewing;
-  const lastUse = cardState.last_injection;
-  const usedCards = lastUse && lastUse.items && lastUse.items.length ? `<div class="mc-stack mc-used-scroll" style="margin-top:12px">${lastUse.items.map(item=>memoryCardView(item,cardState.taxonomy,'used')).join('')}</div>` : '';
-  return `<div class="ap-section"><div class="ap-section-title">按需记忆</div><div class="gnote mc-on-demand-note">${cardState.injection_enabled ? '已开启。每次回复只会挑最多 5 条真正相关的卡片；不相关时一条也不会带入。每累计 50 条旧消息会自动生成待确认记忆卡。' : '已暂停带入，但每累计 50 条旧消息仍会自动生成待确认记忆卡。'}</div><div class="mc-actions"><button class="mc-btn ${cardState.injection_enabled ? 'quiet' : 'primary'}" id="memoryInjectionToggle">${cardState.injection_enabled ? '暂停按需记忆' : '开启按需记忆'}</button></div>${lastUse ? `<div class="mc-section-title">最近一次带入 · ${instructionEsc(memoryDate(lastUse.used_at))} · ${lastUse.items.length} 条</div>${usedCards}` : '<div class="gnote">还没有带入记录。下一次聊到与卡片相关的话题时，这里会显示 AI 实际看到的内容。</div>'}</div>${sigilloState && sigilloState.ok ? `<div class="ap-section"><div class="ap-section-title">回执单</div><div class="gnote">${sigilloState.enabled ? '已开启。一场结束后我可以开一张回执单，你逐条打星封缄；最近几单会作为素材注回上下文。' : '已关闭。开启后我才能开回执单。'}</div>${sigilloState.enabled ? `<div class="gnote">已封缄 ${(sigilloState.reviews||[]).length} 单${(sigilloState.benched||[]).length ? ` · 冷却中：${sigilloState.benched.map(b=>instructionEsc(b.dim+'·'+b.tag)).join('、')}` : ''}</div>` : ''}<div class="mc-actions"><button class="mc-btn ${sigilloState.enabled ? 'quiet' : 'primary'}" id="sigilloToggle">${sigilloState.enabled ? '关闭回执单' : '开启回执单'}</button></div></div>` : ''}
-    <div class="ap-section"><div class="ap-section-title">摘要状态</div><div class="gnote">${instructionEsc(status)}</div><div class="gnote">原消息 ${state.message_count} 条 · 已压缩 ${state.segment_count} 段 · 最近 ${state.tail_messages} 条保留原文</div><div class="gnote">正式摘要最近保存：${instructionEsc(generated)}</div></div>
-    <div class="ap-section"><div class="ap-section-title">整理所用模型</div>${modelOptions ? `<select class="ap-in" id="longContextModel" style="margin-top:10px">${modelOptions}</select><div class="ap-msg" id="longContextModelMsg"></div>` : '<div class="gnote">还没有可选模型。先在设置里为供应商添加模型。</div>'}</div>
-    <div class="ap-section"><div class="ap-section-title">向量检索模型</div><div class="gnote">用于记忆卡的语义检索。设置后新采用或编辑的记忆卡会自动生成向量；已有卡片可以一键补全。</div>${(()=>{ const eItems=(embeddingState&&embeddingState.items||[]).filter(item=>item.favorite); const eOptions=eItems.map(item=>'<option value="'+instructionEsc(item.provider_id)+'::'+instructionEsc(item.model_id)+'" '+(item.provider_id===embeddingState.provider_id&&item.model_id===embeddingState.model_id?'selected':'')+'>'+instructionEsc(item.provider_name||'供应商')+' · '+instructionEsc(item.model_id)+'</option>').join(''); return eOptions?'<select class="ap-in" id="embeddingModel" style="margin-top:10px"><option value="">不使用向量检索</option>'+eOptions+'</select><div class="ap-msg" id="embeddingModelMsg"></div><div class="mc-actions" style="margin-top:8px"><button class="mc-btn" id="embeddingBackfill">为已有卡片补全向量</button></div>':'<div class="gnote">还没有常用模型。先在设置里把模型加入常用。</div>'; })()}</div>
+  return `<div class="ap-section"><div class="ap-section-title">状态</div><div class="gnote">${instructionEsc(status)}</div><div class="gnote">原消息 ${state.message_count} 条 · 已压缩 ${state.segment_count} 段 · 最近 ${state.tail_messages} 条保留原文</div><div class="gnote">正式摘要最近保存：${instructionEsc(generated)}</div></div>
     <div class="mc-actions${state.enabled ? ' mc-summary-primary-actions' : ''}"><button class="mc-btn primary" id="longContextGenerate" ${blocked ? 'disabled' : ''}>${reviewing ? '先处理待确认摘要' : (state.overview ? '更新摘要' : '生成摘要')}</button>${state.enabled ? `<button class="mc-btn" id="longContextRebuild" ${blocked ? 'disabled' : ''}>从原文重建</button>` : ''}</div><div class="ap-msg" id="longContextMsg"></div>
     ${reviewing ? `<div class="ap-section mc-summary"><div class="ap-section-title">待确认的新摘要</div><div class="gnote">生成于 ${instructionEsc(draftGenerated)}。采用前不会影响正式摘要。</div><textarea class="ap-in" id="longContextDraft" maxlength="12000">${instructionEsc(state.draft_overview || '')}</textarea><div class="mc-actions"><button class="mc-btn primary" id="longContextAccept">采用这份摘要</button><button class="mc-btn quiet danger" id="longContextDiscard">丢弃</button></div></div>` : ''}
     ${state.overview ? `<div class="ap-section mc-summary"><div class="ap-section-title">正在使用的正式摘要</div><div class="gnote">可以直接校订；保存前会自动留下旧版本。</div><textarea class="ap-in" id="longContextOverview" maxlength="12000">${instructionEsc(state.overview)}</textarea><div class="mc-actions"><button class="mc-btn primary" id="longContextSave">保存修改</button></div></div>` : ''}
     ${versions ? `<div class="ap-section"><div class="ap-section-title">摘要历史（${state.version_count || 0}）</div>${versions}</div>` : ''}`;
 }
-function memoryReadForm(form) {
-  const topics = [...form.querySelectorAll('.mc-topic input:checked')].map(input => input.value);
-  return {content:form.elements.content.value.trim(),memory_type:form.elements.memory_type.value,topics,importance:form.elements.importance.value,retention:form.elements.retention.value,valid_until:form.elements.valid_until.value || null};
+
+function memorySettingsHtml(modelState, cardState, embeddingState, sigilloState) {
+  const modelOptions = (modelState.items || []).filter(item => item.favorite).map(item => `<option value="${instructionEsc(item.provider_id)}::${instructionEsc(item.model_id)}" ${(item.provider_id === modelState.provider_id && item.model_id === modelState.model_id) ? 'selected' : ''}>${instructionEsc(item.provider_name || '供应商')} · ${instructionEsc(item.model_id)}</option>`).join('');
+  const eItems = (embeddingState && embeddingState.items || []).filter(item => item.favorite);
+  const eOptions = eItems.map(item => `<option value="${instructionEsc(item.provider_id)}::${instructionEsc(item.model_id)}" ${(item.provider_id === embeddingState.provider_id && item.model_id === embeddingState.model_id) ? 'selected' : ''}>${instructionEsc(item.provider_name || '供应商')} · ${instructionEsc(item.model_id)}</option>`).join('');
+  const sigilloBlock = sigilloState && sigilloState.ok
+    ? `<div class="ap-section">`
+      + memorySwitchRow('回执单', '一场结束后我可以开一张回执单，你逐条打星封缄；最近几单会作为素材注回上下文。', 'sigilloToggle', sigilloState.enabled)
+      + (sigilloState.enabled ? `<div class="gnote">已封缄 ${(sigilloState.reviews || []).length} 单${(sigilloState.benched || []).length ? ` · 冷却中：${sigilloState.benched.map(b => instructionEsc(b.dim + '·' + b.tag)).join('、')}` : ''}</div>` : '')
+      + `</div>`
+    : '';
+  return `<div class="ap-section">`
+    + memorySwitchRow('按需记忆', '每次回复只挑最多 5 条真正相关的卡片；不相关时一条也不会带入。', 'memoryInjectionToggle', cardState.injection_enabled)
+    + `<div class="gnote">${cardState.injection_enabled ? '每累计 50 条旧消息会自动生成待确认记忆卡。' : '已暂停带入，但每累计 50 条旧消息仍会自动生成待确认记忆卡。'}</div></div>`
+    + sigilloBlock
+    + `<div class="ap-section"><div class="ap-section-title">整理所用模型</div><div class="gnote">用来压缩长期摘要、生成记忆卡草稿。</div>${modelOptions ? `<select class="ap-in" id="longContextModel" style="margin-top:10px">${modelOptions}</select><div class="ap-msg" id="longContextModelMsg"></div>` : '<div class="gnote">还没有可选模型。先在设置里为供应商添加模型。</div>'}</div>`
+    + `<div class="ap-section"><div class="ap-section-title">向量检索模型</div><div class="gnote">用于记忆卡的语义检索。设置后新采用或编辑的记忆卡会自动生成向量；已有卡片可以一键补全。</div>${eOptions ? `<select class="ap-in" id="embeddingModel" style="margin-top:10px"><option value="">不使用向量检索</option>${eOptions}</select><div class="ap-msg" id="embeddingModelMsg"></div><div class="mc-actions" style="margin-top:8px"><button class="mc-btn" id="embeddingBackfill">为已有卡片补全向量</button></div>` : '<div class="gnote">还没有常用模型。先在设置里把模型加入常用。</div>'}</div>`;
 }
-async function memoryJson(url, options) {
-  const response = await fetch(url, options);
-  const data = await response.json();
-  if (!response.ok || !data.ok) throw new Error(data.detail || '操作没有完成');
-  return data;
-}
-function wireMemoryOverview(chat, state, cardState, embeddingState, sigilloState) {
+
+function wireMemorySummary(chat, state) {
   const startUpdate = async reset => {
     const msg = document.getElementById('longContextMsg');
     if (reset && !confirm('从原聊天记录重新生成待确认摘要？当前正式摘要不会删除。')) return;
@@ -11210,15 +11233,45 @@ function wireMemoryOverview(chat, state, cardState, embeddingState, sigilloState
   const blocked = state.status === 'queued' || state.status === 'running' || state.has_draft;
   const generate = document.getElementById('longContextGenerate'); if (generate && !blocked) generate.onclick = () => startUpdate(false);
   const rebuild = document.getElementById('longContextRebuild'); if (rebuild && !blocked) rebuild.onclick = () => startUpdate(true);
-  const model = document.getElementById('longContextModel'); if (model) model.onchange = async () => { const msg = document.getElementById('longContextModelMsg'); const [provider_id, model_id] = model.value.split('::'); msg.textContent='正在保存…'; msg.className='ap-msg on'; try { await memoryJson('api/long-context-model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id,model_id})}); msg.textContent='之后会用这台模型整理。'; } catch(e) { msg.textContent='没有保存：'+e.message; msg.className='ap-msg on bad'; } };
   const save = document.getElementById('longContextSave'); if (save) save.onclick = async () => { const msg=document.getElementById('longContextMsg'); try { await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/long-context',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({overview:document.getElementById('longContextOverview').value})}); msg.textContent='已保存，并留下修改前的版本。'; msg.className='ap-msg on'; setTimeout(loadLongContext,500); } catch(e) { msg.textContent='没有保存：'+e.message; msg.className='ap-msg on bad'; } };
   const accept = document.getElementById('longContextAccept'); if (accept) accept.onclick = async () => { if (!confirm('采用这份摘要？当前版本会保留在历史记录中。')) return; try { await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/long-context',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({overview:document.getElementById('longContextDraft').value,accept_draft:true})}); loadLongContext(); } catch(e) { alert('没有采用：'+e.message); } };
   const discard = document.getElementById('longContextDiscard'); if (discard) discard.onclick = async () => { if (!confirm('丢弃待确认摘要？正式摘要不会改变。')) return; try { await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/long-context/draft',{method:'DELETE'}); loadLongContext(); } catch(e) { alert('没有丢弃：'+e.message); } };
   document.querySelectorAll('.longContextRestore').forEach(button => button.onclick = async () => { if (!confirm('恢复这一版摘要？当前正式摘要也会先保存。')) return; try { await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/long-context/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({version_id:button.dataset.version})}); loadLongContext(); } catch(e) { alert('没有恢复：'+e.message); } });
-  const sigilloBtn=document.getElementById('sigilloToggle'); if(sigilloBtn)sigilloBtn.onclick=async()=>{sigilloBtn.disabled=true;try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/sigillo',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!(sigilloState&&sigilloState.enabled)})});loadLongContext();}catch(e){sigilloBtn.disabled=false;alert('没有切换：'+e.message);}};
-  const injection=document.getElementById('memoryInjectionToggle'); if(injection)injection.onclick=async()=>{injection.disabled=true;try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/injection',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!cardState.injection_enabled})});loadLongContext();}catch(e){injection.disabled=false;alert('没有切换：'+e.message);}};
+}
+
+/* 滑块开关：点下去先把滑块推过去再发请求，手感即时；失败就推回来。 */
+function wireMemorySwitch(id, enabled, send) {
+  const row = document.getElementById(id);
+  if (!row) return;
+  row.onclick = async () => {
+    const sw = row.querySelector('.sw');
+    if (sw.classList.contains('wait')) return;
+    sw.classList.toggle('on', !enabled);
+    sw.classList.add('wait');
+    try { await send(!enabled); loadLongContext(); }
+    catch (e) { sw.classList.toggle('on', enabled); sw.classList.remove('wait'); alert('没有切换：' + e.message); }
+  };
+}
+
+function wireMemorySettings(chat, cardState, sigilloState) {
+  wireMemorySwitch('memoryInjectionToggle', !!cardState.injection_enabled, next =>
+    memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/injection',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:next})}));
+  wireMemorySwitch('sigilloToggle', !!(sigilloState && sigilloState.enabled), next =>
+    memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/sigillo',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:next})}));
+  const model = document.getElementById('longContextModel'); if (model) model.onchange = async () => { const msg = document.getElementById('longContextModelMsg'); const [provider_id, model_id] = model.value.split('::'); msg.textContent='正在保存…'; msg.className='ap-msg on'; try { await memoryJson('api/long-context-model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id,model_id})}); msg.textContent='之后会用这台模型整理。'; } catch(e) { msg.textContent='没有保存：'+e.message; msg.className='ap-msg on bad'; } };
   const embModel=document.getElementById('embeddingModel'); if(embModel) embModel.onchange=async()=>{ const msg=document.getElementById('embeddingModelMsg'); const val=embModel.value; const [provider_id,model_id]=val?val.split('::'):['','']; msg.textContent='正在保存…'; msg.className='ap-msg on'; try { await memoryJson('api/embedding-model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id,model_id})}); msg.textContent=val?'已设置，新卡片会自动生成向量。':'已关闭向量检索。'; } catch(e) { msg.textContent='没有保存：'+e.message; msg.className='ap-msg on bad'; } };
   const backfill=document.getElementById('embeddingBackfill'); if(backfill) backfill.onclick=async()=>{ backfill.disabled=true; backfill.textContent='正在生成…'; const msg=document.getElementById('embeddingModelMsg'); try { const result=await memoryJson('api/embedding-backfill',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chat.id})}); msg.textContent='已为 '+result.processed+'/'+result.total+' 张卡片生成向量。'+(result.failed?' '+result.failed+' 张失败'+(result.error?'：'+result.error:''):''); msg.className='ap-msg on'+(result.failed?' bad':''); backfill.textContent='为已有卡片补全向量'; backfill.disabled=false; } catch(e) { msg.textContent='补全失败：'+e.message; msg.className='ap-msg on bad'; backfill.textContent='为已有卡片补全向量'; backfill.disabled=false; } };
+}
+
+function memoryReadForm(form) {
+  const topics = [...form.querySelectorAll('.mc-topic input:checked')].map(input => input.value);
+  return {content:form.elements.content.value.trim(),memory_type:form.elements.memory_type.value,topics,importance:form.elements.importance.value,retention:form.elements.retention.value,valid_until:form.elements.valid_until.value || null};
+}
+async function memoryJson(url, options) {
+  const response = await fetch(url, options);
+  const data = await response.json();
+  if (!response.ok || !data.ok) throw new Error(data.detail || '操作没有完成');
+  return data;
 }
 function memoryCardReplace(card, item, taxonomy, kind, recentIds) {
   var tmp = document.createElement('div');
@@ -11262,23 +11315,25 @@ async function loadLongContext() {
     const active=(cards.items||[]).filter(item=>item.status!=='archived'), archived=(cards.items||[]).filter(item=>item.status==='archived'), drafts=cards.drafts||[], cardWorking=cards.state&&['queued','running'].includes(cards.state.status);
     const recentIds=new Set(((cards.last_injection||{}).items||[]).map(item=>item.id));
     const cardById=Object.fromEntries((cards.items||[]).map(item=>[item.id,item]));
-    const tabs=[['overview','总览',''],['review','待确认',drafts.length],['cards','记忆卡',active.length],['archive','归档',archived.length]];
+    const tabs=[['cards','记忆卡',active.length],['review','待确认',drafts.length],['summary','摘要',''],['settings','设置','']];
     const tabHtml=tabs.map(([id,label,count])=>`<button class="mc-tab" role="tab" aria-selected="${memoryConsoleTab===id}" data-memory-tab="${id}">${label}${count!==''?`<span class="mc-count">${count}</span>`:''}</button>`).join('');
     let panel='';
-    if(memoryConsoleTab==='overview') panel=memoryOverviewHtml(summary,model,cards,embeddingModel,sigilloState);
+    if(memoryConsoleTab==='summary') panel=memorySummaryHtml(summary);
+    if(memoryConsoleTab==='settings') panel=memorySettingsHtml(model,cards,embeddingModel,sigilloState);
     if(memoryConsoleTab==='review') panel=`<div class="mc-toolbar"><button class="mc-btn primary" id="memoryGenerate" ${cardWorking?'disabled':''}>${cardWorking?'正在整理…':'生成未处理分段的记忆卡草稿'}</button><button class="mc-btn" id="memoryRetag" ${cardWorking?'disabled':''}>按新主题重新分类</button>${drafts.length?`<button class="mc-btn" id="memoryAcceptAll" ${cardWorking?'disabled':''}>采用全部（${drafts.length}）</button>`:''}</div>${cards.state&&cards.state.error?`<div class="ap-msg on bad">${instructionEsc(cards.state.error)}</div>`:''}${drafts.length?`<div class="mc-stack">${drafts.map(item=>memoryCardView(item,cards.taxonomy,'draft',null,cardById)).join('')}</div>`:memoryEmpty(cardWorking?'正在整理候选':'没有待确认内容',cardWorking?'完成后会自动出现在这里。':'可以让模型检查尚未处理的新分段；任何候选都要由你逐条采用。')}`;
-    if(memoryConsoleTab==='cards') panel=`<div class="mc-toolbar"><input class="ap-in" id="memorySearch" type="search" placeholder="搜索记忆内容" value="${instructionEsc(memoryConsoleQuery)}"><select class="ap-in" id="memoryFilter"><option value="all">全部状态</option><option value="active" ${memoryConsoleFilter==='active'?'selected':''}>可被挑选</option><option value="hidden" ${memoryConsoleFilter==='hidden'?'selected':''}>已隐藏</option><option value="high" ${memoryConsoleFilter==='high'?'selected':''}>固定保留</option></select></div>${active.length?`<div class="mc-stack">${active.map(item=>memoryCardView(item,cards.taxonomy,'card',recentIds)).join('')}</div><div class="mc-empty" id="memoryFilteredEmpty" hidden><strong>没有符合条件的记忆</strong>换个关键词或筛选条件看看。</div>`:memoryEmpty('还没有正式记忆卡','先到“待确认”生成候选，并逐条采用。')}`;
-    if(memoryConsoleTab==='archive') panel=archived.length?`<div class="mc-stack">${archived.map(item=>memoryCardView(item,cards.taxonomy,'card')).join('')}</div>`:memoryEmpty('归档是空的','归档后的记忆会留在这里，可以随时恢复。');
-    body.innerHTML=`<div class="mc-intro"><h1>${instructionEsc(chat.name||'新对话')}</h1><p>总览维持这段关系的连续性；记忆卡把重要细节拆成可以管理的小条目。</p><div class="mc-safety${cards.injection_enabled?'':' off'}"><span class="ic" data-i="${cards.injection_enabled?'check':'x'}"></span><span>${cards.injection_enabled?'按需记忆已开启：每轮最多带入 5 条相关卡片；隐藏、归档和过期内容会自动排除。':'按需记忆已暂停：AI 仍会看到长期摘要和最近原文，但不会看到记忆卡。'}</span></div></div><div class="mc-tabs" role="tablist" aria-label="记忆管理">${tabHtml}</div><section class="mc-panel" role="tabpanel">${panel}</section>`;
+    if(memoryConsoleTab==='cards') panel=`${(()=>{ const lastUse=cards.last_injection; if(!lastUse||!(lastUse.items||[]).length) return ''; /* 最近一次带入是「结果」不是设置：放记忆卡顶上，折叠着不挡翻卡 */ return `<details class="mc-used-fold"><summary>最近一次带入 · ${instructionEsc(memoryDate(lastUse.used_at))} · ${lastUse.items.length} 条</summary><div class="mc-stack mc-used-scroll" style="margin-top:10px">${lastUse.items.map(item=>memoryCardView(item,cards.taxonomy,'used')).join('')}</div></details>`; })()}<div class="mc-toolbar"><input class="ap-in" id="memorySearch" type="search" placeholder="搜索记忆内容" value="${instructionEsc(memoryConsoleQuery)}"><select class="ap-in" id="memoryFilter"><option value="all">全部状态</option><option value="active" ${memoryConsoleFilter==='active'?'selected':''}>可被挑选</option><option value="hidden" ${memoryConsoleFilter==='hidden'?'selected':''}>已隐藏</option><option value="high" ${memoryConsoleFilter==='high'?'selected':''}>固定保留</option><option value="archived" ${memoryConsoleFilter==='archived'?'selected':''}>已归档（${archived.length}）</option></select></div>${(active.length||archived.length)?`<div class="mc-stack">${active.concat(archived).map(item=>memoryCardView(item,cards.taxonomy,'card',recentIds)).join('')}</div><div class="mc-empty" id="memoryFilteredEmpty" hidden><strong>没有符合条件的记忆</strong>换个关键词或筛选条件看看。</div>`:memoryEmpty('还没有正式记忆卡','先到“待确认”生成候选，并逐条采用。')}`;
+    
+    body.innerHTML=`<div class="mc-intro"><h1>${instructionEsc(chat.name||'新对话')}</h1><p>记忆卡把重要细节拆成可以管理的小条目；摘要维持这段关系的连续性。</p><div class="mc-safety${cards.injection_enabled?'':' off'}"><span class="ic" data-i="${cards.injection_enabled?'check':'x'}"></span><span>${cards.injection_enabled?'按需记忆已开启：每轮最多带入 5 条相关卡片；隐藏、归档和过期内容会自动排除。':'按需记忆已暂停：AI 仍会看到长期摘要和最近原文，但不会看到记忆卡。'}</span></div></div><div class="mc-tabs" role="tablist" aria-label="记忆管理">${tabHtml}</div><section class="mc-panel" role="tabpanel">${panel}</section>`;
     fillIcons(body);
     body.querySelectorAll('[data-memory-tab]').forEach(button=>button.onclick=()=>{memoryConsoleTab=button.dataset.memoryTab;loadLongContext();});
-    if(memoryConsoleTab==='overview')wireMemoryOverview(chat,summary,cards,embeddingModel,sigilloState);
-    if(memoryConsoleTab!=='overview')wireMemoryCards(chat,cards,cards.items||[]);
+    if(memoryConsoleTab==='summary')wireMemorySummary(chat,summary);
+    if(memoryConsoleTab==='settings')wireMemorySettings(chat,cards,sigilloState);
+    if(memoryConsoleTab==='cards'||memoryConsoleTab==='review')wireMemoryCards(chat,cards,cards.items||[]);
     const retag=document.getElementById('memoryRetag'); if(retag&&!cardWorking)retag.onclick=async()=>{if(!confirm('按当前主题词表把已有记忆卡过一遍？只会生成待确认建议，正式卡片不变。'))return;retag.disabled=true;retag.textContent='正在分类…';try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/retag',{method:'POST'});loadLongContext();}catch(e){retag.disabled=false;retag.textContent='按新主题重新分类';alert('没有开始：'+e.message);}};
     const generate=document.getElementById('memoryGenerate'); if(generate&&!cardWorking)generate.onclick=async()=>{generate.disabled=true;generate.textContent='正在开始…';try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/generate',{method:'POST'});loadLongContext();}catch(e){generate.disabled=false;generate.textContent='生成未处理分段的记忆卡草稿';alert('没有开始：'+e.message);}};
     const acceptAll=document.getElementById('memoryAcceptAll'); if(acceptAll&&!cardWorking)acceptAll.onclick=async()=>{if(!confirm('采用全部 '+drafts.length+' 条待确认记忆？它们会直接按当前内容成为正式记忆卡。'))return;acceptAll.disabled=true;acceptAll.textContent='正在采用…';try{const result=await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/accept-all',{method:'POST'});note('（已采用 '+result.accepted+' 条记忆）');document.querySelectorAll('.mc-card').forEach(c=>removeMemoryCard(c,'review'));updateMemoryTabCount('cards',result.accepted);acceptAll.remove();}catch(e){acceptAll.disabled=false;acceptAll.textContent='采用全部（'+drafts.length+'）';alert('没有全部采用：'+e.message);}};
     const search=document.getElementById('memorySearch'), filter=document.getElementById('memoryFilter');
-    const applyCardFilter=()=>{ const query=(memoryConsoleQuery||'').toLocaleLowerCase(); let visible=0; body.querySelectorAll('[data-memory-item]').forEach(card=>{ const item=active.find(value=>value.id===card.dataset.memoryItem); if(!item)return; const show=(!query||(item.content||'').toLocaleLowerCase().includes(query))&&(memoryConsoleFilter==='all'||item.status===memoryConsoleFilter||item.importance===memoryConsoleFilter); card.hidden=!show; if(show)visible+=1; }); const empty=document.getElementById('memoryFilteredEmpty'); if(empty)empty.hidden=visible!==0; };
+    const allCards=active.concat(archived); const applyCardFilter=()=>{ const query=(memoryConsoleQuery||'').toLocaleLowerCase(); let visible=0; body.querySelectorAll('[data-memory-item]').forEach(card=>{ const item=allCards.find(value=>value.id===card.dataset.memoryItem); if(!item)return; const isArchived=item.status==='archived'; const hit=!query||(item.content||'').toLocaleLowerCase().includes(query); /* 归档是独立一档：选它只看归档，不选它就一张归档都不露 */ const scope=memoryConsoleFilter==='archived'?isArchived:!isArchived&&(memoryConsoleFilter==='all'||item.status===memoryConsoleFilter||item.importance===memoryConsoleFilter); const show=hit&&scope; card.hidden=!show; if(show)visible+=1; }); const empty=document.getElementById('memoryFilteredEmpty'); if(empty)empty.hidden=visible!==0; };
     if(search)search.oninput=()=>{memoryConsoleQuery=search.value;applyCardFilter();};
     if(filter)filter.onchange=()=>{memoryConsoleFilter=filter.value;applyCardFilter();};
     if(search||filter)applyCardFilter();
