@@ -49,29 +49,56 @@ def _vector_score(card: dict, query_embedding: list[float]) -> float:
 
 # ---- Keyword fallback ----
 
+# 触发词匹配的是「查询」，加分给的是「卡片的 topic」——这一路不要求查询和卡片
+# 同语言，所以中英并列能接住「英文提问 / 中文卡片」那种组合（词重叠那一路在
+# 跨语言时必然是 0，救不回来）。
+#
+# 中文词走子串匹配，英文词走分词匹配：_normalized 会删掉所有空格，英文按子串匹
+# 配会乱命中（tea 命中 instead、eat 命中 great、like 命中 unlike）。见 _hint_hit。
 TOPIC_HINTS = {
-    "identity": ("名字", "年龄", "生日", "职业", "身份", "背景", "哪里人"),
-    "personality": ("性格", "习惯", "脾气", "特点", "怪癖", "内向", "外向", "个性"),
-    "about_me": ("我自己", "关于我", "我喜欢", "我的", "我想", "我觉得", "cloudy", "老公", "朵朵"),
-    "daily_life": ("日常", "最近", "今天", "生活", "家里", "每天"),
-    "place": ("哪里", "地点", "住", "搬家", "城市", "旅行", "天气", "上海", "北京"),
-    "food": ("吃", "喝", "菜", "饭", "餐厅", "口味", "咖啡", "奶茶", "食物"),
-    "books": ("书", "阅读", "小说", "作者", "读完", "读到"),
-    "work_creativity": ("工作", "项目", "创作", "设计", "代码", "产品", "写作", "dwell"),
-    "schedule": ("日程", "几点", "什么时候", "明天", "今天", "下周", "计划", "提醒"),
-    "relationship": ("关系", "相处", "我们", "陪伴", "聊天", "联系", "在意"),
-    "health_safety": ("身体", "健康", "生病", "疼", "睡眠", "药", "医院", "安全", "情绪"),
-    "entertainment": ("电影", "电视剧", "视频", "游戏", "音乐", "歌", "综艺", "动漫"),
-    "family_friends": ("家人", "朋友", "妈妈", "爸爸", "同事", "同学", "亲人","宠物"),
-    "nsfw": ("想要", "操", "鸡巴", "惩罚", "乖", "坏", "脱", "后入", "咬", "打屁股", "安全词","做爱"),
+    "identity": ("名字", "年龄", "生日", "职业", "身份", "背景", "哪里人",
+                 "name", "age", "birthday", "born", "job"),
+    "personality": ("性格", "习惯", "脾气", "特点", "怪癖", "内向", "外向", "个性",
+                    "personality", "habit", "temper", "quirk", "introvert", "extrovert"),
+    "about_me": ("我自己", "关于我", "我喜欢", "我的", "我想", "我觉得", "cloudy", "老公", "朵朵",
+                 "yourself", "wolfie", "strawberry"),
+    "daily_life": ("日常", "最近", "今天", "生活", "家里", "每天",
+                   "daily", "lately", "routine"),
+    "place": ("哪里", "地点", "住", "搬家", "城市", "旅行", "天气", "上海", "北京",
+              "where", "city", "travel", "weather", "shanghai", "beijing"),
+    "food": ("吃", "喝", "菜", "饭", "餐厅", "口味", "咖啡", "奶茶", "食物",
+             "eat", "drink", "food", "meal", "restaurant", "coffee", "tea", "hungry"),
+    "books": ("书", "阅读", "小说", "作者", "读完", "读到",
+              "book", "read", "reading", "novel", "author"),
+    "work_creativity": ("工作", "项目", "创作", "设计", "代码", "产品", "写作", "dwell",
+                        "work", "project", "design", "code", "coding", "build", "writing"),
+    "schedule": ("日程", "几点", "什么时候", "明天", "今天", "下周", "计划", "提醒",
+                 "when", "tomorrow", "schedule", "remind", "plan"),
+    # 「我们」「聊天」拿掉了：这两个词几乎每句都有，当触发词等于给所有 relationship
+    # 卡片无差别加分，把本该空着的召回位填满。
+    "relationship": ("关系", "相处", "陪伴", "联系", "在意",
+                     "relationship", "dynamic", "together", "distance"),
+    "health_safety": ("身体", "健康", "生病", "疼", "睡眠", "药", "医院", "安全", "情绪",
+                      "health", "sick", "pain", "sleep", "tired", "doctor", "safe"),
+    "entertainment": ("电影", "电视剧", "视频", "游戏", "音乐", "歌", "综艺", "动漫",
+                      "movie", "film", "show", "game", "music", "song", "anime"),
+    "family_friends": ("家人", "朋友", "妈妈", "爸爸", "同事", "同学", "亲人", "宠物",
+                       "family", "friend", "mom", "mother", "dad", "father", "pet"),
+    "nsfw": ("想要", "操", "鸡巴", "惩罚", "乖", "坏", "脱", "后入", "咬", "打屁股", "安全词", "做爱",
+             "fuck", "cock", "punish", "spank", "naughty", "safeword"),
 }
 
 TYPE_HINTS = {
-    "preference": ("喜欢", "不喜欢", "偏好", "想要", "讨厌"),
-    "plan": ("计划", "准备", "打算", "以后", "明天", "下周"),
-    "open_thread": ("继续", "进展", "完成", "做到哪", "后来", "项目"),
-    "recent_event": ("最近", "刚才", "昨天", "今天", "发生"),
-    "quote": ("原话", "说过", "怎么说", "那句话"),
+    "preference": ("喜欢", "不喜欢", "偏好", "想要", "讨厌",
+                   "like", "love", "hate", "prefer", "favorite"),
+    "plan": ("计划", "准备", "打算", "以后", "明天", "下周",
+             "plan", "going", "will", "tomorrow"),
+    "open_thread": ("继续", "进展", "完成", "做到哪", "后来", "项目",
+                    "still", "progress", "finish", "done"),
+    "recent_event": ("最近", "刚才", "昨天", "今天", "发生",
+                     "recently", "lately", "yesterday", "happened"),
+    "quote": ("原话", "说过", "怎么说", "那句话",
+              "said", "quote", "words"),
 }
 
 COMMON_CJK_GRAMS = {
@@ -94,6 +121,21 @@ def _terms(text: object) -> set[str]:
     return {term for term in terms if term not in COMMON_CJK_GRAMS}
 
 
+def _hint_hit(hints, normalized_query: str, query_terms: set[str]) -> bool:
+    """中文触发词按子串匹配，英文触发词按整词匹配。
+
+    _normalized 删掉了所有空格，英文按子串匹配会乱命中：tea 命中 instead、
+    eat 命中 great、like 命中 unlike。英文改走 _terms 切出来的词表就没这问题。
+    """
+    for hint in hints:
+        if hint.isascii():
+            if hint in query_terms:
+                return True
+        elif hint in normalized_query:
+            return True
+    return False
+
+
 def _keyword_score(card: dict, query: str, query_terms: set[str]) -> float:
     content = str(card.get("content") or "").strip()
     if not content:
@@ -106,12 +148,11 @@ def _keyword_score(card: dict, query: str, query_terms: set[str]) -> float:
         score += 5.0
     topic_hits = 0
     for topic in card.get("topics") or []:
-        hints = TOPIC_HINTS.get(str(topic), ())
-        if any(hint in normalized_query for hint in hints):
+        if _hint_hit(TOPIC_HINTS.get(str(topic), ()), normalized_query, query_terms):
             topic_hits += 1
     score += min(2, topic_hits) * 2.4
     memory_type = str(card.get("memory_type") or "")
-    if any(hint in normalized_query for hint in TYPE_HINTS.get(memory_type, ())):
+    if _hint_hit(TYPE_HINTS.get(memory_type, ()), normalized_query, query_terms):
         score += 1.4
     return round(score, 4)
 
