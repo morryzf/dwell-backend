@@ -13,7 +13,7 @@ class OpenRouterUsageStaticTest(unittest.TestCase):
         recents = HTML.index('class="drawer-section-head"', usage)
         self.assertLess(heartbeat, usage)
         self.assertLess(usage, recents)
-        self.assertIn('id="navUsage"><span class="ic" data-i="trend"></span>用量', HTML)
+        self.assertIn('id="navUsage"><span class="ic" data-i="trend"></span>Usage', HTML)
         self.assertNotIn('id="usageRow"', HTML)
 
     def test_usage_sheet_has_summary_chart_and_controls(self):
