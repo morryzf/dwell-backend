@@ -10,7 +10,8 @@ class MemoryConsoleStaticTest(unittest.TestCase):
         )
 
     def test_console_exposes_the_four_management_views(self):
-        for label in ("总览", "待确认", "记忆卡", "归档"):
+        # 标签按「系统」分，不再按卡片状态分：归档降级成记忆卡里的筛选项。
+        for label in ("记忆卡", "待确认", "摘要", "设置", "已归档"):
             self.assertIn(label, self.html)
 
     def test_console_connects_every_memory_card_action(self):
@@ -26,7 +27,9 @@ class MemoryConsoleStaticTest(unittest.TestCase):
     def test_console_explains_and_controls_phase_three_injection(self):
         self.assertIn("按需记忆已开启", self.html)
         self.assertIn("隐藏、归档和过期内容会自动排除", self.html)
-        self.assertIn("暂停按需记忆", self.html)
+        self.assertIn("'memoryInjectionToggle'", self.html)
+        self.assertIn("mc-switch-row", self.html)
+        self.assertIn("wireMemorySwitch(", self.html)
         self.assertIn("最近一次带入", self.html)
 
     def test_summary_typography_is_compact(self):
@@ -39,8 +42,7 @@ class MemoryConsoleStaticTest(unittest.TestCase):
             self.html,
         )
 
-    def test_overview_uses_compact_scrollable_hierarchy(self):
-        self.assertIn(".mc-on-demand-note { font-size: 12px;", self.html)
+    def test_summary_and_cards_keep_compact_scrollable_hierarchy(self):
         self.assertIn("max-height: min(42dvh, 340px); overflow-y: auto;", self.html)
         self.assertIn('.mc-summary-history > summary { color: var(--dim); font-size: 12px;', self.html)
         self.assertIn(
