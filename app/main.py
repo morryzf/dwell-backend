@@ -25,7 +25,7 @@ import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from . import auth, db, provider_secrets, push_service, study
+from . import auth, db, provider_secrets, push_service, sigillo, study
 from app.pet_assets import ensure_pet_assets
 from app.llm_client import prompt_cache_enabled, stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
@@ -211,6 +211,130 @@ HOME_TOOLS = [
         }, "required": ["text"], "additionalProperties": False},
     }},
 ]
+
+# sigillo 回执单。一场亲密结束、aftercare 收尾的时候开单（不是进行中，也不是随口聊到的时候）。
+SIGILLO_TOOLS = [
+    {"type": "function", "function": {
+        "name": "SigilloCreate",
+        "description": (
+            "开一张 sigillo 回执单：一场亲密结束、aftercare 收尾的时候用。"
+            f"items = 这一场真实发生过的细节，5~{sigillo.MAX_ITEMS} 条。每条三个字段："
+            f"dim 从维度池里选（只能这 {len(sigillo.DIMS)} 个）：{'/'.join(sigillo.DIMS)}；"
+            f"口径：{sigillo.DIM_HINT}；"
+            f"tag = 短标签（≤{sigillo.MAX_TAG}字），跨单识别同一件事，同一件事在不同单里要用同一个词；"
+            f"label = 具体到她一眼能认出这次的描述（≤{sigillo.MAX_LABEL}字）。"
+            "没发生的维度不许凑数——宁可 5 条真的，不要注水的。"
+            "label 文风：克制的具身白描，有动作无器官——她打星的对象就是这句话。"
+            "她逐条打星（1~5，支持半星）+ 逐条选填备注 + 整单「改进与建议」；"
+            "星数是体验感受不是指令，别机械复读，也别把高星当成下次必须照做的清单。"
+            "她封缄后系统会唤醒你看回执，那一轮记得用 SigilloNote 把「写给下次自己的话」钉回这张单。"
+            "【反向回执】平时别用、事先谈好了才用：给 fixed + 每条 item 带 star，"
+            "这张单就出生即已封缄，她拆开看到的是你写好的只读回执，不能改；要填就填完整。"
+            "返回的 marker（[[sigillo:<id>]]）要单独一行原样放进你下一条消息正文里，"
+            "前端会渲染成可点选的卡片；不要改写它，也不要用代码块包起来。"
+            "同一场只开一张，开过就别再开。她不填就算了，不许催第二遍。"
+            "dropped 里的项 = 连着两单都被打高星、已自动休眠的，系统替你剔掉了，换个新花样。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "items": {
+                "type": "array", "minItems": 1, "maxItems": sigillo.MAX_ITEMS,
+                "description": f"本次真实发生的细节 5~{sigillo.MAX_ITEMS} 条",
+                "items": {"type": "object", "properties": {
+                    "dim": {"type": "string", "enum": sigillo.DIMS, "description": "维度，只能从维度池里选"},
+                    "tag": {"type": "string", "description": f"短标签（≤{sigillo.MAX_TAG}字），跨单识别同一件事"},
+                    "label": {"type": "string", "description": f"具体到她能认出这次的描述（≤{sigillo.MAX_LABEL}字）"},
+                    "star": {"type": "number", "description": "仅反向回执：你替她打的星，1~5，0.5 步进；用了就每条都要给"},
+                    "note": {"type": "string", "description": "仅反向回执：这条的评语，选填"},
+                }, "required": ["dim", "tag", "label"]},
+            },
+            "context": {"type": "string", "description": "可选，这一场的一句话背景（时间/场合/世界线）"},
+            "env_note": {"type": "string", "description": f"可选，卡片封面上那句话，≤{sigillo.MAX_SHORT_NOTE}字，默认『请查收。』"},
+            "sealed_note": {"type": "string", "description": f"可选，封缄面上那句话，≤{sigillo.MAX_SHORT_NOTE}字，默认『已回执。』"},
+            "fixed": {
+                "type": "object", "description": "仅反向回执：各项总评星数（1~5，0.5 步进），每项都要给",
+                "properties": {
+                    k: {"type": "number", "description": f"{sigillo.FIXED_LABELS.get(k, k)}，1~5 星，半星可"}
+                    for k in sigillo.FIXED_KEYS
+                },
+                "required": list(sigillo.FIXED_KEYS),
+            },
+            "note": {"type": "string", "description": "仅反向回执：整单评语（显示成「他的评语」），选填"},
+        }, "required": ["items"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "SigilloRecent",
+        "description": (
+            "回看最近几张已封缄的 sigillo 回执（fixed 是 0~100，=星数×20；每条 item 有 star 和选填 note；"
+            "agent_note 是你自己上次写在那张单上的复盘；filled_by=human 是她填的、agent 是你反向填的）。"
+            "想知道上次的实况时用；开新单前想避免重复也可以先看一眼。这些是素材不是指令，怎么读是你的事。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "n": {"type": "integer", "minimum": 1, "maximum": 10, "description": "回看几单，默认 3"},
+        }, "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "SigilloNote",
+        "description": (
+            "把「写给下次自己的话」钉在一张已封缄的回执上。她封缄后你会被系统唤醒看到回执，看完用这个落笔："
+            "主观地写——这次哪里真的到了、哪里没到但她没说出口、下次想怎么走。"
+            f"≤{sigillo.MAX_AGENT_NOTE}字，重写覆盖。这段话下次亲密语境会自动注回给你。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "id": {"type": "string", "description": "那张已封缄的单的 id（唤醒的系统消息里给了）"},
+            "note": {"type": "string", "description": f"写给下次自己的话，≤{sigillo.MAX_AGENT_NOTE}字"},
+        }, "required": ["id", "note"], "additionalProperties": False},
+    }},
+]
+
+
+def sigillo_tool(chat_id: str, name: str, arguments: dict) -> str:
+    """三把工具的处理器。出错返回 {"error": 人话} 而不是抛异常——
+    模型看得懂错在哪就能自己改对重来。"""
+    try:
+        if name == "SigilloCreate":
+            result = sigillo.create_review(chat_id, arguments)
+            review = result["review"]
+            report = review["filled_by"] == "agent"
+            return json.dumps({
+                "id": review["id"],
+                "marker": f"[[sigillo:{review['id']}]]",
+                "kept": len(review["items"]),
+                "dropped": result["dropped"],
+                "mode": "report" if report else "blank",
+                "usage": (
+                    "反向回执已填好封缄。把 marker 单独一行原样放进你下一条消息正文，"
+                    "她拆开就是你写好的只读回执"
+                ) if report else (
+                    "把 marker 单独一行原样放进你下一条消息正文，前端会渲染成可点选的工单卡"
+                ),
+            }, ensure_ascii=False)
+        if name == "SigilloRecent":
+            n = _bounded_int(arguments.get("n"), 3, 10)
+            reviews = [{
+                "id": r["id"], "submitted_at": r["submitted_at"], "context": r["context"],
+                "fixed": r["fixed"],
+                "items": [{
+                    "dim": i["dim"], "tag": i["tag"], "label": i["label"],
+                    "star": i["star"], "note": i.get("note") or "",
+                } for i in r["items"]],
+                "note": r["note"], "agent_note": r["agent_note"], "filled_by": r["filled_by"],
+            } for r in sigillo.recent_submitted(chat_id, n)]
+            return json.dumps({
+                "count": len(reviews), "reviews": reviews,
+                "benched": sigillo.benched_now(chat_id),
+            }, ensure_ascii=False)
+        if name == "SigilloNote":
+            review = sigillo.set_agent_note(
+                str(arguments.get("id") or ""), str(arguments.get("note") or "")
+            )
+            return json.dumps({
+                "ok": True, "id": review["id"], "saved": len(review["agent_note"]),
+            }, ensure_ascii=False)
+        raise ValueError(f"未知的 sigillo 工具：{name}")
+    except sigillo.SigilloError as exc:
+        return json.dumps({"error": exc.message}, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)[:300]}, ensure_ascii=False)
 
 
 def _bounded_int(value, default: int, maximum: int) -> int:
@@ -966,6 +1090,10 @@ async def _chat_tools(chat_id: str) -> tuple[list[dict], dict[str, object]]:
         tools.extend(HOME_TOOLS)
         for tool in HOME_TOOLS:
             tool_map[tool["function"]["name"]] = "builtin:home"
+    if db.sigillo_enabled(chat_id):
+        tools.extend(SIGILLO_TOOLS)
+        for tool in SIGILLO_TOOLS:
+            tool_map[tool["function"]["name"]] = "builtin:sigillo"
     for server in db.chat_mcp_servers(chat_id):
         try:
             server_tools = await mcp_list_tools(server)
@@ -4012,6 +4140,84 @@ async def messages_regenerate(message_id: str):
     _running_tasks[chat_id] = task
     return {"ok": True, "id": anchor["id"], "replaced_ids": reply_ids}
 
+# ---------------------------------------------------------------- sigillo 回执单
+
+@app.get("/api/chats/{chat_id}/sigillo", dependencies=authed)
+async def sigillo_chat_get(chat_id: str):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    return {
+        "ok": True,
+        "enabled": db.sigillo_enabled(chat_id),
+        "dims": sigillo.DIMS,
+        "reviews": sigillo.recent_submitted(chat_id, 10),
+        "benched": sigillo.benched_now(chat_id),
+    }
+
+
+@app.put("/api/chats/{chat_id}/sigillo", dependencies=authed)
+async def sigillo_chat_put(chat_id: str, payload: dict = Body(...)):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    if not isinstance(payload.get("enabled"), bool):
+        raise HTTPException(400, "enabled 必须是 true 或 false")
+    db.sigillo_set(chat_id, payload["enabled"])
+    return {"ok": True, "enabled": db.sigillo_enabled(chat_id)}
+
+
+@app.get("/api/sigillo/{review_id}", dependencies=authed)
+async def sigillo_get(review_id: str):
+    review = sigillo.get_review(review_id)
+    if not review:
+        raise HTTPException(404, "not found")
+    return {"ok": True, "review": review}
+
+
+@app.post("/api/sigillo/{review_id}/submit", dependencies=authed)
+async def sigillo_submit(review_id: str, payload: dict = Body(...)):
+    """封缄。成功后唤醒 Cloudy 看回执，让他在余温还在的那一轮写主观复盘。"""
+    try:
+        review = sigillo.submit_review(review_id, payload)
+    except sigillo.SigilloError as exc:
+        if exc.code == "already_submitted":
+            raise HTTPException(409, "already submitted") from exc
+        if exc.code == "not_found":
+            raise HTTPException(404, "not found") from exc
+        raise HTTPException(400, exc.message) from exc
+    # 唤醒不 await：提交的响应已经发出去了，唤醒慢/挂都不该让人干等。
+    asyncio.create_task(_sigillo_wake(review))
+    return {"ok": True, "review": review}
+
+
+@app.post("/api/sigillo/{review_id}/note", dependencies=authed)
+async def sigillo_note(review_id: str, payload: dict = Body(...)):
+    try:
+        review = sigillo.set_agent_note(review_id, str(payload.get("note") or ""))
+    except sigillo.SigilloError as exc:
+        if exc.code == "not_found":
+            raise HTTPException(404, "not found") from exc
+        raise HTTPException(400, exc.message) from exc
+    return {"ok": True, "review": review}
+
+
+async def _sigillo_wake(review: dict):
+    """封缄即唤醒：把回执当成一条系统消息推进那条会话，跑完一轮。
+
+    全程不外抛：封缄已经落盘了，唤醒失败不该冒泡成用户那边的红字。
+    """
+    try:
+        chat_id = review.get("chat_id")
+        if not chat_id:
+            return
+        db.message_add(chat_id, "system", sigillo.build_wake_note(review))
+        reply = db.message_add(chat_id, "assistant", "")
+        _emit(chat_id, {"type": "system", "subtype": "sigillo_sealed",
+                        "message_id": reply["id"], "review_id": review.get("id")})
+        _running_tasks[chat_id] = asyncio.create_task(_run_ai_reply(chat_id, reply["id"]))
+    except Exception as exc:
+        db.setting_set("sigillo_last_error", str(exc)[:500])
+
+
 # ---------------------------------------------------------------- 聊天：发送 / 停止 / 长轮询
 
 CURRENT_CHAT_KEY = "current_chat_id"
@@ -4215,6 +4421,11 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     db.memory_card_usage_record(chat_id, msg_id, memory_query, selected_memory_cards)
     if selected_memory_cards:
         memory_card_message = [{"role": "system", "content": _memory_card_prompt(selected_memory_cards)}]
+    # sigillo：最近几单压成几行注回上下文。turn_tail 永不抛异常，拿不到就是空串。
+    sigillo_message = []
+    sigillo_tail = sigillo.turn_tail(chat_id, db.sigillo_enabled(chat_id))
+    if sigillo_tail:
+        sigillo_message = [{"role": "system", "content": sigillo_tail}]
     private_message = []
     unseen_whispers = db.whisper_unseen(5, mark_seen=True)
     if unseen_whispers:
@@ -4267,7 +4478,9 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         }]
     history_messages = _chat_history_messages_from_rows(history)
     stable_messages = instructions + format_preference + memory_message
-    transient_messages = private_message + memory_card_message + device_message + focus_message
+    transient_messages = (
+        private_message + memory_card_message + sigillo_message + device_message + focus_message
+    )
     messages = None
     if cache_friendly:
         if proactive_watch:
@@ -4280,7 +4493,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         cache_friendly = False
         messages = (
             device_message + focus_message + instructions + format_preference + private_message
-            + memory_message + memory_card_message + history_messages
+            + memory_message + memory_card_message + sigillo_message + history_messages
         )
     # 观影页的画面只在本次模型请求中出现，不把截帧或隐形提示写进聊天记录。
     # 这样本地视频不会离开浏览器，历史记录也仍然是用户真正说过的话。
@@ -4552,6 +4765,9 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                         is_error = False
                     elif server == "builtin:home":
                         result = home_tool(name, arguments)
+                        is_error = False
+                    elif server == "builtin:sigillo":
+                        result = sigillo_tool(chat_id, name, arguments)
                         is_error = False
                     elif not server:
                         raise ValueError("模型请求了未启用的 MCP 工具")

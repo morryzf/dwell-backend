@@ -456,6 +456,28 @@ CREATE TABLE IF NOT EXISTS provider_usage_events (
 );
 CREATE INDEX IF NOT EXISTS ix_provider_usage_scope
 ON provider_usage_events(provider_id, key_hash, made ASC);
+
+-- sigillo 回执单。一场亲密结束后 Cloudy 开单、Morry 逐条打星封缄，
+-- 之后 Cloudy 把主观复盘钉回单上。星数是素材不是指令。
+CREATE TABLE IF NOT EXISTS sigillo_reviews (
+    id            TEXT PRIMARY KEY,
+    chat_id       TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    created_at    INTEGER NOT NULL,
+    submitted_at  INTEGER,
+    context       TEXT NOT NULL DEFAULT '',
+    env_note      TEXT NOT NULL DEFAULT '',
+    sealed_note   TEXT NOT NULL DEFAULT '',
+    fixed_json    TEXT NOT NULL DEFAULT '{}',
+    items_json    TEXT NOT NULL DEFAULT '[]',
+    note          TEXT NOT NULL DEFAULT '',
+    filled_by     TEXT NOT NULL DEFAULT 'human',
+    agent_note    TEXT NOT NULL DEFAULT '',
+    agent_note_at INTEGER,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_sigillo_chat
+ON sigillo_reviews(chat_id, status, submitted_at DESC);
 """
 
 
@@ -1990,6 +2012,15 @@ def memory_card_delete_permanently(chat_id: str, card_id: str) -> bool:
             (card_id, chat_id),
         )
     return cur.rowcount > 0
+
+
+def sigillo_enabled(chat_id: str) -> bool:
+    """sigillo 回执单默认关着——只有明确打开的聊天才有这三把工具。"""
+    return setting_get(f"sigillo_enabled:{chat_id}", "0") == "1"
+
+
+def sigillo_set(chat_id: str, enabled: bool) -> None:
+    setting_set(f"sigillo_enabled:{chat_id}", "1" if enabled else "0")
 
 
 def memory_card_injection_enabled(chat_id: str) -> bool:
