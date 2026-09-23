@@ -25,7 +25,7 @@ import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from . import auth, db, provider_secrets, push_service, study
+from . import auth, db, provider_secrets, push_service, sigillo, study
 from app.pet_assets import ensure_pet_assets
 from app.llm_client import prompt_cache_enabled, stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
@@ -4011,6 +4011,61 @@ async def messages_regenerate(message_id: str):
     task = asyncio.create_task(_run_ai_reply(chat_id, anchor["id"], request_kind="regenerate"))
     _running_tasks[chat_id] = task
     return {"ok": True, "id": anchor["id"], "replaced_ids": reply_ids}
+
+# ---------------------------------------------------------------- sigillo 回执单
+
+@app.get("/api/sigillo/{review_id}", dependencies=authed)
+async def sigillo_get(review_id: str):
+    review = sigillo.get_review(review_id)
+    if not review:
+        raise HTTPException(404, "not found")
+    return {"ok": True, "review": review}
+
+
+@app.post("/api/sigillo/{review_id}/submit", dependencies=authed)
+async def sigillo_submit(review_id: str, payload: dict = Body(...)):
+    """封缄。成功后唤醒 Cloudy 看回执，让他在余温还在的那一轮写主观复盘。"""
+    try:
+        review = sigillo.submit_review(review_id, payload)
+    except sigillo.SigilloError as exc:
+        if exc.code == "already_submitted":
+            raise HTTPException(409, "already submitted") from exc
+        if exc.code == "not_found":
+            raise HTTPException(404, "not found") from exc
+        raise HTTPException(400, exc.message) from exc
+    # 唤醒不 await：提交的响应已经发出去了，唤醒慢/挂都不该让人干等。
+    asyncio.create_task(_sigillo_wake(review))
+    return {"ok": True, "review": review}
+
+
+@app.post("/api/sigillo/{review_id}/note", dependencies=authed)
+async def sigillo_note(review_id: str, payload: dict = Body(...)):
+    try:
+        review = sigillo.set_agent_note(review_id, str(payload.get("note") or ""))
+    except sigillo.SigilloError as exc:
+        if exc.code == "not_found":
+            raise HTTPException(404, "not found") from exc
+        raise HTTPException(400, exc.message) from exc
+    return {"ok": True, "review": review}
+
+
+async def _sigillo_wake(review: dict):
+    """封缄即唤醒：把回执当成一条系统消息推进那条会话，跑完一轮。
+
+    全程不外抛：封缄已经落盘了，唤醒失败不该冒泡成用户那边的红字。
+    """
+    try:
+        chat_id = review.get("chat_id")
+        if not chat_id:
+            return
+        db.message_add(chat_id, "system", sigillo.build_wake_note(review))
+        reply = db.message_add(chat_id, "assistant", "")
+        _emit(chat_id, {"type": "system", "subtype": "sigillo_sealed",
+                        "message_id": reply["id"], "review_id": review.get("id")})
+        _running_tasks[chat_id] = asyncio.create_task(_run_ai_reply(chat_id, reply["id"]))
+    except Exception as exc:
+        db.setting_set("sigillo_last_error", str(exc)[:500])
+
 
 # ---------------------------------------------------------------- 聊天：发送 / 停止 / 长轮询
 
