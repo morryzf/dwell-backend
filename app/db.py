@@ -1981,10 +1981,18 @@ def memory_card_set_embedding(card_id: str, embedding: list[float]) -> None:
 
 
 def memory_card_embeddings(chat_id: str) -> list[dict]:
+    """给检索和注入用的卡片。
+
+    happened = 这件事发生的时间，取自来源消息，而不是建卡时间：补建旧分段的卡
+    made 是今天、事情却是几周前的，拿 made 当日期会把模型带偏。来源消息找不到
+    时（手工加的卡）退回 made。
+    """
     with conn() as cx:
         rows = cx.execute(
-            "SELECT id,content,embedding_json,importance,retention,valid_until,status,updated "
-            "FROM memory_cards WHERE chat_id=? AND status<>'archived'",
+            "SELECT c.id,c.content,c.embedding_json,c.memory_type,c.topics_json,"
+            "c.importance,c.retention,c.valid_until,c.status,c.made,c.updated,"
+            "(SELECT m.made FROM messages m WHERE m.rowid=c.source_start_rowid) AS source_made "
+            "FROM memory_cards c WHERE c.chat_id=? AND c.status<>'archived'",
             (chat_id,),
         ).fetchall()
     result = []
@@ -1995,6 +2003,12 @@ def memory_card_embeddings(chat_id: str) -> list[dict]:
             d["embedding"] = json.loads(raw) if raw else None
         except (TypeError, json.JSONDecodeError):
             d["embedding"] = None
+        try:
+            topics = json.loads(d.pop("topics_json", "[]") or "[]")
+        except (TypeError, json.JSONDecodeError):
+            topics = []
+        d["topics"] = [str(t) for t in topics if str(t).strip()]
+        d["happened"] = int(d.pop("source_made", None) or d.get("made") or 0)
         result.append(d)
     return result
 
