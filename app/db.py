@@ -2014,6 +2014,15 @@ def memory_card_delete_permanently(chat_id: str, card_id: str) -> bool:
     return cur.rowcount > 0
 
 
+def sigillo_enabled(chat_id: str) -> bool:
+    """sigillo 回执单默认关着——只有明确打开的聊天才有这三把工具。"""
+    return setting_get(f"sigillo_enabled:{chat_id}", "0") == "1"
+
+
+def sigillo_set(chat_id: str, enabled: bool) -> None:
+    setting_set(f"sigillo_enabled:{chat_id}", "1" if enabled else "0")
+
+
 def memory_card_injection_enabled(chat_id: str) -> bool:
     return setting_get(f"memory_cards_enabled:{chat_id}", "1") != "0"
 
