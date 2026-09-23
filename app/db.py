@@ -1845,8 +1845,56 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
     return inserted
 
 
+def memory_card_stage_retags(chat_id: str, proposals: list[dict]) -> int:
+    """为已有卡片登记「只改主题」的待确认建议。
+
+    proposals 里每项是 {card_id, topics}。同一张卡已经有待确认建议时跳过，
+    免得同一张卡排出两条互相打架的建议。
+    """
+    now = int(time.time())
+    inserted = 0
+    with conn() as cx:
+        pending = {
+            str(row["target_card_id"] or "")
+            for row in cx.execute(
+                "SELECT target_card_id FROM memory_card_drafts WHERE chat_id=? AND action='update'",
+                (chat_id,),
+            ).fetchall()
+        }
+        for proposal in proposals:
+            card_id = str(proposal.get("card_id") or "")
+            if not card_id or card_id in pending:
+                continue
+            card = cx.execute(
+                "SELECT * FROM memory_cards WHERE id=? AND chat_id=? AND status='active'",
+                (card_id, chat_id),
+            ).fetchone()
+            if not card:
+                continue
+            topics = [str(t) for t in (proposal.get("topics") or []) if str(t).strip()]
+            if not topics:
+                continue
+            cx.execute(
+                """INSERT INTO memory_card_drafts
+                   (id,chat_id,action,target_card_id,content,memory_type,topics_json,importance,
+                    retention,valid_until,surface_scope,source_segment_id,source_start_rowid,
+                    source_end_rowid,made)
+                   VALUES (?,?,'update',?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    new_id(), chat_id, card_id, card["content"], card["memory_type"],
+                    json.dumps(topics, ensure_ascii=False), card["importance"],
+                    card["retention"], card["valid_until"], card["surface_scope"],
+                    card["source_segment_id"], card["source_start_rowid"],
+                    card["source_end_rowid"], now,
+                ),
+            )
+            pending.add(card_id)
+            inserted += 1
+    return inserted
+
+
 def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
-    """采用一条经过用户确认或编辑的建议。第一阶段只生成 create 建议。"""
+    """采用一条经过用户确认或编辑的建议。create 新建一张卡，update 改写已有的那张。"""
     now = int(time.time())
     with conn() as cx:
         draft = cx.execute(
@@ -1854,8 +1902,24 @@ def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
         ).fetchone()
         if not draft:
             raise ValueError("没有找到这条待确认记忆")
-        if draft["action"] != "create":
+        if draft["action"] not in ("create", "update"):
             raise ValueError("暂不支持这种记忆变更")
+        if draft["action"] == "update":
+            # target_card_id 上挂着 ON DELETE CASCADE：卡片没了，这条建议也早没了，
+            # 所以走到这里 target 必然还在。status 不碰——重新分类不该顺手取消归档。
+            target_id = str(draft["target_card_id"] or "")
+            cx.execute(
+                """UPDATE memory_cards SET content=?,memory_type=?,topics_json=?,importance=?,
+                   retention=?,valid_until=?,updated=? WHERE id=? AND chat_id=?""",
+                (
+                    str(chosen["content"]).strip()[:1200], str(chosen["memory_type"])[:40],
+                    json.dumps(chosen.get("topics") or [], ensure_ascii=False),
+                    str(chosen["importance"])[:20], str(chosen["retention"])[:20],
+                    chosen.get("valid_until") or None, now, target_id, chat_id,
+                ),
+            )
+            cx.execute("DELETE FROM memory_card_drafts WHERE id=?", (draft_id,))
+            return memory_card_get(chat_id, target_id)
         row = {
             "id": new_id(), "chat_id": chat_id,
             "content": str(chosen["content"]).strip()[:1200],
