@@ -39,8 +39,8 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn('"voices": []', self.source)
         self.assertIn('"active_voice_id": ""', self.source)
         self.assertIn('"provider_name"', self.source)
-        self.assertIn("已保存音色", self.ui_source)
-        self.assertIn("同步可选模型和音色", self.ui_source)
+        self.assertIn("我的音色", self.ui_source)
+        self.assertIn("同步模型与音色", self.ui_source)
         self.assertIn("openTtsPicker('model'", self.ui_source)
         self.assertIn("openTtsPicker('voice'", self.ui_source)
 
@@ -51,7 +51,7 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn('id="ttsPlayer"', self.ui_source)
         self.assertIn("const TTS_RATES = [0.98, 1, 1.02]", self.ui_source)
         self.assertIn("ttsPlayerSeek.oninput", self.ui_source)
-        self.assertIn("清空缓存", self.ui_source)
+        self.assertIn('id="ttsCacheClear"', self.ui_source)
 
     def test_tts_full_turn_metadata_and_legacy_fallback(self):
         ast.parse(self.db_source)

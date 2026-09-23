@@ -8,11 +8,9 @@ def test_message_style_mode_is_applied_explicitly():
     assert "applyMessageStyleMode(effectiveMessageStyleMode());" in INDEX
 
 
-def test_mode_tabs_switch_live_interface_before_editing():
-    handler = INDEX.split("body.querySelectorAll('[data-style-tab]')", 1)[1].split("});", 1)[0]
-    assert "wearTheme(messageStyleTab);" in handler
-    assert "applyMessageStyleMode(messageStyleTab);" in handler
-
-
-def test_message_controls_update_live_chat_profile():
-    assert "writeMessageRoleStyle(preview.style, messageStyleRole, current);\n      applyMessageStyleMode(messageStyleTab); saveMessageStyles();" in INDEX
+# 原本还有 test_mode_tabs_switch_live_interface_before_editing 和
+# test_message_controls_update_live_chat_profile，断言明暗标签会把整个 app 主题
+# 一起切过去（#140 的行为）。第二天 #142「让玻璃明暗标签只切换预览」把这个行为
+# 改掉了，并在 test_message_style_preview_mode_static.py 里写了断言相反行为的
+# 新测试——但忘了删这两个，于是两份测试互相打架、这两个一直红着。
+# 当前行为由那份新测试守着，这两个已被取代。
