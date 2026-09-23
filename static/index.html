@@ -3302,6 +3302,133 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .glass-effect-label { margin-top: 16px; }
 </style>
 <style>
+  /* sigillo 回执卡。四态：封面 → 表单 → 封缄面 → 只读回执。
+     移植自 29-Cu/sigillo（CC BY 4.0），配色换成 Dwell 的玻璃语言。 */
+  /* 空心星单独给一个色：暗色下 --line(#3d3d3a) 和卡片底(#30302e) 差太近，
+     五颗星糊成一片看不出打了几颗。 */
+  .sg-card { --sg-star-off: var(--line); display: block; margin: 10px 0; max-width: 340px; font-family: var(--serif); color: var(--text); }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) .sg-card { --sg-star-off: #5b5854; }
+  }
+  html[data-theme="dark"] .sg-card { --sg-star-off: #5b5854; }
+  .sg-card--loading { min-height: 1px; }
+  .sg-card--dead { padding: 8px 2px; font-size: 13px; color: var(--dim); }
+
+  /* 收纳面（封面 / 封缄面） */
+  .sg-face {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    width: 100%; padding: 18px 16px 16px; font: inherit; font-family: var(--serif);
+    text-align: center; color: inherit; background: var(--card);
+    border: 1px solid var(--line); border-radius: 14px; cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.04);
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color 160ms ease, transform 150ms cubic-bezier(.23,1,.32,1);
+  }
+  .sg-face:hover { border-color: var(--accent); }
+  .sg-face:active { transform: scale(.985); }
+  .sg-face__title { font-size: 10px; letter-spacing: .34em; text-indent: .34em; color: var(--accent); }
+  .sg-face__note { font-size: 15px; font-weight: 600; line-height: 1.5; word-break: break-word; }
+  .sg-face__hint { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim); }
+  .sg-face__sep { font-style: normal; color: var(--accent); }
+  .sg-face--sealed { border-style: double; border-width: 3px; }
+
+  /* 信笺 */
+  .sg-sheet {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.04);
+  }
+  .sg-scroller {
+    max-height: 520px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+  }
+  .sg-scroller::-webkit-scrollbar { width: 6px; }
+  .sg-scroller::-webkit-scrollbar-track { background: transparent; }
+  .sg-scroller::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
+  .sg-inner { padding: 14px 14px 12px; }
+  .sg-head { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .sg-head__cap { font-size: 11px; font-weight: 600; letter-spacing: .3em; text-indent: .3em; color: var(--accent); }
+
+  .sg-orn { display: flex; align-items: center; gap: 5px; width: 100%; font-size: 9px; color: var(--accent); }
+  .sg-orn__line { flex: 1; height: 1px; background: var(--line); }
+  .sg-orn--bottom { margin: 12px 0 8px; }
+
+  .sg-date { margin-top: 8px; font-size: 11px; text-align: center; letter-spacing: .06em; color: var(--dim); }
+  .sg-ctx { margin-top: 6px; font-size: 12px; line-height: 1.6; text-align: center; color: var(--dim); }
+
+  .sg-dims { margin-top: 10px; }
+  .sg-dim { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .sg-dim__k { font-size: 12px; letter-spacing: .1em; }
+  .sg-dim__cn { display: block; margin-top: 1px; font-style: normal; font-size: 10px; letter-spacing: .14em; color: var(--dim); }
+  .sg-hr { height: 1px; margin: 8px 2px 4px; background: var(--line); }
+
+  .sg-item { padding: 6px 0; }
+  .sg-item + .sg-item { border-top: 1px dashed var(--line); }
+  .sg-q { display: flex; gap: 6px; align-items: baseline; }
+  .sg-q__mark { font-size: 9px; color: var(--accent); }
+  .sg-q__text { margin: 0; font-size: 13px; line-height: 1.65; word-break: break-word; }
+  .sg-item .sg-stars { margin-left: -4px; }
+
+  .sg-box { margin-top: 4px; }
+  .sg-box__ta {
+    display: block; box-sizing: border-box; width: 100%; padding: 6px 8px;
+    font: inherit; font-family: var(--serif); font-size: 12px; line-height: 1.6;
+    color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; resize: vertical;
+  }
+  .sg-box__ta:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+  .sg-roline {
+    margin: 4px 0 2px 14px; padding-left: 8px; font-size: 12px; line-height: 1.6;
+    color: var(--dim); border-left: 1px solid var(--accent); word-break: break-word;
+  }
+  .sg-suggest { margin-top: 10px; }
+
+  /* 星：clip-path 切的五角星，零图片，跟着主题变色 */
+  .sg-stars { display: flex; align-items: center; }
+  .sg-starcell {
+    width: 34px; height: 40px; display: flex; align-items: center; justify-content: center;
+    padding: 0; background: none; border: 0; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .sg-starcell:focus-visible { outline: 1px solid var(--accent); outline-offset: -8px; border-radius: 10px; }
+  .sg-starcell:disabled { cursor: default; }
+  .sg-star {
+    position: relative; width: 17px; height: 16.2px; background: var(--sg-star-off);
+    clip-path: polygon(50% 0%, 61.8% 38.2%, 100% 38.2%, 69.1% 61.8%, 80.9% 100%, 50% 76.4%, 19.1% 100%, 30.9% 61.8%, 0% 38.2%, 38.2% 38.2%);
+    transition: background .2s ease;
+  }
+  .sg-star::after {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 50%;
+    background: var(--accent); opacity: 0; transition: opacity .2s ease;
+  }
+  .sg-starcell.is-on .sg-star { background: var(--accent); }
+  .sg-starcell.is-half .sg-star::after { opacity: 1; }
+  .sg-starcell--sm { width: 28px; height: 32px; }
+  .sg-starcell--sm .sg-star { width: 14px; height: 13.3px; }
+
+  .sg-footbar { display: flex; flex-direction: column; align-items: center; gap: 6px; padding-bottom: 4px; }
+  .sg-sealbtn, .sg-stamp {
+    display: inline-flex; align-items: center; gap: 8px; padding: 8px 18px;
+    font: inherit; font-family: var(--serif); font-size: 13px; letter-spacing: .08em;
+    color: var(--accent); background: transparent; border: 1px solid var(--accent);
+    border-radius: 999px; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: transform 150ms cubic-bezier(.23,1,.32,1), background-color 160ms ease, color 160ms ease;
+  }
+  .sg-sealbtn:disabled { opacity: .45; cursor: default; }
+  .sg-sealbtn:hover:not(:disabled), .sg-stamp:hover { color: var(--card); background: var(--accent); }
+  .sg-sealbtn:active:not(:disabled), .sg-stamp:active { transform: scale(.97); }
+  .sg-sealbtn:focus-visible, .sg-stamp:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+  .sg-wax { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .sg-stamp { display: flex; margin: 6px auto 0; }
+  .sg-footnote { font-size: 11px; color: var(--dim); }
+
+  .sg-fadein { animation: sg-fadein .22s ease both; }
+  @keyframes sg-fadein { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .sg-fadein { animation: none; }
+    .sg-star, .sg-star::after, .sg-face, .sg-sealbtn, .sg-stamp { transition: none; }
+  }
+</style>
+<style>
   /* Compact process summary + provider-reported usage (PR token-process-summary). */
   .process-band {
     display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
@@ -4961,6 +5088,9 @@ const STREAM_FILE_TAIL = /(?:https?:\/\/[^\s"'<>]*)?\/?a(?:p(?:i(?:\/(?:f(?:i(?:
    结尾那个还没写完的链接一律藏住，定稿再变卡片。 */
 const STREAM_SONG_TAIL = /https?:\/\/(?:[a-z0-9.]*music[a-z0-9.]*|[a-z]{1,6})(?:\/[^\s]*)?$/i;
 
+/* 还没写完的回执卡标记：`[[sigillo:sg_12` 这种半截货流式时藏住，定稿再变卡片。 */
+const STREAM_SIG_TAIL = /\[(?:\[(?:s(?:i(?:g(?:i(?:l(?:l(?:o(?::(?:s(?:g(?:_[A-Za-z0-9]*)?)?)?)?)?)?)?)?)?)?)?)?$/;
+
 /* 流式重绘：攒着原文，每帧重画一次（rAF 合并，别一个 token 排一次版） */
 function paintStream(el) {
   if (el._final || el._painting) return;
@@ -4972,8 +5102,11 @@ function paintStream(el) {
     if (el._final || !el.isConnected) return;
     el.textContent = '';
     // 流式时也压着孤尾：真有下文的话，下一帧就补齐了，只差一帧；
+    // 回执卡的标记流式时整条藏住（写全了的也藏）——定稿那一下才变成卡，
+    // 不然 `[[sigillo:sg_12` 会当场以原文露出来，然后跳成一张卡。
     const t = (el._raw || '').replace(ORPHAN_TAIL, '')
-      .replace(STREAM_FILE_TAIL, '').replace(STREAM_SONG_TAIL, '');
+      .replace(STREAM_FILE_TAIL, '').replace(STREAM_SONG_TAIL, '')
+      .replace(SIG_RE, '').replace(STREAM_SIG_TAIL, '');
     appendWithImages(el, t, true);
     const c = document.createElement('span');
     c.className = 'caret';
@@ -5159,10 +5292,351 @@ function buildCodeBlock(lang, code, isFull) {
   return box;
 }
 
+/* ---------- sigillo 回执卡 ----------
+   消息正文里独占一行的 [[sigillo:sg_xxxx]] 渲染成一张嵌在气泡里的卡，四态：
+   封面（未拆）→ 表单（逐条打星）→ 封缄面 → 只读回执。
+   状态永不本地缓存：每次渲染都以 GET 结果为准，仪式每次重新开始。
+   拿不到（404/网络挂了）一律静音降级成一行灰字——消息流里不该因为一张卡炸红字。 */
+const SIG_RE = /\[\[sigillo:(sg_[A-Za-z0-9]+)\]\]/g;
+const SG_SPARK = '✦';
+const SG_FIXED = [
+  { key: 'foreplay', en: 'Foreplay', cn: '前戏' },
+  { key: 'process', en: 'Sex', cn: '过程' },
+  { key: 'aftercare', en: 'Aftercare', cn: '事后照顾' },
+];
+
+function sgShell(id) {
+  const node = document.createElement('div');
+  node.className = 'sg-card sg-card--loading';
+  node.dataset.sigilloId = id;
+  // 卡内的按下不冒泡：气泡上挂了长按手势，按住星星犹豫一下不该触发它。
+  node.addEventListener('pointerdown', (e) => e.stopPropagation());
+  sgLoad(node, id);
+  return node;
+}
+
+async function sgLoad(node, id) {
+  let review = null;
+  try {
+    const r = await fetch('api/sigillo/' + encodeURIComponent(id), { headers: { Accept: 'application/json' } });
+    if (!r.ok) throw 0;
+    const j = await r.json();
+    if (!j || !j.ok || !j.review) throw 0;
+    review = j.review;
+  } catch (e) {
+    node.classList.remove('sg-card--loading');
+    node.classList.add('sg-card--dead');
+    node.textContent = '回执单已失效';
+    return;
+  }
+  sgRender(node, review);
+}
+
+/* 展开与否记在 dataset 上——innerHTML 清空不动 dataset，所以提交失败重画时不会缩回封面；
+   整页刷新后 dataset 才消失，回到封面态/封缄面。 */
+function sgRender(node, review, fade) {
+  node.classList.remove('sg-card--loading', 'sg-card--dead');
+  node.textContent = '';
+  const r = review || {};
+  const done = r.status === 'submitted';
+  // 反向回执（Cloudy 替对方填好的）：收纳形态是未拆封面，拆开直接是只读回执。
+  const agentFilled = r.filled_by === 'agent';
+  if (done && node.dataset.sigilloOpen) sgSheet(node, r, true, fade);
+  else if (done && agentFilled) sgFace(node, r, true);
+  else if (done) sgSealed(node, r, fade);
+  else if (node.dataset.sigilloOpen) sgSheet(node, r, false, fade);
+  else sgFace(node, r, false);
+}
+
+function sgEl(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+function sgDeco(cls, text, tag) {
+  const n = sgEl(tag || 'div', cls, text);
+  n.setAttribute('aria-hidden', 'true');
+  return n;
+}
+function sgOrn(extraCls) {
+  const n = sgDeco('sg-orn' + (extraCls ? ' ' + extraCls : ''));
+  n.append(SG_SPARK, sgEl('i', 'sg-orn__line'), SG_SPARK, sgEl('i', 'sg-orn__line'), SG_SPARK);
+  return n;
+}
+
+function sgFaceEl(note, fallback, action, aria, extraCls) {
+  const face = sgEl('button', 'sg-face' + (extraCls ? ' ' + extraCls : ''));
+  face.type = 'button';
+  face.setAttribute('aria-label', aria);
+  face.appendChild(sgDeco('sg-face__title', 'SIGILLO', 'span'));
+  face.appendChild(sgEl('b', 'sg-face__note', String(note || '').trim() || fallback));
+  const hint = sgEl('div', 'sg-face__hint');
+  hint.appendChild(sgDeco('sg-face__sep', SG_SPARK, 'i'));
+  hint.appendChild(sgEl('span', 'sg-face__act', action));
+  face.appendChild(hint);
+  return face;
+}
+
+function sgFace(node, review, locked) {
+  const face = sgFaceEl(review.env_note, '请查收。', '轻点拆开', locked ? '拆开回执' : '拆开工单');
+  face.addEventListener('click', () => {
+    node.dataset.sigilloOpen = '1';
+    node.textContent = '';
+    sgSheet(node, review, !!locked, true);
+  });
+  node.appendChild(face);
+}
+
+function sgSealed(node, review, fade) {
+  const face = sgFaceEl(review.sealed_note, '已回执。', '已封存 · 轻点查看回执', '查看回执', 'sg-face--sealed');
+  if (fade) face.classList.add('sg-fadein');
+  face.addEventListener('click', () => {
+    node.dataset.sigilloOpen = '1';
+    sgRender(node, review, true);
+  });
+  node.appendChild(face);
+}
+
+/* 后端百分制 ↔ 屏上五星（1 星 = 20 分，半星 = 10 分） */
+function sgStateFrom(review) {
+  const items = Array.isArray(review.items) ? review.items : [];
+  const fixed = review.fixed && typeof review.fixed === 'object' ? review.fixed : {};
+  const fromScore = (v) => {
+    if (v == null) return 0;
+    const n = Math.round(Number(v) / 10) / 2;
+    return isFinite(n) ? Math.max(0, Math.min(5, n)) : 0;
+  };
+  const ofItem = (it) => {
+    const s = Math.round(Number(it && it.star) * 2) / 2;
+    return (isFinite(s) && s >= 1 && s <= 5) ? s : 0;
+  };
+  return {
+    dims: SG_FIXED.map(f => fromScore(fixed[f.key])),
+    stars: items.map(ofItem),
+    notes: items.map(it => (it && typeof it.note === 'string') ? it.note : ''),
+    suggest: typeof review.note === 'string' ? review.note : '',
+  };
+}
+
+/* 一行五星，半星步进。点左半 = 半星，右半 = 整星，再点当前值归零；键盘回车 = 整星。 */
+function sgStarRow(paints, repaint, locked, small, get, set, labelOf) {
+  const wrap = sgEl('div', 'sg-stars');
+  wrap.setAttribute('role', 'group');
+  const cells = [];
+  for (let v = 1; v <= 5; v++) {
+    const b = sgEl('button', 'sg-starcell' + (small ? ' sg-starcell--sm' : ''));
+    b.type = 'button';
+    b.setAttribute('aria-label', labelOf(v));
+    b.appendChild(sgEl('span', 'sg-star'));
+    if (locked) { b.disabled = true; b.setAttribute('aria-disabled', 'true'); }
+    else b.addEventListener('click', (e) => {
+      let want = v;
+      if (e.detail !== 0) {
+        const rect = b.getBoundingClientRect();
+        if (rect.width > 0 && (e.clientX - rect.left) < rect.width / 2) want = v - 0.5;
+      }
+      set(get() === want ? 0 : want);
+      repaint();
+    });
+    cells.push(b);
+    wrap.appendChild(b);
+  }
+  paints.push(() => {
+    const val = get();
+    cells.forEach((b, i) => {
+      b.classList.toggle('is-on', (i + 1) <= val);
+      b.classList.toggle('is-half', val === i + 0.5);
+    });
+  });
+  return wrap;
+}
+
+function sgQ(text) {
+  const q = sgEl('div', 'sg-q');
+  q.appendChild(sgDeco('sg-q__mark', SG_SPARK, 'span'));
+  q.appendChild(sgEl('p', 'sg-q__text', text));
+  return q;
+}
+function sgBox(value, onInput, label) {
+  const box = sgEl('div', 'sg-box');
+  const ta = document.createElement('textarea');
+  ta.className = 'sg-box__ta';
+  ta.rows = 2;
+  ta.setAttribute('aria-label', label);
+  ta.value = value || '';
+  ta.addEventListener('input', () => onInput(ta.value));
+  box.appendChild(ta);
+  return box;
+}
+function sgRoLine(value) {
+  const t = String(value || '').trim();
+  return t ? sgEl('div', 'sg-roline', t) : null;
+}
+function sgDateLine(ts) {
+  if (!ts) return '';
+  const d = new Date(Number(ts) * 1000);
+  if (isNaN(d.getTime())) return '';
+  const p = (n) => (n < 10 ? '0' : '') + n;
+  return d.getFullYear() + ' · ' + p(d.getMonth() + 1) + ' · ' + p(d.getDate())
+    + '　' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+/* 信笺本体。locked=true 即只读回执：星锁死、备注变引线、底部换封缄章。 */
+function sgSheet(node, review, locked, fade) {
+  const st = sgStateFrom(review);
+  const sheet = sgEl('div', 'sg-sheet' + (locked ? ' sg-sheet--ro' : ''));
+  if (fade) sheet.classList.add('sg-fadein');
+  const scroller = sgEl('div', 'sg-scroller');
+  const inner = sgEl('div', 'sg-inner');
+
+  const head = sgEl('div', 'sg-head');
+  head.appendChild(sgEl('b', 'sg-head__cap', 'FEEDBACK'));
+  head.appendChild(sgOrn());
+  inner.appendChild(head);
+  const dateLine = sgDateLine(review.created_at);
+  if (dateLine) inner.appendChild(sgEl('div', 'sg-date', dateLine));
+  if (review.context) inner.appendChild(sgEl('div', 'sg-ctx', String(review.context)));
+
+  const paints = [];
+  let syncGate = () => {};
+  const repaint = () => { paints.forEach(p => p()); syncGate(); };
+
+  const dims = sgEl('div', 'sg-dims');
+  SG_FIXED.forEach((f, i) => {
+    const row = sgEl('div', 'sg-dim');
+    const k = sgEl('div', 'sg-dim__k', f.en);
+    k.appendChild(sgEl('em', 'sg-dim__cn', f.cn));
+    row.appendChild(k);
+    row.appendChild(sgStarRow(paints, repaint, locked, false,
+      () => st.dims[i], (v) => { st.dims[i] = v; },
+      (v) => f.cn + ' 第 ' + v + ' 星，点左半为半星'));
+    dims.appendChild(row);
+  });
+  inner.appendChild(dims);
+  inner.appendChild(sgEl('div', 'sg-hr'));
+
+  const items = Array.isArray(review.items) ? review.items : [];
+  const list = sgEl('div', 'sg-items');
+  items.forEach((it, i) => {
+    const row = sgEl('div', 'sg-item');
+    row.appendChild(sgQ(String((it && it.label) || '')));
+    row.appendChild(sgStarRow(paints, repaint, locked, true,
+      () => st.stars[i], (v) => { st.stars[i] = v; },
+      (v) => '细节 ' + (i + 1) + ' 第 ' + v + ' 星，点左半为半星'));
+    if (locked) {
+      const line = sgRoLine(st.notes[i]);
+      if (line) row.appendChild(line);
+    } else {
+      row.appendChild(sgBox(st.notes[i], (v) => { st.notes[i] = v; }, '第 ' + (i + 1) + ' 条备注'));
+    }
+    list.appendChild(row);
+  });
+  inner.appendChild(list);
+
+  const suggestTitle = review.filled_by === 'agent' ? '他的评语' : '改进与建议';
+  const roSuggest = locked ? sgRoLine(st.suggest) : null;
+  if (!locked || roSuggest) {
+    const suggest = sgEl('div', 'sg-suggest');
+    suggest.appendChild(sgQ(suggestTitle));
+    suggest.appendChild(locked ? roSuggest : sgBox(st.suggest, (v) => { st.suggest = v; }, suggestTitle));
+    inner.appendChild(suggest);
+  }
+
+  if (locked) {
+    const stamp = sgEl('button', 'sg-stamp');
+    stamp.type = 'button';
+    stamp.setAttribute('aria-label', '收起回执');
+    stamp.appendChild(sgDeco('sg-wax', null, 'span'));
+    stamp.append('已封缄');
+    stamp.appendChild(sgDeco('sg-wax', null, 'span'));
+    stamp.addEventListener('click', () => {
+      delete node.dataset.sigilloOpen;
+      sgRender(node, review, true);
+    });
+    inner.appendChild(stamp);
+    inner.appendChild(sgOrn('sg-orn--bottom'));
+  } else {
+    inner.appendChild(sgOrn('sg-orn--bottom'));
+    const bar = sgEl('div', 'sg-footbar');
+    const btn = sgEl('button', 'sg-sealbtn');
+    btn.type = 'button';
+    btn.appendChild(sgDeco('sg-wax', null, 'span'));
+    btn.append('封 缄 回 执');
+    const foot = sgEl('div', 'sg-footnote', '');
+    bar.append(btn, foot);
+    inner.appendChild(bar);
+    // 解禁条件：总评全打星 且 全部细节全打星。备注/建议选填，不参与校验。
+    syncGate = () => {
+      const missD = st.dims.filter(v => !v).length;
+      const missI = st.stars.filter(v => !v).length;
+      btn.disabled = !!(missD || missI);
+      foot.textContent = missD ? ('总评还差 ' + missD + ' 项')
+        : missI ? ('细节还差 ' + missI + ' 条未打星')
+        : '封缄后不可再改';
+    };
+    btn.addEventListener('click', () => sgSubmit(node, st, btn, foot));
+  }
+
+  scroller.appendChild(inner);
+  sheet.appendChild(scroller);
+  repaint();
+  node.appendChild(sheet);
+}
+
+/* 提交：失败不回滚已填内容，只放开按钮让人再点一次；409 = 别处已交，以服务器为准。 */
+async function sgSubmit(node, st, btn, foot) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  foot.textContent = '封缄中…';
+  const fixed = {};
+  SG_FIXED.forEach((f, i) => { fixed[f.key] = Math.round(st.dims[i] * 20); });
+  const id = node.dataset.sigilloId;
+  try {
+    const r = await fetch('api/sigillo/' + encodeURIComponent(id) + '/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        fixed,
+        stars: st.stars.slice(),
+        notes: st.notes.map(v => String(v || '').trim()),
+        suggest: String(st.suggest || '').trim(),
+      }),
+    });
+    if (r.status === 409) { await sgLoad(node, id); return; }
+    if (!r.ok) throw 0;
+    const j = await r.json();
+    if (!j || !j.ok || !j.review) throw 0;
+    delete node.dataset.sigilloOpen;   // 提交完先收回封缄面，想看再点开
+    sgRender(node, j.review, true);
+  } catch (e) {
+    btn.disabled = false;
+    foot.textContent = '没提交上，再试一次';
+  }
+}
+
 function renderRich(el) {
   if (!el || el.dataset.rich) return;
   // 流式那条路把标记边走边吃掉了，textContent 里已经没有原文——认 _raw
   const text = el._raw != null ? el._raw : el.textContent;
+  SIG_RE.lastIndex = 0;
+  if (SIG_RE.test(text)) {
+    /* 有回执卡标记：切成「文本 / 卡 / 文本 …」，文本那几段还走原来那条路。
+       卡是流式定稿后才画的——半截 id 会 404 成一行灰字。 */
+    el.textContent = '';
+    SIG_RE.lastIndex = 0;
+    let last = 0, m;
+    while ((m = SIG_RE.exec(text))) {
+      const before = text.slice(last, m.index).replace(/\n+$/, '');
+      if (before) renderPlainInto(el, before);
+      el.appendChild(sgShell(m[1]));
+      last = m.index + m[0].length;
+    }
+    const after = text.slice(last).replace(/^\n+/, '');
+    if (after) renderPlainInto(el, after);
+    el.dataset.rich = '1';
+    return;
+  }
   FENCE_RE.lastIndex = 0;
   if (FENCE_RE.test(text)) {
     /* 有代码块：切成「文本 / 代码块 / 文本 …」，文本那几段还走原来那条路 */
