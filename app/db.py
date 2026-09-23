@@ -551,6 +551,8 @@ def init_db():
             cx.execute("ALTER TABLE messages ADD COLUMN thinking TEXT NOT NULL DEFAULT ''")
         if "usage_json" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN usage_json TEXT NOT NULL DEFAULT '{}'")
+        if "voice" not in message_cols:
+            cx.execute("ALTER TABLE messages ADD COLUMN voice INTEGER NOT NULL DEFAULT 0")
         usage_cols = {
             r["name"] for r in cx.execute("PRAGMA table_info(provider_usage_events)").fetchall()
         }
@@ -1260,6 +1262,27 @@ def message_add(chat_id: str, role: str, content: str, made: int | None = None,
             row,
         )
     return row
+
+
+def message_voice_set(message_id: str, voice: bool) -> None:
+    """标记一条回复是语音消息。标在消息上而不是看聊天的开关：开关关掉以后，
+    历史里的语音气泡仍然是语音气泡；重新生成也沿用同一条消息，标记跟着走。"""
+    with conn() as cx:
+        cx.execute("UPDATE messages SET voice=? WHERE id=?", (1 if voice else 0, message_id))
+
+
+def message_is_voice(message_id: str) -> bool:
+    with conn() as cx:
+        row = cx.execute("SELECT voice FROM messages WHERE id=?", (message_id,)).fetchone()
+    return bool(row and row["voice"])
+
+
+def chat_voice_mode(chat_id: str) -> bool:
+    return setting_get(f"voice_mode:{chat_id}", "0") == "1"
+
+
+def chat_voice_mode_set(chat_id: str, enabled: bool) -> None:
+    setting_set(f"voice_mode:{chat_id}", "1" if enabled else "0")
 
 
 def message_attachment_add(message_id: str, data_url: str) -> dict:
@@ -2307,6 +2330,7 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
             "at": r["made"],
             "origin": r["origin"],
             "display_split": bool(r["display_split"]),
+            "voice": bool(r.get("voice")) if role == "assistant" else False,
             "usage": usage,
             "tools": tools_by_message.get(r["id"], []) if role == "assistant" else [],
             "images": images_by_message.get(r["id"], []),

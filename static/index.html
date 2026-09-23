@@ -492,13 +492,13 @@ html[data-theme="dark"] .composer {
   }
   .pill:active { opacity: .7; }
   .pill .ic { width: 14px; height: 14px; }
-  #plusBtn, #instructionsBtn, #mcpChatBtn, #reasoningBtn { width: 34px; height: 34px; border-radius: 50%; background: var(--panel); flex: none; display: flex; align-items: center; justify-content: center; }
-  #plusBtn .ic, #instructionsBtn .ic, #mcpChatBtn .ic, #reasoningBtn .ic { width: 15px; height: 15px; }
-  #instructionsBtn.on, #mcpChatBtn.on, #reasoningBtn.on { color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent); }
+  #plusBtn, #instructionsBtn, #mcpChatBtn, #reasoningBtn, #voiceBtn { width: 34px; height: 34px; border-radius: 50%; background: var(--panel); flex: none; display: flex; align-items: center; justify-content: center; }
+  #plusBtn .ic, #instructionsBtn .ic, #mcpChatBtn .ic, #reasoningBtn .ic, #voiceBtn .ic { width: 15px; height: 15px; }
+  #instructionsBtn.on, #mcpChatBtn.on, #reasoningBtn.on, #voiceBtn.on { color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent); }
   #modelPill { min-width: 0; max-width: min(34vw, 150px); padding: 6px 11px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   @media (max-width: 390px) {
     .ctlrow { gap: 5px; }
-    #plusBtn, #instructionsBtn, #mcpChatBtn, #reasoningBtn { width: 32px; height: 32px; }
+    #plusBtn, #instructionsBtn, #mcpChatBtn, #reasoningBtn, #voiceBtn { width: 32px; height: 32px; }
     #modelPill { max-width: 29vw; padding-inline: 9px; }
   }
   .ctlrow .gap { flex: 1; }
@@ -2257,13 +2257,13 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   header .title h1 { letter-spacing: .045em; color: var(--text); }
   header .title h1::before { content: '✦  '; color: var(--accent); font-size: .72em; vertical-align: .14em; }
   header .title h1::after { content: '  ୨୧'; color: var(--accent); font-size: .88em; }
-  header .iconbtn, #plusBtn, #instructionsBtn, #mcpChatBtn, #reasoningBtn, .pill {
+  header .iconbtn, #plusBtn, #instructionsBtn, #mcpChatBtn, #reasoningBtn, #voiceBtn, .pill {
     border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
     background: color-mix(in srgb, var(--card) 84%, var(--accent-soft));
     box-shadow: 0 2px 8px rgba(100, 72, 84, .07);
     transition: transform 150ms var(--ease-out), background-color 150ms ease, border-color 150ms ease;
   }
-  header .iconbtn:active, #plusBtn:active, #instructionsBtn:active, #mcpChatBtn:active, #reasoningBtn:active, .pill:active, #send:active { transform: scale(.97); }
+  header .iconbtn:active, #plusBtn:active, #instructionsBtn:active, #mcpChatBtn:active, #reasoningBtn:active, #voiceBtn:active, .pill:active, #send:active { transform: scale(.97); }
 
   .glass, .composer, #nkPop, .nk-say, .board-toggle, .menuCard, .crow, .songcard, #drawer, .sheet {
     background: linear-gradient(180deg, color-mix(in srgb, var(--card) 96%, transparent), color-mix(in srgb, var(--card) 82%, var(--accent-soft))) !important;
@@ -2658,7 +2658,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   }
 
   /* Header controls and composer toggles share the same quiet glass language. */
-  header .iconbtn, #plusBtn, #instructionsBtn, #mcpChatBtn, #reasoningBtn {
+  header .iconbtn, #plusBtn, #instructionsBtn, #mcpChatBtn, #reasoningBtn, #voiceBtn {
     background: linear-gradient(145deg, rgba(255,255,255,.25), rgba(235,199,215,.12)) !important;
     border-color: rgba(158,112,133,.18) !important;
     -webkit-backdrop-filter: blur(18px) saturate(1.35);
@@ -2753,7 +2753,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   html[data-theme="dark"] #plusBtn,
   html[data-theme="dark"] #instructionsBtn,
   html[data-theme="dark"] #mcpChatBtn,
-  html[data-theme="dark"] #reasoningBtn {
+  html[data-theme="dark"] #reasoningBtn,
+  html[data-theme="dark"] #voiceBtn {
     background: linear-gradient(145deg, rgba(255,235,244,.12), rgba(205,145,171,.055)) !important;
     border-color: rgba(242,201,220,.12) !important;
     box-shadow: 0 7px 20px rgba(12,8,10,.14), inset 0 1px rgba(255,235,244,.08) !important;
@@ -2856,7 +2857,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   }
 
   @media (prefers-reduced-motion: reduce) {
-    header .iconbtn, #plusBtn, #instructionsBtn, #mcpChatBtn, #reasoningBtn, .pill, #send { transition: background-color 150ms ease, border-color 150ms ease; }
+    header .iconbtn, #plusBtn, #instructionsBtn, #mcpChatBtn, #reasoningBtn, #voiceBtn, .pill, #send { transition: background-color 150ms ease, border-color 150ms ease; }
   }
 
   /* The chat header actions are navigation, not floating cards. */
@@ -2996,6 +2997,117 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       border-radius: var(--msg-cloudy-radius, 18px) !important;
       box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 6px 20px rgba(72,54,64,.075) !important;
     }
+  }
+  /* ---------- 语音气泡 ----------
+     文字照常流进 .gu，只是默认收起来，上面叠一条语音条。语音条吃和 Cloudy 文字
+     气泡同一套 --msg-cloudy-* 变量：消息样式里怎么调，它就跟着怎么变。 */
+  #log .row.voice-row:not(.vt-open) > .gu { display: none !important; }
+  #log .vb {
+    --vb-ink: var(--msg-cloudy-text, #514a4f);
+    --vb-radius: var(--msg-cloudy-radius, 18px);
+    display: flex; align-items: center; gap: 10px;
+    width: fit-content; max-width: 85%; min-height: 50px; box-sizing: border-box;
+    padding: 7px 9px 7px 7px;
+    color: var(--vb-ink);
+    background: var(--msg-cloudy-bg, rgba(248,242,245,.46));
+    border: var(--msg-cloudy-border-width, 1px) solid var(--msg-cloudy-border, rgba(255,255,255,.42));
+    border-radius: var(--vb-radius);
+    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 6px 20px rgba(72,54,64,.075);
+    -webkit-tap-highlight-color: transparent;
+    transition: border-radius 220ms ease;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) #log .vb {
+      --vb-ink: var(--msg-cloudy-text, #f7edf2);
+      background: var(--msg-cloudy-bg, rgba(79,65,72,.62));
+      border-color: var(--msg-cloudy-border, rgba(242,201,220,.18));
+    }
+  }
+
+  /* 播放键：和发送键同一抹粉 */
+  .vb-play {
+    position: relative; flex: none; width: 36px; height: 36px; border-radius: 50%;
+    display: grid; place-items: center; padding: 0; border: 0; color: #fff; cursor: pointer;
+    background: linear-gradient(135deg, #deaabd, #c992a4);
+    box-shadow: 0 5px 12px rgba(181,111,136,.24), inset 0 1px 0 rgba(255,255,255,.28);
+    transition: transform 150ms cubic-bezier(.23,1,.32,1), box-shadow 200ms ease, background 200ms ease;
+  }
+  .vb-play:active { transform: scale(.93); }
+  .vb-play .ic { width: 15px; height: 15px; }
+  .vb-play .ic[data-i="mediaPlay"] { margin-left: 2px; }
+  .vb[data-state="playing"] .vb-play { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent), 0 5px 12px rgba(181,111,136,.24); }
+  .vb[data-state="error"] .vb-play { background: color-mix(in srgb, var(--vb-ink) 14%, transparent); color: var(--vb-ink); box-shadow: none; }
+
+  /* 还在说：三个点轮流亮 */
+  .vb-dots { display: none; gap: 3px; }
+  .vb-dots i { width: 4px; height: 4px; border-radius: 50%; background: #fff; opacity: .45; animation: vbDot 1.1s ease-in-out infinite; }
+  .vb-dots i:nth-child(2) { animation-delay: .15s; }
+  .vb-dots i:nth-child(3) { animation-delay: .3s; }
+  .vb[data-state="pending"] .vb-dots { display: flex; }
+  .vb[data-state="pending"] .vb-play .ic { display: none; }
+  @keyframes vbDot { 0%, 80%, 100% { opacity: .35; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+
+  /* 合成中：一圈细环 */
+  .vb[data-state="loading"] .vb-play .ic { display: none; }
+  .vb[data-state="loading"] .vb-play::after {
+    content: ""; width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.45); border-top-color: #fff;
+    animation: vbSpin .8s linear infinite;
+  }
+  @keyframes vbSpin { to { transform: rotate(360deg); } }
+
+  /* 声纹 */
+  .vb-wave { flex: none; height: 28px; display: flex; align-items: center; gap: 2.5px; }
+  .vb-wave i {
+    flex: none; width: 3px; height: calc(var(--h, .5) * 26px); min-height: 4px; border-radius: 2px;
+    background: color-mix(in srgb, var(--vb-ink) 34%, transparent);
+    transition: background 180ms ease;
+    transform-origin: center;
+  }
+  .vb-wave i.on { background: var(--accent); }
+  .vb[data-state="pending"] .vb-wave i { animation: vbBreathe 1.4s ease-in-out infinite; animation-delay: calc(var(--i, 0) * 45ms); }
+  @keyframes vbBreathe { 0%, 100% { transform: scaleY(.45); opacity: .55; } 50% { transform: scaleY(1); opacity: 1; } }
+  .vb[data-state="playing"] .vb-wave i.head { animation: vbPulse .5s ease-in-out infinite alternate; }
+  @keyframes vbPulse { from { transform: scaleY(.7); } to { transform: scaleY(1.15); } }
+
+  .vb-time {
+    flex: none; min-width: 30px; text-align: right;
+    font-size: 12px; font-variant-numeric: tabular-nums; letter-spacing: .02em;
+    color: color-mix(in srgb, var(--vb-ink) 62%, transparent);
+  }
+  .vb[data-state="error"] .vb-time { min-width: 0; font-size: 11.5px; }
+
+  /* 文字开关 */
+  .vb-text {
+    flex: none; display: inline-flex; align-items: center; gap: 3px;
+    height: 24px; padding: 0 8px 0 9px; border: 0; border-radius: 999px; cursor: pointer;
+    font: inherit; font-size: 11.5px; letter-spacing: .04em;
+    color: color-mix(in srgb, var(--vb-ink) 72%, transparent);
+    background: color-mix(in srgb, var(--vb-ink) 8%, transparent);
+    transition: background 180ms ease, color 180ms ease, transform 150ms cubic-bezier(.23,1,.32,1);
+  }
+  .vb-text:active { transform: scale(.95); }
+  .vb-text::after {
+    content: ""; width: 5px; height: 5px; margin-top: -3px;
+    border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+    transform: rotate(45deg); transition: transform 220ms cubic-bezier(.23,1,.32,1), margin 220ms ease;
+  }
+  #log .row.vt-open .vb-text { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  #log .row.vt-open .vb-text::after { transform: rotate(-135deg); margin-top: 3px; }
+
+  /* 展开：语音条和文字叠成一张两段式卡片 */
+  #log .row.voice-row.vt-open > .vb { border-bottom-left-radius: 8px; }
+  #log .row.voice-row.vt-open > .gu {
+    margin-top: 3px; border-top-left-radius: 8px !important;
+    animation: vbReveal 240ms cubic-bezier(.23,1,.32,1);
+  }
+  @keyframes vbReveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .vb, .vb-play, .vb-text, .vb-text::after, .vb-wave i { transition: none; }
+    .vb-dots i, .vb-wave i, #log .row.voice-row.vt-open > .gu, .vb[data-state="loading"] .vb-play::after { animation: none !important; }
   }
   #log .row:not(.me) > .toolline {
     width: 100%; padding: 7px 11px; box-sizing: border-box;
@@ -3762,6 +3874,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
 <button id="instructionsBtn" title="这间聊天的指令"><span class="ic" data-i="layers"></span></button>
 <button id="mcpChatBtn" title="这间聊天的工具"><span class="ic" data-i="tool"></span></button>
 <button id="reasoningBtn" title="thinking 与推理强度" aria-label="thinking 与推理强度" aria-pressed="true"><span class="ic" data-i="bulb"></span></button>
+<button id="voiceBtn" title="语音回复" aria-label="语音回复" aria-pressed="false"><span class="ic" data-i="wave"></span></button>
       <button class="pill" id="modelPill">…</button>
       <span class="gap"></span>
       <button id="send" title="发送"><span class="ic" data-i="arrowUp"></span></button>
@@ -4372,6 +4485,7 @@ const ICONS = {
   sliders: S('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
   chat: S('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'),
   pen: S('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>'),
+  wave: S('<path d="M4 10v4"/><path d="M8 7v10"/><path d="M12 4v16"/><path d="M16 8v8"/><path d="M20 11v2"/>'),
   volume: S('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/>'),
   mediaPrevious: S('<line x1="6" y1="5" x2="6" y2="19"/><path d="M18 6.5 9 12l9 5.5z" fill="currentColor" stroke="none"/>'),
   mediaPlay: S('<path d="M8 5.5 18.5 12 8 18.5z" fill="currentColor" stroke="none"/>'),
@@ -5944,6 +6058,7 @@ function renderSaid(msgs) {
         renderRich(el);
         if (index === segments.length - 1) appendMessageImages(el, m.images);
         attachMessageActions(el, m);
+        if (m.voice) voiceDecorate(el, m.id, 'ready');
         if (index === segments.length - 1) attachMessageUsage(el, m);
         guEl = null;                   // 每段各归各位，编辑时仍指向同一条原消息
       });
@@ -6142,6 +6257,7 @@ function handle(d) {
     }
     guEl = null; endThink(); closeGroup(); setBusy(true); petSet('thinking'); return;
   }
+  if (d.type === 'system' && d.subtype === 'voice_reply') { voiceNextId = d.message_id || ''; return; }
   if (d.type === 'tool_call' && d.tool) { addToolUse(d.tool); return; }
   if (d.type === 'tool_result') { markToolDone(d.tool_call_id, d.is_error, d.content); return; }
   if (d.type === 'assistant_split') {
@@ -6170,7 +6286,10 @@ function handle(d) {
     }
     if (delta.type === 'text_delta' && delta.text) {
       petSet('typing');
+      // 语音回复要自己单独一个泡，别和同一轮里前面已经说完的话挤在一起。
+      if (voiceNextId && guEl && (guEl._raw || '').trim()) { guEl.querySelector('.caret')?.remove(); guEl = null; }
       const el = ensureGu();
+      if (voiceNextId) { voiceDecorate(el, voiceNextId, 'pending'); el._voiceId = voiceNextId; voiceNextId = ''; }
       // 上一条已经定稿，现在又开口了——中间没干活，两条话共用这一个泡。
       // 把已经说完的那截钉成"基线"，等下这条的定稿只能接在它后面，不许把它吃掉。
       if (el._final) { el._base = el._raw || ''; el._final = false; }
@@ -6239,11 +6358,17 @@ function handle(d) {
 
   if (d.type === 'result') {
     if (!d.is_error) cacheGlowStart();
+    const voiceJustSaid = guEl && guEl._voiceId ? guEl._voiceId : '';
+    voiceNextId = '';
     guEl?.querySelector('.caret')?.remove();
     guEl = null; endThink(); closeGroup(); processBand = null;
     if (regeneratingMessageId) {
+      const regenerated = regeneratingMessageId;
       regeneratingMessageId = '';
-      loadSaid().then((upto) => { if (upto) cursor = Math.max(cursor, upto); }).catch(() => {});
+      loadSaid().then((upto) => {
+        if (upto) cursor = Math.max(cursor, upto);
+        if (!d.is_error) voiceSettle(regenerated);
+      }).catch(() => {});
       setBusy(false); petSet('happy', 4000); scroll();
       return;
     }
@@ -6276,6 +6401,7 @@ function handle(d) {
     if (d.is_error) note('（出错了：' + (d.result || '不知道为什么') + '）', 'err');
     scroll();
     reconcileAfterReply();
+    voiceSettle(d.is_error ? '' : voiceJustSaid);
     if (!d.is_error) maybeAutoReadLastReply();
     return;
   }
@@ -6289,6 +6415,7 @@ function handle(d) {
   if (d.type === 'system' && d.subtype === 'stopped') {
     guEl?.querySelector('.caret')?.remove();
     guEl = null; endThink(); closeGroup(); processBand = null;
+    voiceNextId = ''; voiceSettle('');   // 说到一半被叫停：有字的定稿成可播，没字的标失败
     setBusy(false); petSet('calm');
     note('（我停下了）');
     return;
@@ -7303,6 +7430,7 @@ async function loadTtsQueue() {
   return ttsState.queue;
 }
 function stopTtsPlayer(hide = true) {
+  if (typeof voiceResetActive === 'function') voiceResetActive();
   ttsState.playerRunId += 1;
   clearTimeout(ttsState.hideTimer); ttsState.hideTimer = null;
   if (ttsState.controller) { ttsState.controller.abort(); ttsState.controller = null; }
@@ -7436,7 +7564,7 @@ async function maybeAutoReadLastReply() {
     if (!cfg.auto_play) return;
     const r = await fetch('api/messages?limit=8', {cache:'no-store'}); const d = await r.json();
     const last = (d.msgs || []).filter(m => m.kind === 'gu' && m.origin === 'chat').pop();
-    if (last && last.id) await playTts(last.id);
+    if (last && last.id && !last.voice) await playTts(last.id);
   } catch (_) {}
 }
 
@@ -12180,6 +12308,237 @@ reasoningBtn.onclick = openReasoningSheet;
     syncReasoningButton();
   } catch { setModelPill(''); }
 })();
+
+/* ---------- 语音回复 ----------
+   开关按聊天存在服务器。开着时发出的消息，回复被标成语音：文字照常流进 .gu，
+   只是默认收起来，上面叠一条语音条。合成走现有的 TTS 接口（有缓存），播放共用
+   ttsState.audio——iOS 的解锁照样生效，全局也只会有一个声音在响。 */
+const voiceBtn = document.getElementById('voiceBtn');
+let voiceMode = false;
+let voiceNextId = '';     // voice_reply 事件先到、第一个字后到：先记下来，开口时再装扮气泡
+var voiceActive = null;   // 正在播的那条。用 var：stopTtsPlayer 可能在它声明之前就被调用
+const voiceOpenIds = new Set();   // 展开过文字的消息：聊天记录重画后别自己收回去
+function voiceIcon(name) { const el = icEl(name, 15); el.dataset.i = name; return el; }
+
+function syncVoiceButton() {
+  voiceBtn.classList.toggle('on', voiceMode);
+  voiceBtn.setAttribute('aria-pressed', String(voiceMode));
+  voiceBtn.title = voiceMode ? '语音回复已开启：我会用英文语音回你' : '语音回复';
+}
+async function loadVoiceMode() {
+  try {
+    const chat = await currentChatForMemory();
+    if (!chat) return;
+    const d = await (await fetch('api/chats/' + encodeURIComponent(chat.id) + '/voice-mode', {cache:'no-store'})).json();
+    voiceMode = !!d.enabled;
+    syncVoiceButton();
+  } catch (_) {}
+}
+voiceBtn.onclick = async () => {
+  const next = !voiceMode;
+  voiceMode = next; syncVoiceButton();   // 先亮，手感即时；失败再退回去
+  if (next) unlockTtsAudio();            // 这一下点击顺便给 iOS 解锁音频
+  try {
+    const chat = await currentChatForMemory();
+    if (!chat) throw new Error('还没有打开聊天');
+    const r = await fetch('api/chats/' + encodeURIComponent(chat.id) + '/voice-mode', {
+      method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled: next}),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
+    voiceMode = !!d.enabled; syncVoiceButton();
+  } catch (e) {
+    voiceMode = !next; syncVoiceButton();
+    note('（语音开关没切换：' + e.message + '）', 'err');
+  }
+};
+loadVoiceMode();
+
+/* 按消息 id 生成固定的声纹：同一条语音每次看都是同一个形状。两头收、中间高，像一句话的包络。 */
+function voiceShape(id, count) {
+  let h = 2166136261;
+  for (const ch of String(id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    h ^= h << 13; h ^= h >>> 17; h ^= h << 5;
+    const r = ((h >>> 0) % 1000) / 1000;
+    const env = Math.sin(Math.PI * (i + .5) / count);
+    out.push(Math.round((.28 + .72 * (.35 + .65 * r) * (.45 + .55 * env)) * 100) / 100);
+  }
+  return out;
+}
+/* 声纹根数跟时长走：短语音短气泡，长语音长气泡，声纹永远完整不被截断。 */
+function voiceBarCount(seconds) {
+  return Math.round(Math.min(30, Math.max(12, 10 + seconds * 1.1)));
+}
+function voiceBuildWave(bar, count) {
+  if (bar._bars && bar._bars.length === count) return;
+  bar._wave.textContent = '';
+  bar._bars = voiceShape(bar.dataset.messageId, count).map((h, i) => {
+    const b = document.createElement('i');
+    b.style.setProperty('--h', h); b.style.setProperty('--i', i);
+    bar._wave.appendChild(b); return b;
+  });
+}
+/* 音频还没拿到时，按英文语速估一个时长，让语音条先有个像样的长度。 */
+function voiceEstimate(text) {
+  const t = String(text || '');
+  const words = (t.match(/[A-Za-z']+/g) || []).length;
+  const cjk = (t.match(/[㐀-鿿]/g) || []).length;
+  return Math.max(1, Math.round(words / 2.6 + cjk / 4.5));
+}
+function voiceSetDuration(bar, seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return;
+  bar._dur = seconds;
+  voiceBuildWave(bar, voiceBarCount(seconds));
+  if (bar.dataset.state !== 'playing' && bar.dataset.state !== 'paused') bar._time.textContent = ttsClock(seconds);
+}
+function voiceProgress(bar, current, duration) {
+  const frac = Number.isFinite(duration) && duration > 0 ? Math.min(1, current / duration) : 0;
+  const lit = Math.round(frac * bar._bars.length);
+  bar._bars.forEach((b, i) => { b.classList.toggle('on', i < lit); b.classList.toggle('head', i === lit - 1); });
+  if (current > 0) bar._time.textContent = ttsClock(current);
+}
+function voiceSetState(bar, state, detail) {
+  bar.dataset.state = state;
+  const icon = state === 'playing' ? 'mediaPause' : 'mediaPlay';
+  const slot = bar._play.querySelector('.ic');
+  if (slot && slot.dataset.i !== icon) slot.replaceWith(voiceIcon(icon));
+  const labels = { pending: '正在说…', loading: '正在准备语音', playing: '暂停', paused: '继续播放', ready: '播放语音', error: '重新生成语音' };
+  bar._play.setAttribute('aria-label', labels[state] || '播放语音');
+  bar._play.disabled = state === 'pending';
+  if (state === 'pending') bar._time.textContent = '···';
+  else if (state === 'error') bar._time.textContent = detail || '语音没出来';
+  else if (state === 'ready') { voiceProgress(bar, 0, 1); bar._time.textContent = ttsClock(bar._dur || voiceEstimate(bar._el && bar._el._raw)); }
+}
+function voiceToggleText(bar, open) {
+  const rowEl = bar.parentElement;
+  const next = open == null ? !rowEl.classList.contains('vt-open') : !!open;
+  rowEl.classList.toggle('vt-open', next);
+  if (next) voiceOpenIds.add(bar.dataset.messageId); else voiceOpenIds.delete(bar.dataset.messageId);
+  bar._text.setAttribute('aria-expanded', String(next));
+  bar._text.setAttribute('aria-label', next ? '收起文字' : '展开文字');
+  if (next) scroll();
+}
+function voiceDecorate(el, messageId, state) {
+  const rowEl = el.parentElement;
+  if (!rowEl) return null;
+  const existing = rowEl.querySelector(':scope > .vb');
+  if (existing) return existing;
+  rowEl.classList.add('voice-row');
+  const bar = document.createElement('div');
+  bar.className = 'vb';
+  bar.dataset.messageId = messageId;
+  bar._el = el;
+
+  const play = document.createElement('button');
+  play.type = 'button'; play.className = 'vb-play';
+  play.appendChild(voiceIcon('mediaPlay'));
+  const dots = document.createElement('span'); dots.className = 'vb-dots';
+  dots.innerHTML = '<i></i><i></i><i></i>';
+  play.appendChild(dots);
+
+  const wave = document.createElement('div'); wave.className = 'vb-wave'; wave.setAttribute('aria-hidden', 'true');
+
+  const time = document.createElement('span'); time.className = 'vb-time';
+  const text = document.createElement('button');
+  text.type = 'button'; text.className = 'vb-text'; text.textContent = '文字';
+  text.setAttribute('aria-expanded', 'false'); text.setAttribute('aria-label', '展开文字');
+
+  bar.append(play, wave, time, text);
+  bar._play = play; bar._wave = wave; bar._time = time; bar._text = text;
+  voiceBuildWave(bar, 16);   // 还在说的时候先给一段中等长度的声纹
+  rowEl.insertBefore(bar, el);
+
+  play.onclick = (event) => { event.stopPropagation(); voicePlay(bar, true); };
+  text.onclick = (event) => { event.stopPropagation(); voiceToggleText(bar); };
+  // 文字气泡收起来了，长按/点按消息的那套操作改由语音条转交给它。
+  bar.addEventListener('click', (event) => { if (!event.target.closest('button')) el.click(); });
+
+  voiceSetState(bar, state || 'ready');
+  if (state !== 'pending') voiceSetDuration(bar, voiceEstimate(el._raw));
+  if (voiceOpenIds.has(messageId)) voiceToggleText(bar, true);
+  // 一轮说完后聊天记录会整个重画一遍，常常正好撞上自动播放。正在播的是这条消息的
+  // 话，新画出来的语音条把状态接过去，不然界面停在「可播」、声音却还在响。
+  const old = voiceActive;
+  if (old && old !== bar && !old.isConnected && old.dataset.messageId === messageId) {
+    voiceActive = bar;
+    if (old._dur) voiceSetDuration(bar, old._dur);
+    voiceSetState(bar, old.dataset.state);
+    const a = ttsState.audio;
+    if (a && old.dataset.state !== 'loading') voiceProgress(bar, a.currentTime || 0, a.duration);
+  }
+  return bar;
+}
+/* 别处开始播放时（全局播放器、另一条语音），把正在播的这条复位。 */
+function voiceResetActive() {
+  const bar = voiceActive;
+  voiceActive = null;
+  if (bar && bar.isConnected && bar.dataset.state !== 'error' && bar.dataset.state !== 'pending') voiceSetState(bar, 'ready');
+}
+function voiceFail(bar, message) {
+  voiceSetState(bar, 'error', '语音没出来');
+  bar._play.title = message || '语音没出来';
+  voiceToggleText(bar, true);   // 念不出来，至少让她能读到
+}
+async function voicePlay(bar, userInitiated) {
+  if (bar.dataset.state === 'pending') return;
+  const audio = ttsState.audio;
+  // 同一条：暂停 / 继续 / 从头再放
+  if (voiceActive === bar && audio && audio.getAttribute('src')) {
+    if (audio.paused) { audio.play().catch(() => {}); } else { audio.pause(); }
+    return;
+  }
+  stopTtsPlayer(true);          // 停掉全局播放器和别的语音条（顺手复位旧的那条）
+  if (userInitiated) unlockTtsAudio();
+  voiceActive = bar;
+  const runId = ttsState.playerRunId;
+  voiceSetState(bar, 'loading');
+  try {
+    const response = await fetch('api/tts/messages/' + encodeURIComponent(bar.dataset.messageId), {cache: 'no-store'});
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || '语音没能生成');
+    }
+    const url = URL.createObjectURL(await response.blob());
+    if (runId !== ttsState.playerRunId) { URL.revokeObjectURL(url); return; }
+    ttsState.objectUrl = url;
+    const a = ttsState.audio || new Audio();
+    ttsState.audio = a;
+    a.volume = 1; a.playbackRate = 1; a.src = url;
+    // 回调更新的是「这条消息此刻在页面上的语音条」，不是当初点的那个元素——
+    // 中途聊天记录重画过的话，旧元素已经不在页面上了。
+    const live = () => (runId === ttsState.playerRunId && voiceActive) ? voiceActive : null;
+    a.onloadedmetadata = () => { const b = live(); if (b) voiceSetDuration(b, a.duration); };
+    a.ontimeupdate = () => { const b = live(); if (b) voiceProgress(b, a.currentTime, a.duration); };
+    a.onplay = () => { const b = live(); if (b) voiceSetState(b, 'playing'); };
+    a.onpause = () => { const b = live(); if (b && !a.ended) voiceSetState(b, 'paused'); };
+    a.onended = () => { const b = live(); if (b) voiceSetState(b, 'ready'); };
+    a.onerror = () => { const b = live(); if (b) voiceFail(b, '播放失败'); };
+    try {
+      await a.play();
+    } catch (e) {
+      // 自动播放被浏览器拦了：音频已经在手，点一下就能放，不算失败。
+      const b = live();
+      if (b) voiceSetState(b, e && e.name === 'NotAllowedError' ? 'ready' : 'error');
+    }
+  } catch (e) {
+    const b = runId === ttsState.playerRunId ? (voiceActive || bar) : null;
+    if (b) voiceFail(b, e.message);
+  }
+}
+/* 一轮说完：还在「正在说」的语音条定稿；有字的新语音自动播一次。 */
+function voiceSettle(autoplayId) {
+  document.querySelectorAll('#log .vb[data-state="pending"]').forEach(bar => {
+    const text = (bar._el && bar._el._raw || '').trim();
+    if (!text) { voiceFail(bar, '没有说出内容'); return; }
+    voiceSetState(bar, 'ready');
+    voiceSetDuration(bar, voiceEstimate(text));
+  });
+  if (!autoplayId || document.visibilityState !== 'visible') return;
+  const bar = document.querySelector('#log .vb[data-message-id="' + CSS.escape(autoplayId) + '"]');
+  if (bar && bar.dataset.state === 'ready') voicePlay(bar, false);
+}
 
 /* ---------- 供应商模型库：常用在前，完整目录按需打开 ---------- */
 let catalogMode = 'favorites';

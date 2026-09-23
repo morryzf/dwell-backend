@@ -215,6 +215,15 @@ HOME_TOOLS = [
     }},
 ]
 
+VOICE_REPLY_PROMPT = (
+    "【这一条是语音回复】你的回复会被合成成语音，作为一条语音消息发给她。"
+    "只用英文说，不管她用什么语言跟你讲。"
+    "像当面说话那样自然、口语化，多用短句；不要 markdown、列表、标题、表情符号，"
+    "也不要星号动作或括号里的舞台说明——这些念出来都很怪。"
+    "一般不超过 80 个英文单词，除非她明显想听你多说。"
+    "不要提起你在用语音，直接说。"
+)
+
 # sigillo 回执单。一场亲密结束、aftercare 收尾的时候开单（不是进行中，也不是随口聊到的时候）。
 SIGILLO_TOOLS = [
     {"type": "function", "function": {
@@ -4249,6 +4258,23 @@ async def messages_regenerate(message_id: str):
 
 # ---------------------------------------------------------------- sigillo 回执单
 
+@app.get("/api/chats/{chat_id}/voice-mode", dependencies=authed)
+async def voice_mode_get(chat_id: str):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    return {"ok": True, "enabled": db.chat_voice_mode(chat_id)}
+
+
+@app.put("/api/chats/{chat_id}/voice-mode", dependencies=authed)
+async def voice_mode_put(chat_id: str, payload: dict = Body(...)):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    if not isinstance(payload.get("enabled"), bool):
+        raise HTTPException(400, "enabled 必须是 true 或 false")
+    db.chat_voice_mode_set(chat_id, payload["enabled"])
+    return {"ok": True, "enabled": db.chat_voice_mode(chat_id)}
+
+
 @app.get("/api/chats/{chat_id}/sigillo", dependencies=authed)
 async def sigillo_chat_get(chat_id: str):
     if not db.chat_get(chat_id):
@@ -4525,6 +4551,14 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     split_replies, instructions, format_preference, memory_message = (
         _chat_stable_message_parts(chat_id)
     )
+    # 语音回复：标记在消息上，重新生成沿用同一条消息，所以标记会跟着走。
+    voice_reply = db.message_is_voice(msg_id)
+    voice_message = []
+    if voice_reply:
+        # 整段合成一条语音，拆成多个气泡就没法念成一条了。
+        split_replies = False
+        voice_message = [{"role": "system", "content": VOICE_REPLY_PROMPT}]
+        _emit(chat_id, {"type": "system", "subtype": "voice_reply", "message_id": msg_id})
     memory_card_message = []
     memory_query = _memory_card_query(history, watch_context)
     selected_memory_cards = []
@@ -4599,6 +4633,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     stable_messages = instructions + format_preference + memory_message
     transient_messages = (
         private_message + memory_card_message + sigillo_message + device_message + focus_message
+        + voice_message
     )
     messages = None
     if cache_friendly:
@@ -4612,7 +4647,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         cache_friendly = False
         messages = (
             device_message + focus_message + instructions + format_preference + private_message
-            + memory_message + memory_card_message + sigillo_message + history_messages
+            + memory_message + memory_card_message + sigillo_message + voice_message
+            + history_messages
         )
     # 观影页的画面只在本次模型请求中出现，不把截帧或隐形提示写进聊天记录。
     # 这样本地视频不会离开浏览器，历史记录也仍然是用户真正说过的话。
@@ -5021,6 +5057,8 @@ async def send(request: Request):
     })
 
     placeholder = db.message_add(chat_id, "assistant", "")
+    if db.chat_voice_mode(chat_id):
+        db.message_voice_set(placeholder["id"], True)
 
     task = asyncio.create_task(_run_ai_reply(
         chat_id, placeholder["id"], device_time=device_time,
