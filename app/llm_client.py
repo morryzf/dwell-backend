@@ -581,8 +581,13 @@ async def _stream_openai(client, provider: dict, api_key: str, model_id: str,
 
 async def stream_chat(provider: dict, model_id: str, messages: list, tools: list | None = None,
                       max_tokens: int | None = None, reasoning_effort: str | None = None,
-                      thinking_enabled: bool = True, session_id: str | None = None):
-    """Stream chat through native Anthropic caching or the OpenAI-compatible path."""
+                      thinking_enabled: bool = True, session_id: str | None = None,
+                      agent_session_key: str = ""):
+    """Stream chat through native Anthropic caching or the OpenAI-compatible path.
+
+    `session_id` 是供应商侧的缓存分组；`agent_session_key` 是 Claude Code 的会话
+    归属，只有想续上同一段对话的入口才传——两者用途不同，不要混用。
+    """
     if not model_id:
         yield {"type": "text", "text": "[配置错误] 这个聊天还没有选择模型"}
         return
@@ -594,7 +599,7 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
         async for event in agent_sdk_client.stream_bridge_chat(
             provider, model_id, messages, tools,
             max_tokens=max_tokens, reasoning_effort=reasoning_effort,
-            thinking_enabled=thinking_enabled, session_id=session_id,
+            thinking_enabled=thinking_enabled, session_key=agent_session_key,
         ):
             yield event
         return

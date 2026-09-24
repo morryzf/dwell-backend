@@ -39,17 +39,28 @@ def _plain_text(content) -> str:
     return "\n".join(content_texts(content)).strip()
 
 
-def split_history(messages: list) -> tuple[str, list[tuple[str, str]]]:
-    """把中立历史拆成 system 文本和 (说话人, 正文) 的轮次列表。"""
+def split_history(messages: list) -> tuple[str, list[tuple[str, str]], list[str]]:
+    """把中立历史拆成 system 文本、轮次列表、以及本轮的临时上下文。
+
+    历史开始之前的 system 是稳定人设；历史开始之后才出现的 system 是这一轮的
+    临时信息（设备时间、专注计时、记忆卡…），每轮都不一样。两者必须分开：
+    续会话时 Claude Code 只认第一次记下的 system，把易变的东西混进去，
+    指纹每轮都对不上，会话就永远续不起来。
+    """
     system_parts: list[str] = []
     turns: list[tuple[str, str]] = []
+    context_parts: list[str] = []
     for message in messages or []:
         if not isinstance(message, dict):
             continue
         role = str(message.get("role") or "")
         text = _plain_text(message.get("content"))
         if role == "system":
-            if text:
+            if not text:
+                continue
+            if turns:
+                context_parts.append(text)
+            else:
                 system_parts.append(text)
         elif role == "user":
             if text:
@@ -61,7 +72,7 @@ def split_history(messages: list) -> tuple[str, list[tuple[str, str]]]:
             # 这个通道由桥接侧跑工具，历史里的旧工具结果只当上下文留着。
             if text:
                 turns.append((SPEAKER_TOOL, text))
-    return "\n\n".join(system_parts), turns
+    return "\n\n".join(system_parts), turns, context_parts
 
 
 def build_prompt(turns: list[tuple[str, str]]) -> str:
@@ -191,7 +202,6 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
                          max_tokens: int | None = None,
                          reasoning_effort: str | None = None,
                          thinking_enabled: bool = True,
-                         session_id: str | None = None,
                          state: dict | None = None) -> dict:
     """组装一次桥接请求。
 
@@ -200,17 +210,19 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
 
     payload 里额外带上 `_turns` / `_system`，给调用方存会话状态用；发请求前摘掉。
     """
-    system, turns = split_history(messages)
+    system, turns, context = split_history(messages)
     hint = _length_hint(max_tokens)
     if hint:
         system = f"{system}\n\n{hint}".strip()
 
     resume, outgoing = plan_turn(state, str(model_id or ""), system, turns)
+    # 临时上下文跟着本轮走，不进 system，也不算进轮次指纹。
+    prompt = "\n\n".join(context + [build_prompt(outgoing)])
 
     payload = {
         "model": str(model_id or ""),
         "system": system,
-        "prompt": build_prompt(outgoing),
+        "prompt": prompt,
         "include_thinking": bool(thinking_enabled),
         # 没有工具时一轮就该收尾；留给 MCP 的余量在桥接侧按需要放大。
         "max_turns": 8 if tools else 1,
@@ -222,8 +234,6 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
     effort = str(reasoning_effort or "").strip()
     if effort and thinking_enabled:
         payload["effort"] = effort
-    if session_id:
-        payload["session_id"] = str(session_id)[:256]
     return payload
 
 
@@ -291,13 +301,17 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                              max_tokens: int | None = None,
                              reasoning_effort: str | None = None,
                              thinking_enabled: bool = True,
-                             session_id: str | None = None):
-    """通过桥接服务跑一轮对话。密钥是可选的：它是桥接服务的门禁，不是模型凭据。"""
-    chat_key = str(session_id or "")
+                             session_key: str = ""):
+    """通过桥接服务跑一轮对话。密钥是可选的：它是桥接服务的门禁，不是模型凭据。
+
+    session_key 为空就每轮从头讲：心跳这类不属于这段对话的入口不该续会话，
+    更不该把聊天存下的会话状态冲掉。
+    """
+    chat_key = str(session_key or "")
     payload = build_bridge_payload(
         model_id, messages, tools, max_tokens=max_tokens,
         reasoning_effort=reasoning_effort, thinking_enabled=thinking_enabled,
-        session_id=session_id, state=load_state(chat_key),
+        state=load_state(chat_key),
     )
     if not payload["prompt"]:
         yield {"type": "text", "text": "[配置错误] 这次没有可以发给 Claude Code 的内容"}
@@ -338,7 +352,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                     payload = build_bridge_payload(
                         model_id, messages, tools, max_tokens=max_tokens,
                         reasoning_effort=reasoning_effort,
-                        thinking_enabled=thinking_enabled, session_id=session_id,
+                        thinking_enabled=thinking_enabled,
                     )
                     continue
 

@@ -94,7 +94,7 @@ class PromptCacheIntegrationSourceTest(unittest.TestCase):
             "private_message + memory_card_message + sigillo_message + device_message",
             self.main,
         )
-        self.assertIn('session_id=f"dwell-chat:{chat_id}",', self.main)
+        self.assertIn('session_id=f"dwell-chat:{chat_id}" if cache_friendly else None', self.main)
 
     def test_provider_ui_only_selects_the_transport(self):
         self.assertIn('id="apProviderType"', self.ui)

@@ -30,7 +30,7 @@ def _run(coro):
 
 class SplitHistoryTest(unittest.TestCase):
     def test_pulls_system_text_out_of_the_turns(self):
-        system, turns = split_history([
+        system, turns, context = split_history([
             {"role": "system", "content": "你是 Cloudy"},
             {"role": "system", "content": "说中文"},
             {"role": "user", "content": "在吗"},
@@ -38,9 +38,23 @@ class SplitHistoryTest(unittest.TestCase):
 
         self.assertEqual(system, "你是 Cloudy\n\n说中文")
         self.assertEqual(turns, [("用户", "在吗")])
+        self.assertEqual(context, [])
+
+    def test_system_after_the_history_is_this_turn_s_context(self):
+        # 设备时间这类每轮都变的东西排在历史之后，不能混进 system，
+        # 否则会话指纹每轮都对不上，resume 永远不会生效。
+        system, turns, context = split_history([
+            {"role": "system", "content": "你是 Cloudy"},
+            {"role": "user", "content": "在吗"},
+            {"role": "system", "content": "【用户设备时间】17:36"},
+        ])
+
+        self.assertEqual(system, "你是 Cloudy")
+        self.assertEqual(turns, [("用户", "在吗")])
+        self.assertEqual(context, ["【用户设备时间】17:36"])
 
     def test_keeps_tool_results_as_context_and_drops_empty_turns(self):
-        _, turns = split_history([
+        _, turns, _ = split_history([
             {"role": "user", "content": "查一下"},
             {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]},
             {"role": "tool", "content": "结果是 3", "tool_call_id": "1"},
@@ -54,7 +68,7 @@ class SplitHistoryTest(unittest.TestCase):
         ])
 
     def test_ignores_thinking_parts_and_unknown_roles(self):
-        _, turns = split_history([
+        _, turns, _ = split_history([
             {"role": "developer", "content": "不该出现"},
             {"role": "assistant", "content": [
                 {"type": "thinking", "thinking": "先想想"},
@@ -95,7 +109,7 @@ class BridgePayloadTest(unittest.TestCase):
         payload = build_bridge_payload("sonnet", [
             {"role": "system", "content": "你是 Cloudy"},
             {"role": "user", "content": "在吗"},
-        ], reasoning_effort=" high ", session_id="dwell-chat:abc")
+        ], reasoning_effort=" high ")
 
         self.assertEqual(payload["model"], "sonnet")
         self.assertEqual(payload["system"], "你是 Cloudy")
@@ -103,7 +117,6 @@ class BridgePayloadTest(unittest.TestCase):
         self.assertTrue(payload["include_thinking"])
         self.assertEqual(payload["max_turns"], 1)
         self.assertEqual(payload["effort"], "high")
-        self.assertEqual(payload["session_id"], "dwell-chat:abc")
 
     def test_tools_only_widen_the_turn_budget_and_are_not_forwarded(self):
         payload = build_bridge_payload(
@@ -340,7 +353,7 @@ class StreamChatDispatchTest(unittest.TestCase):
                  "api_key_box": ""},
                 "sonnet",
                 [{"role": "user", "content": "在吗"}],
-                session_id="dwell-chat:abc",
+                agent_session_key="dwell-chat:abc",
             )))
         finally:
             agent_sdk_client.stream_bridge_chat = REAL_STREAM_BRIDGE_CHAT
@@ -348,7 +361,7 @@ class StreamChatDispatchTest(unittest.TestCase):
         # 没有 api_key_box 也不该退化成「还没有保存 API 密钥」的配置错误。
         self.assertEqual(events, [{"type": "text", "text": "在"}])
         self.assertEqual(seen["model_id"], "sonnet")
-        self.assertEqual(seen["kwargs"]["session_id"], "dwell-chat:abc")
+        self.assertEqual(seen["kwargs"]["session_key"], "dwell-chat:abc")
 
     def test_other_providers_still_require_a_key(self):
         events = _run(_collect(llm_client.stream_chat(
