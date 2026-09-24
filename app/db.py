@@ -2396,7 +2396,8 @@ def provider_upsert(provider_id: str, name: str, base_url: str, api_key_box: str
     box = row["api_key_box"] if row and api_key_box is None else (api_key_box or "")
     provider_type = (
         provider_type
-        if provider_type in {"generic", "openrouter", "claude_compatible"}
+        if provider_type in {"generic", "openrouter", "claude_compatible",
+                             "claude_agent_sdk"}
         else "generic"
     )
     # Kept in the row for backwards compatibility; cache duration is chat-scoped.

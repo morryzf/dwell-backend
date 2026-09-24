@@ -2421,7 +2421,8 @@ async def providers_upsert(request: Request):
     provider_type = str(
         payload.get("provider_type", (existing or {}).get("provider_type") or "generic")
     ).strip()
-    if provider_type not in {"generic", "openrouter", "claude_compatible"}:
+    if provider_type not in {"generic", "openrouter", "claude_compatible",
+                             "claude_agent_sdk"}:
         raise HTTPException(400, "未知的供应商类型")
     # Cache duration is selected per chat, never as a provider-side default.
     prompt_cache_ttl = "off"
@@ -4635,6 +4636,9 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         private_message + memory_card_message + sigillo_message + device_message + focus_message
         + voice_message
     )
+    agent_sdk = bool(
+        provider and str(provider.get("provider_type") or "") == "claude_agent_sdk"
+    )
     messages = None
     if cache_friendly:
         if proactive_watch:
@@ -4643,6 +4647,10 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             messages = _cache_friendly_chat_messages(
                 stable_messages, transient_messages, history_messages
             )
+    elif agent_sdk and history_messages:
+        # Claude Code 续会话只认第一次记下的 system，所以每轮都变的那些上下文
+        # 要排在历史之后，当作这一轮的临时信息，而不是 system 的一部分。
+        messages = stable_messages + history_messages + transient_messages
     if messages is None:
         cache_friendly = False
         messages = (
@@ -4846,6 +4854,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 reasoning_effort=selection.get("reasoning_effort"),
                 thinking_enabled=show_thinking,
                 session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
+                agent_session_key=f"dwell-chat:{chat_id}",
             ):
                 if event["type"] == "thinking":
                     append_stream_thinking(str(event.get("thinking") or ""))
