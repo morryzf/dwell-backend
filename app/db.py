@@ -2462,6 +2462,20 @@ def provider_model_upsert(provider_id: str, model_id: str, favorite: bool | None
     return {**dict(row), "favorite": bool(row["favorite"]), "manual": bool(row["manual"])}
 
 
+def provider_model_delete(provider_id: str, model_id: str) -> bool:
+    """把一个模型从目录里拿掉。
+
+    取消常用只是清掉标记，行还留着；手动加错的名字不在供应商的抓取结果里，
+    不删就永远清不掉。抓来的删掉后，下次「获取 / 刷新」会自己回来。
+    """
+    with conn() as cx:
+        cur = cx.execute(
+            "DELETE FROM provider_models WHERE provider_id=? AND model_id=?",
+            (provider_id, model_id),
+        )
+    return cur.rowcount > 0
+
+
 def provider_models_refresh(provider_id: str, model_ids: list[str]) -> int:
     for model_id in dict.fromkeys(model_ids):
         provider_model_upsert(provider_id, model_id, manual=False)
