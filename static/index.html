@@ -6548,7 +6548,13 @@ function cacheGlowAnimate(end) {
   cacheGlowUpdateLabel();
 }
 
+// 这圈光画的是 5 分钟缓存的剩余时间。选 1h 或关掉缓存时它没有意义。
+function cacheGlowApplies() {
+  return curPromptCacheTtl === '5m';
+}
+
 function cacheGlowStart() {
+  if (!cacheGlowApplies()) { cacheGlowStop(true, true); return; }
   const begin = () => {
     cacheGlowEnd = Date.now() + CACHE_GLOW_MS;
     cacheGlowSave();
@@ -6585,7 +6591,9 @@ function cacheGlowStop(clearStored, quick) {
 function cacheGlowSetChat(chatId) {
   cacheGlowChatId = String(chatId || '');
   const stored = cacheGlowStored();
-  if (stored && stored.chat_id === cacheGlowChatId && Number(stored.end) > Date.now()) {
+  if (!cacheGlowApplies()) {
+    cacheGlowStop(true, true);
+  } else if (stored && stored.chat_id === cacheGlowChatId && Number(stored.end) > Date.now()) {
     cacheGlowAnimate(Number(stored.end));
   } else {
     cacheGlowStop(false, true);
@@ -6864,6 +6872,15 @@ function resetChatKeyboardAdjustment() {
   footerEl.style.transform = '';
   log.style.paddingBottom = (footerEl.offsetHeight + 48) + 'px';
 }
+// 输入卡的高度会变：模型名换行、附件条出现、字体加载完都会撑高它。留白只在
+// 几个固定时机算过一次，之后就不准了，最后一条消息会被玻璃压住看不到。
+// 键盘态交给 fitKeyboard，这里只管静止时。
+new ResizeObserver(() => {
+  if (sheetIsOpen() || kbShift || kbGap > 20) return;
+  const wasAtBottom = atBottom();
+  log.style.paddingBottom = (footerEl.offsetHeight + 48) + 'px';
+  if (wasAtBottom) log.scrollTop = log.scrollHeight;
+}).observe(footerEl);
 function fitKeyboard() {
   const vv = window.visualViewport;
   if (!vv) return;
@@ -10918,7 +10935,7 @@ const MESSAGE_STYLE_CONTROLS = [
   { key: 'backgroundOpacity', label: '背景不透明度', type: 'range', min: 0, max: 100, step: 1 },
   { key: 'border', label: '边框颜色', type: 'color' },
   { key: 'borderOpacity', label: '边框不透明度', type: 'range', min: 0, max: 100, step: 1 },
-  { key: 'borderWidth', label: '边框宽度', type: 'range', min: 0, max: 3, step: .5 },
+  { key: 'borderWidth', label: '边框宽度', type: 'range', min: 0, max: 3, step: .1 },
   { key: 'text', label: '文字颜色', type: 'color' },
   { key: 'radius', label: '圆角半径', type: 'range', min: 4, max: 32, step: 1 }
 ];
@@ -12686,6 +12703,7 @@ async function setChatPromptCacheTtl(ttl, button) {
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(data.detail || '没有保存');
     curPromptCacheTtl = data.prompt_cache_ttl || ttl;
+    if (!cacheGlowApplies()) cacheGlowStop(true, false);
     renderProviderModelPicker();
   } catch (error) {
     button.disabled = false;
