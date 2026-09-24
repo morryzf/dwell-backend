@@ -1183,7 +1183,7 @@ def _chat_history_messages(chat_id: str, cache_friendly: bool = False) -> list[d
 # ---------------------------------------------------------------- 今天要做的事
 
 DAY_BRIEF_SETTING_KEY = "day_brief_last_date"
-DAY_BRIEF_FROM_HOUR = 6      # 当天几点以后才看得见（不是过了 0 点就算新的一天）
+DAY_BRIEF_FROM_HOUR = db.DAY_START_HOUR   # 和「每天」待办重置用同一个天的起点
 DAY_BRIEF_CAL_TRAILING_DAYS = 3   # 日历上的事顺延几天还提
 DAY_BRIEF_MAX_TODOS = 10
 DAY_BRIEF_MAX_EVENTS = 10
