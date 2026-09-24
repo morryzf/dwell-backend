@@ -18,6 +18,9 @@ const DEFAULT_MODEL = (process.env.CLAUDE_AGENT_MODEL || "sonnet").trim();
 // 2 核 4G 上一个 Claude Code 子进程就够吃了，默认串行。
 const MAX_CONCURRENCY = Math.max(1, Number(process.env.MAX_CONCURRENCY || 1));
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
+// 并发上限是 1，一轮卡住就等于整个聊天卡住——而冷启动可能接近三分钟没有任何
+// 事件，所以不能靠「有没有动静」判断，只能给一轮一个硬上限。0＝不限。
+const TURN_TIMEOUT_MS = Math.max(0, Number(process.env.TURN_TIMEOUT_MS || 15 * 60 * 1000));
 
 // Claude Code 自带的工具，全是给改代码用的：光是它们的说明就占一万多 token，
 // 而 Dwell 这条通道只是聊天。裸名字传进 disallowedTools 会把工具移出上下文，
@@ -144,8 +147,17 @@ async function runChat(res, request) {
     return;
   }
 
+  const abort = new AbortController();
+  let timedOut = false;
+  const timer = TURN_TIMEOUT_MS
+    ? setTimeout(() => { timedOut = true; abort.abort(); }, TURN_TIMEOUT_MS)
+    : null;
+  // Dwell 那边放弃了就没必要继续烧着这个槽位。
+  res.on("close", () => abort.abort());
+
   const options = {
     model: String(request.model || DEFAULT_MODEL),
+    abortController: abort,
     env: CHILD_ENV,
     includePartialMessages: true,
     // 空数组＝不读 VPS 上的 CLAUDE.md、settings 和 output style：
@@ -183,6 +195,19 @@ async function runChat(res, request) {
       && (includeThinking || EFFORT_WITHOUT_THINKING.has(effort))) {
     options.effort = effort;
   }
+  try {
+    await streamTurn(res, prompt, options, includeThinking);
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(`这一轮超过 ${Math.round(TURN_TIMEOUT_MS / 1000)} 秒没跑完，已中止`);
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function streamTurn(res, prompt, options, includeThinking) {
   let sawResultUsage = false;
   let sentSession = "";
 
@@ -288,6 +313,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[bridge] 门禁 token：${BRIDGE_TOKEN ? "已启用" : "未设置"}`);
   console.log(`[bridge] 缓存 TTL ${PROMPT_CACHE_TTL || "跟随默认"}`);
   console.log(`[bridge] 移出上下文的内置工具 ${DISABLED_TOOLS.length} 个`);
+  console.log(`[bridge] 单轮上限 ${TURN_TIMEOUT_MS ? Math.round(TURN_TIMEOUT_MS / 1000) + " 秒" : "不限"}`);
   if (HAS_MCP) {
     console.log(`[bridge] MCP：${Object.keys(MCP_SERVERS).join(", ")}`);
   }

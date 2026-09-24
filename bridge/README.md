@@ -70,6 +70,7 @@ curl -s localhost:8787/health
 | `BRIDGE_TOKEN` | 空 | 门禁 token。空＝不校验，只在 `127.0.0.1` 上才可接受 |
 | `CLAUDE_AGENT_MODEL` | `sonnet` | 请求没带 model 时的默认值 |
 | `MAX_CONCURRENCY` | `1` | 同时在跑的 Claude Code 子进程数。2 核 4G 建议保持 1 |
+| `TURN_TIMEOUT_MS` | `900000` | 单轮硬上限（15 分钟）。0＝不限，不建议 |
 | `PROMPT_CACHE_TTL` | `1h` | 缓存保留时长，`5m` 或 `1h`；留空＝跟随 Claude Code 默认 |
 | `DISABLED_TOOLS` | 见下 | 移出上下文的内置工具，逗号分隔；留空＝一个都不禁 |
 | `MCP_SERVERS_JSON` | 空 | MCP 配置（内联 JSON） |
@@ -117,6 +118,16 @@ data: [DONE]
 
 `session` 事件带回 Claude Code 的会话 id。Dwell 把它存在 settings 表的
 `agent_sdk_session:<聊天键>` 下，下一轮作为 `resume` 传回来。桥接自己不存任何状态。
+
+## 一轮卡住怎么办
+
+并发上限是 1，所以一轮卡住就等于整个聊天卡住。而冷启动可能接近三分钟没有
+任何事件，靠「有没有动静」判断会误杀，所以用的是一轮一个硬上限
+（`TURN_TIMEOUT_MS`，默认 15 分钟）：到点中止，槽位当场释放，Dwell 那边
+收到一条说明而不是无限等待。
+
+Dwell 主动断开（用户放弃、后端超时）也会中止这一轮——没人要的回复没必要
+继续占着槽位。
 
 ## thinking 和 effort
 
