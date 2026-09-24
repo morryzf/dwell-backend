@@ -117,5 +117,82 @@ class VoiceBubbleFrontendTest(unittest.TestCase):
         self.assertIn("if (last && last.id && !last.voice) await playTts(last.id);", HTML)
 
 
+class VoiceCacheDirTest(unittest.TestCase):
+    """语音缓存目录搬家回归。
+
+    Zeabur 时代跑在 Docker 里，/data 是挂载卷；搬到普通服务器上
+    以后没有这个卷，服务又不是 root 跑的，往根目录底下建文件夹会被拒。
+    合成完的音频落不下盘，前端只能显示一句什么都没说的「语音没能生成」。
+    """
+
+    SOURCE = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
+
+    def test_default_cache_dir_follows_the_repo(self):
+        self.assertIn(
+            'os.environ.get("DWELL_TTS_CACHE_DIR", "./data/tts-cache")',
+            self.SOURCE,
+            "语音缓存目录的默认值必须是相对路径，"
+            "和 DWELL_DB 一样跟着仓库走，不能再指根目录底下的 /data",
+        )
+
+    def test_unwritable_cache_dir_says_where_it_failed(self):
+        import tempfile
+
+        blocker = tempfile.NamedTemporaryFile(delete=False)
+        blocker.close()
+        # 把缓存目录指到一个普通文件底下：mkdir 必失败，跟权限不够一个性质。
+        doomed = Path(blocker.name) / "tts-cache" / "m-abc.mp3"
+
+        class FakeResponse:
+            status_code = 200
+            content = b"ID3fake-audio"
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, *args, **kwargs):
+                return FakeResponse()
+
+        saved = {
+            name: getattr(main, name)
+            for name in ("_get_or_create_current_chat", "_tts_config",
+                         "_tts_message_cache_details", "_tts_api_key")
+        }
+        saved_client = main.httpx.AsyncClient
+        main._get_or_create_current_chat = lambda: "chat"
+        main._tts_config = lambda: {
+            "base_url": "https://api.elevenlabs.io", "voice_id": "v", "model_id": "m",
+        }
+        main._tts_message_cache_details = lambda *a, **k: {"spoken": "hi", "path": doomed}
+        main._tts_api_key = lambda cfg: "key"
+        main.httpx.AsyncClient = lambda *a, **k: FakeClient()
+        try:
+            with self.assertRaises(main.HTTPException) as caught:
+                asyncio.run(main.tts_message_audio("m"))
+        finally:
+            for name, value in saved.items():
+                setattr(main, name, value)
+            main.httpx.AsyncClient = saved_client
+            os.remove(blocker.name)
+
+        self.assertEqual(caught.exception.status_code, 500)
+        detail = str(caught.exception.detail)
+        self.assertIn("DWELL_TTS_CACHE_DIR", detail, "得告诉人怎么改")
+        self.assertIn(str(doomed.parent), detail, "得说清楚是哪个目录写不了")
+
+
+class VoiceErrorMessageFrontendTest(unittest.TestCase):
+    def test_bare_server_errors_carry_their_status_code(self):
+        self.assertIn(
+            "throw new Error(data.detail || ('语音没能生成（' + response.status + '）'));",
+            HTML,
+            "服务器没给 detail 时，至少要把状态码显给人看",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

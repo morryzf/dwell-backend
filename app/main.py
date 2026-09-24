@@ -39,7 +39,7 @@ app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 TTS_CONFIG_KEY = "tts_config_v1"
-TTS_CACHE_DIR = Path(os.environ.get("DWELL_TTS_CACHE_DIR", "/data/tts-cache"))
+TTS_CACHE_DIR = Path(os.environ.get("DWELL_TTS_CACHE_DIR", "./data/tts-cache"))
 TTS_MAX_TEXT_CHARS = 4500
 TTS_CACHE_MAX_BYTES = int(os.environ.get("DWELL_TTS_CACHE_MAX_BYTES", str(500 * 1024 * 1024)))
 OPENROUTER_FX_SETTING_KEY = "openrouter_usd_cny_rate_v1"
@@ -2907,10 +2907,17 @@ async def tts_message_audio(message_id: str, cached_only: bool = False):
                 raise HTTPException(502, "语音服务返回 " + str(response.status_code))
             if not response.content or len(response.content) > 30 * 1024 * 1024:
                 raise HTTPException(502, "语音服务没有返回有效音频")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temp = path.with_suffix(".tmp")
-            temp.write_bytes(response.content)
-            temp.replace(path)
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temp = path.with_suffix(".tmp")
+                temp.write_bytes(response.content)
+                temp.replace(path)
+            except OSError as exc:
+                raise HTTPException(
+                    500,
+                    f"语音合成好了，但存不进缓存目录 {path.parent}：{exc.strerror or exc}"
+                    "（用 DWELL_TTS_CACHE_DIR 指到一个写得进去的目录）",
+                ) from exc
             _tts_prune_cache()
         except httpx.HTTPError as exc:
             raise HTTPException(502, "语音服务网络错误") from exc
