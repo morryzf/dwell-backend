@@ -25,7 +25,7 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn("_cache_friendly_chat_messages(", self.source)
 
     def test_tts_uses_cached_full_turns_and_respects_read_modes(self):
-        self.assertIn('TTS_CACHE_DIR = Path(os.environ.get("DWELL_TTS_CACHE_DIR", "/data/tts-cache"))', self.source)
+        self.assertIn('TTS_CACHE_DIR = Path(os.environ.get("DWELL_TTS_CACHE_DIR", "./data/tts-cache"))', self.source)
         self.assertIn('async def tts_message_audio', self.source)
         self.assertIn('tts_turn_id', self.source)
         self.assertIn('private, no-store', self.source)

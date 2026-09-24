@@ -7516,7 +7516,8 @@ async function playTts(messageId, userInitiated = false, cachedOnly = false) {
     const response = await fetch('api/tts/messages/' + encodeURIComponent(messageId) + suffix, {cache:'no-store', signal:controller.signal});
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      throw new Error(data.detail || '语音没能生成');
+      // 服务器没给出原因（比如裸的 500）时把状态码带上，别只留一句什么都没说的「语音没能生成」。
+      throw new Error(data.detail || ('语音没能生成（' + response.status + '）'));
     }
     const objectUrl = URL.createObjectURL(await response.blob());
     if (controller.signal.aborted || playerRunId !== ttsState.playerRunId) { URL.revokeObjectURL(objectUrl); return; }
@@ -12565,7 +12566,8 @@ async function voicePlay(bar, userInitiated) {
     const response = await fetch('api/tts/messages/' + encodeURIComponent(bar.dataset.messageId), {cache: 'no-store'});
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      throw new Error(data.detail || '语音没能生成');
+      // 服务器没给出原因（比如裸的 500）时把状态码带上，别只留一句什么都没说的「语音没能生成」。
+      throw new Error(data.detail || ('语音没能生成（' + response.status + '）'));
     }
     const url = URL.createObjectURL(await response.blob());
     if (runId !== ttsState.playerRunId) { URL.revokeObjectURL(url); return; }
