@@ -204,6 +204,16 @@ class BridgeEventsTest(unittest.TestCase):
             {"type": "bridge_error", "message": "Claude Code 没起来"},
         ])
 
+    def test_rate_limit_notices_go_to_the_thinking_panel(self):
+        # 限流说明不是回复的一部分，不该混进正文。
+        rows = ['data: {"type":"notice","message":"上游暂时不可用，等 8 秒"}']
+
+        events = _run(_collect(bridge_events(_lines(rows))))
+
+        self.assertEqual(events, [
+            {"type": "thinking", "thinking": "（上游暂时不可用，等 8 秒）\n"},
+        ])
+
     def test_session_id_comes_through_as_an_internal_event(self):
         rows = ['data: {"type":"session","session_id":"abc-123"}']
 

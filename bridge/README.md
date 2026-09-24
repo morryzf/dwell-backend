@@ -72,7 +72,7 @@ curl -s localhost:8787/health
 | `MAX_CONCURRENCY` | `1` | 同时在跑的 Claude Code 子进程数。2 核 4G 建议保持 1 |
 | `TURN_TIMEOUT_MS` | `900000` | 单轮硬上限（15 分钟）。0＝不限，不建议 |
 | `PROMPT_CACHE_TTL` | `1h` | 缓存保留时长，`5m` 或 `1h`；留空＝跟随 Claude Code 默认 |
-| `DISABLED_TOOLS` | 见下 | 移出上下文的内置工具，逗号分隔；留空＝一个都不禁 |
+| `BUILTIN_TOOLS` | 空 | 给模型哪些内置工具。留空＝一件都不给；`preset`＝全套；或逗号分隔的名字 |
 | `MCP_SERVERS_JSON` | 空 | MCP 配置（内联 JSON） |
 | `MCP_SERVERS_FILE` | 空 | MCP 配置（文件路径），`MCP_SERVERS_JSON` 优先 |
 
@@ -147,13 +147,24 @@ Dwell 那边就什么都看不到。
 
 ## 内置工具
 
-Claude Code 自带 25 个工具（Read / Write / Bash / WebSearch…），全是给改代码用的，
-光工具说明就占一万多 token，而这条通道只是聊天。所以默认把它们用
-`disallowedTools` 移出上下文——传裸名字是移除，不只是禁止调用。
+Claude Code 自带的工具（Read / Write / Bash / WebSearch…）全是给改代码用的，
+光说明就占一万多 token，而这条通道只是聊天。默认一件都不给。
 
-想放回来：`DISABLED_TOOLS=` （留空）。想只留几个：把不要的列进去就行。
+用白名单而不是黑名单，是因为黑名单挡不住 CLI 以后新增的工具——它们会悄悄
+溜回上下文里，而我们不会发现。
 
-MCP 工具名字长这样 `mcp__<服务>__<工具>`，不受这个清单影响。
+- `BUILTIN_TOOLS=`（默认，留空）→ 一件都不给
+- `BUILTIN_TOOLS=preset` → 原样给 Claude Code 的整套
+- `BUILTIN_TOOLS=WebSearch,ToolSearch` → 只给这几件
+
+MCP 工具不受这里影响（走 `mcpServers`）。但挂了很多 MCP 工具时要把
+`ToolSearch` 加回来：CLI 会把一部分 schema 延迟加载，模型靠它才取得到。
+
+## 限流和上游错误
+
+Claude Code 遇到限流会发 `api_retry`，说明原因、第几次重试、还要等多久。
+桥接把它转成 `notice` 事件，Dwell 那边显示在**思考面板**里——它不是回复的
+一部分，不该混进正文。关掉「显示思考」时就看不到了。
 
 ## MCP（Ombre Brain 等）
 

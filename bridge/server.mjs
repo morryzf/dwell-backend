@@ -22,27 +22,26 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
 // 事件，所以不能靠「有没有动静」判断，只能给一轮一个硬上限。0＝不限。
 const TURN_TIMEOUT_MS = Math.max(0, Number(process.env.TURN_TIMEOUT_MS || 15 * 60 * 1000));
 
-// Claude Code 自带的工具，全是给改代码用的：光是它们的说明就占一万多 token，
-// 而 Dwell 这条通道只是聊天。裸名字传进 disallowedTools 会把工具移出上下文，
-// 不只是禁止调用。MCP 工具名字长这样 mcp__<服务>__<工具>，不受影响。
-const DEFAULT_DISABLED_TOOLS = [
-  "Task", "Bash", "CronCreate", "CronDelete", "CronList", "DesignSync", "Edit",
-  "EnterWorktree", "ExitWorktree", "ListAgents", "Monitor", "NotebookEdit",
-  "PushNotification", "Read", "RemoteTrigger", "ReportFindings", "ScheduleWakeup",
-  "SendMessage", "Skill", "TaskStop", "ToolSearch", "WebFetch", "WebSearch",
-  "Workflow", "Write",
-];
-// 留空＝一个都不禁，把 Claude Code 的整套工具原样交给模型。
-const DISABLED_TOOLS = (
-  process.env.DISABLED_TOOLS === undefined
-    ? DEFAULT_DISABLED_TOOLS
-    : process.env.DISABLED_TOOLS.split(/[,\s]+/)
-).map((name) => name.trim()).filter(Boolean);
+// Claude Code 自带的工具全是给改代码用的，光说明就占一万多 token，而这条
+// 通道只是聊天。所以用白名单而不是黑名单：黑名单挡不住 CLI 以后新增的工具，
+// 它们会悄悄溜回上下文里，而我们不会发现。
+//
+// 留空＝一件都不给；"preset"＝原样给 Claude Code 的整套；其余按逗号分隔取名字。
+// MCP 工具不受这里影响（它们走 mcpServers），但挂了很多 MCP 工具时要把
+// ToolSearch 加回来——CLI 会把一部分 schema 延迟加载，靠它才取得到。
+const BUILTIN_TOOLS_RAW = (process.env.BUILTIN_TOOLS ?? "").trim();
+const BUILTIN_TOOLS = BUILTIN_TOOLS_RAW === "preset"
+  ? { type: "preset", preset: "claude_code" }
+  : BUILTIN_TOOLS_RAW.split(/[,\s]+/).map((name) => name.trim()).filter(Boolean);
 
 // 子进程里留着这两个变量就会走按量计费的 API，而不是订阅额度。
 const CHILD_ENV = { ...process.env };
 delete CHILD_ENV.ANTHROPIC_API_KEY;
 delete CHILD_ENV.ANTHROPIC_AUTH_TOKEN;
+
+// harness 自带的记忆索引（MEMORY.md）是给终端窗口用的工程笔记，聊天用不上，
+// 实测能占好几千 token。
+CHILD_ENV.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
 
 // 订阅在套餐额度内本来就是 1 小时，但一开始吃 usage credits 就会掉到 5 分钟。
 // 聊天经常隔几十分钟才继续，掉到 5 分钟等于每次都重新建缓存，所以显式钉住。
@@ -179,9 +178,7 @@ async function runChat(res, request) {
   if (HAS_MCP) {
     options.mcpServers = MCP_SERVERS;
   }
-  if (DISABLED_TOOLS.length) {
-    options.disallowedTools = DISABLED_TOOLS;
-  }
+  options.tools = BUILTIN_TOOLS;
 
   const includeThinking = request.include_thinking !== false;
   // Dwell 的「显示思考」开关本来就是改请求，不是只藏起来，所以这里真的关掉它。
@@ -232,6 +229,17 @@ async function streamTurn(res, prompt, options, includeThinking) {
       } else if (includeThinking && delta?.type === "thinking_delta" && delta.thinking) {
         writeEvent(res, { type: "thinking", thinking: delta.thinking });
       }
+      continue;
+    }
+
+    // 限流和上游错误：不转发的话，用户只看到长时间没反应，不知道是卡了还是在排队。
+    if (message.type === "system" && message.subtype === "api_retry") {
+      const seconds = Math.round(Number(message.retry_delay_ms || 0) / 1000);
+      writeEvent(res, {
+        type: "notice",
+        message: `上游暂时不可用（${message.error || message.error_status || "未知原因"}）`
+          + `，第 ${message.attempt || 1} 次重试${seconds ? `，等 ${seconds} 秒` : ""}`,
+      });
       continue;
     }
 
@@ -312,7 +320,11 @@ server.listen(PORT, HOST, () => {
   console.log(`[bridge] 默认模型 ${DEFAULT_MODEL}，并发上限 ${MAX_CONCURRENCY}`);
   console.log(`[bridge] 门禁 token：${BRIDGE_TOKEN ? "已启用" : "未设置"}`);
   console.log(`[bridge] 缓存 TTL ${PROMPT_CACHE_TTL || "跟随默认"}`);
-  console.log(`[bridge] 移出上下文的内置工具 ${DISABLED_TOOLS.length} 个`);
+  console.log(`[bridge] 内置工具 ${
+    Array.isArray(BUILTIN_TOOLS)
+      ? (BUILTIN_TOOLS.length ? BUILTIN_TOOLS.join(",") : "一件都不给")
+      : "Claude Code 全套"
+  }`);
   console.log(`[bridge] 单轮上限 ${TURN_TIMEOUT_MS ? Math.round(TURN_TIMEOUT_MS / 1000) + " 秒" : "不限"}`);
   if (HAS_MCP) {
     console.log(`[bridge] MCP：${Object.keys(MCP_SERVERS).join(", ")}`);

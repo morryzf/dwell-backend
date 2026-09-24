@@ -269,6 +269,11 @@ async def bridge_events(lines):
             usage.pop("upstream_cost", None)
             if usage:
                 yield {"type": "usage", "usage": usage}
+        elif kind == "notice":
+            # 限流这类说明走思考面板：它不是回复的一部分，不该混进正文。
+            text = str(event.get("message") or "")
+            if text:
+                yield {"type": "thinking", "thinking": f"（{text}）\n"}
         elif kind == "session":
             sid = str(event.get("session_id") or "")
             if sid:
