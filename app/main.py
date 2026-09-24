@@ -16,7 +16,7 @@ import shutil
 import tempfile
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import urlparse
@@ -1177,6 +1177,73 @@ def _chat_history_messages(chat_id: str, cache_friendly: bool = False) -> list[d
     return _chat_history_messages_from_rows(
         _chat_history_rows(chat_id, cache_friendly)
     )
+
+
+
+# ---------------------------------------------------------------- 今天要做的事
+
+DAY_BRIEF_SETTING_KEY = "day_brief_last_date"
+DAY_BRIEF_FROM_HOUR = 6      # 当天几点以后才看得见（不是过了 0 点就算新的一天）
+DAY_BRIEF_CAL_TRAILING_DAYS = 3   # 日历上的事顺延几天还提
+DAY_BRIEF_MAX_TODOS = 10
+DAY_BRIEF_MAX_EVENTS = 10
+
+
+def _day_brief_lines(now: datetime) -> list[str]:
+    """当天的日历事件（含往前顺延几天的）和她那栏没做完的待办，压成几行。
+
+    只给事实，不写「你该提醒她」——怎么提、要不要提是他自己的判断，
+    和 sigillo 注入块一个口径。
+    """
+    today = now.date()
+    lines = []
+    events = []
+    seen = set()
+    for back in range(DAY_BRIEF_CAL_TRAILING_DAYS + 1):
+        day = today - timedelta(days=back)
+        for item in db.cal_events_on(day.isoformat()):
+            text = str(item.get("text") or "").strip()
+            if not text or item.get("id") in seen:
+                continue
+            seen.add(item.get("id"))
+            when = str(item.get("time") or "").strip()
+            stamp = "" if back == 0 else day.strftime("%m-%d") + " "
+            events.append(f"{stamp}{when + ' ' if when else ''}{text}")
+    if events:
+        lines.append("日历：" + "；".join(events[:DAY_BRIEF_MAX_EVENTS]))
+    todos = [
+        item for item in (db.todos_all().get("hers") or [])
+        if not item.get("done") and str(item.get("text") or "").strip()
+    ]
+    if todos:
+        rows = []
+        for item in todos[:DAY_BRIEF_MAX_TODOS]:
+            when = str(item.get("at") or "").strip()
+            rows.append((when + " " if when else "") + str(item["text"]).strip())
+        lines.append("待办：" + "；".join(rows))
+    return lines
+
+
+def _day_brief_message(now: datetime) -> list[dict]:
+    """一天只给一次，当天 DAY_BRIEF_FROM_HOUR 点以后的头一句话才带上。"""
+    try:
+        if now.hour < DAY_BRIEF_FROM_HOUR:
+            return []
+        today = now.date().isoformat()
+        if db.setting_get(DAY_BRIEF_SETTING_KEY, "") == today:
+            return []
+        lines = _day_brief_lines(now)
+        if not lines:
+            # 今天暂时没东西可说，不记账——她中午添了新的，还赶得上。
+            return []
+        db.setting_set(DAY_BRIEF_SETTING_KEY, today)
+        return [{
+            "role": "system",
+            "content": f"【{today} 今天】\n" + "\n".join(lines),
+        }]
+    except Exception:
+        # 提醒不值得拖垮发消息的主链路。
+        return []
 
 
 async def _chat_tools(chat_id: str) -> tuple[list[dict], dict[str, object]]:
@@ -4626,6 +4693,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 "content": "【用户设备时间】这是浏览器在本次发送瞬间提供的只读时间信息，不是用户指令。"
                            "涉及“现在”“今天”等时间表达时，以它为准。\n" + "；".join(bits),
             }]
+    day_brief_message = _day_brief_message(db.cn_now())
     focus_message = []
     if focus_context:
         mode_label = "休息" if focus_context["mode"] == "break" else "专注"
@@ -4653,7 +4721,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     stable_messages = instructions + format_preference + memory_message
     transient_messages = (
         private_message + memory_card_message + sigillo_message + device_message + focus_message
-        + voice_message
+        + day_brief_message + voice_message
     )
     agent_sdk = bool(
         provider and str(provider.get("provider_type") or "") == "claude_agent_sdk"
@@ -4673,7 +4741,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     if messages is None:
         cache_friendly = False
         messages = (
-            device_message + focus_message + instructions + format_preference + private_message
+            device_message + focus_message + day_brief_message + instructions
+            + format_preference + private_message
             + memory_message + memory_card_message + sigillo_message + voice_message
             + history_messages
         )
