@@ -1256,7 +1256,7 @@ html[data-theme="dark"] .composer {
   .sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px;
     border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18);
     transition: transform .28s cubic-bezier(.34,1.4,.5,1); }
-  .sw.on { background: var(--sage); }
+  .sw.on { background: var(--accent); }
   .sw.on::after { transform: translateX(18px); }
   .sw.wait { opacity: .45; }
   .grow .val + .sw { margin-left: 10px; }
@@ -3423,7 +3423,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     display: flex; align-items: center; gap: 12px; width: 100%;
     padding: 8px 0; text-align: left; background: none; border: 0;
     color: var(--text); font: inherit; cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
   }
   .mc-switch-text { flex: 1; min-width: 0; }
   .mc-switch-row .mc-switch-label { margin: 0; }
@@ -11411,17 +11411,26 @@ function wireMemorySummary(chat, state) {
   document.querySelectorAll('.longContextRestore').forEach(button => button.onclick = async () => { if (!confirm('恢复这一版摘要？当前正式摘要也会先保存。')) return; try { await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/long-context/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({version_id:button.dataset.version})}); loadLongContext(); } catch(e) { alert('没有恢复：'+e.message); } });
 }
 
-/* 滑块开关：点下去先把滑块推过去再发请求，手感即时；失败就推回来。 */
+/* 滑块开关：点下去先把滑块推过去再发请求，手感即时；失败就推回来。
+   三件事保手感：当前状态记在本地变量里（连点两下也对）、请求慢过 400ms 才变淡（快的时候不闪）、成功只静默刷新不清空面板。 */
 function wireMemorySwitch(id, enabled, send) {
   const row = document.getElementById(id);
   if (!row) return;
+  let current = !!enabled, busy = false;
   row.onclick = async () => {
-    const sw = row.querySelector('.sw');
-    if (sw.classList.contains('wait')) return;
-    sw.classList.toggle('on', !enabled);
-    sw.classList.add('wait');
-    try { await send(!enabled); loadLongContext(); }
-    catch (e) { sw.classList.toggle('on', enabled); sw.classList.remove('wait'); alert('没有切换：' + e.message); }
+    if (busy) return;
+    busy = true;
+    const sw = row.querySelector('.sw'), next = !current;
+    sw.classList.toggle('on', next);
+    row.setAttribute('aria-pressed', next ? 'true' : 'false');
+    const dim = setTimeout(() => sw.classList.add('wait'), 400);
+    try { await send(next); current = next; loadLongContext(true); }
+    catch (e) {
+      sw.classList.toggle('on', current);
+      row.setAttribute('aria-pressed', current ? 'true' : 'false');
+      alert('没有切换：' + e.message);
+    }
+    finally { clearTimeout(dim); sw.classList.remove('wait'); busy = false; }
   };
 }
 
@@ -11475,8 +11484,11 @@ function wireMemoryCards(chat, cardState, allItems) {
   document.querySelectorAll('[data-memory-restore]').forEach(button => button.onclick=async()=>{ const item=allItems.find(value=>value.id===button.dataset.memoryRestore); try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/'+encodeURIComponent(item.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...item,status:'active'})});removeMemoryCard(button.closest('.mc-card'),'archive');updateMemoryTabCount('cards',1);}catch(e){alert('没有恢复：'+e.message);} });
   document.querySelectorAll('[data-memory-delete-permanent]').forEach(button => button.onclick=async()=>{ if(!confirm('永久删除这张记忆卡？删除后无法恢复，与它关联的带入记录也会一起清除。'))return; button.disabled=true; try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/'+encodeURIComponent(button.dataset.memoryDeletePermanent)+'/permanent',{method:'DELETE'});removeMemoryCard(button.closest('.mc-card'),'archive');}catch(e){button.disabled=false;alert('没有永久删除：'+e.message);} });
 }
-async function loadLongContext() {
-  const body=document.getElementById('longContextBody'); stopLongContextPoll(); body.innerHTML='<div class="gnote">正在打开记忆控制台…</div>';
+async function loadLongContext(quiet) {
+  const body=document.getElementById('longContextBody'); stopLongContextPoll();
+  /* quiet：开关这种原地改动不清空面板。清空再重建就是「点一下慢半拍」的来源。 */
+  const keepScroll = quiet ? body.scrollTop : 0;
+  if(!quiet) body.innerHTML='<div class="gnote">正在打开记忆控制台…</div>';
   try {
     const chat=await currentChatForMemory(); if(!chat){body.innerHTML=memoryEmpty('还没有打开聊天','先打开一间聊天，再回来管理它的记忆。');return;}
     const [summaryResponse,modelResponse,cardsResponse,embeddingResponse,sigilloResponse]=await Promise.all([fetch('api/chats/'+encodeURIComponent(chat.id)+'/long-context',{cache:'no-store'}),fetch('api/long-context-model',{cache:'no-store'}),fetch('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards?include_archived=true',{cache:'no-store'}),fetch('api/embedding-model',{cache:'no-store'}),fetch('api/chats/'+encodeURIComponent(chat.id)+'/sigillo',{cache:'no-store'})]);
@@ -11496,6 +11508,7 @@ async function loadLongContext() {
     if(memoryConsoleTab==='cards') panel=`${(()=>{ const lastUse=cards.last_injection; if(!lastUse||!(lastUse.items||[]).length) return ''; /* 最近一次带入是「结果」不是设置：放记忆卡顶上，折叠着不挡翻卡 */ return `<details class="mc-used-fold"><summary>最近一次带入 · ${instructionEsc(memoryDate(lastUse.used_at))} · ${lastUse.items.length} 条</summary><div class="mc-stack mc-used-scroll" style="margin-top:10px">${lastUse.items.map(item=>memoryCardView(item,cards.taxonomy,'used')).join('')}</div></details>`; })()}<div class="mc-toolbar"><input class="ap-in" id="memorySearch" type="search" placeholder="搜索记忆内容" value="${instructionEsc(memoryConsoleQuery)}"><select class="ap-in" id="memoryFilter"><option value="all">全部状态</option><option value="active" ${memoryConsoleFilter==='active'?'selected':''}>可被挑选</option><option value="hidden" ${memoryConsoleFilter==='hidden'?'selected':''}>已隐藏</option><option value="high" ${memoryConsoleFilter==='high'?'selected':''}>固定保留</option><option value="archived" ${memoryConsoleFilter==='archived'?'selected':''}>已归档（${archived.length}）</option></select></div>${(active.length||archived.length)?`<div class="mc-stack">${active.concat(archived).map(item=>memoryCardView(item,cards.taxonomy,'card',recentIds)).join('')}</div><div class="mc-empty" id="memoryFilteredEmpty" hidden><strong>没有符合条件的记忆</strong>换个关键词或筛选条件看看。</div>`:memoryEmpty('还没有正式记忆卡','先到“待确认”生成候选，并逐条采用。')}`;
     
     body.innerHTML=`<div class="mc-intro"><h1>${instructionEsc(chat.name||'新对话')}</h1><p>记忆卡把重要细节拆成可以管理的小条目；摘要维持这段关系的连续性。</p><div class="mc-safety${cards.injection_enabled?'':' off'}"><span class="ic" data-i="${cards.injection_enabled?'check':'x'}"></span><span>${cards.injection_enabled?'按需记忆已开启：每轮最多带入 5 条相关卡片；隐藏、归档和过期内容会自动排除。':'按需记忆已暂停：AI 仍会看到长期摘要和最近原文，但不会看到记忆卡。'}</span></div></div><div class="mc-tabs" role="tablist" aria-label="记忆管理">${tabHtml}</div><section class="mc-panel" role="tabpanel">${panel}</section>`;
+    if(quiet) body.scrollTop=keepScroll;
     fillIcons(body);
     body.querySelectorAll('[data-memory-tab]').forEach(button=>button.onclick=()=>{memoryConsoleTab=button.dataset.memoryTab;loadLongContext();});
     if(memoryConsoleTab==='summary')wireMemorySummary(chat,summary);
