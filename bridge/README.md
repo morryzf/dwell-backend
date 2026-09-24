@@ -71,6 +71,7 @@ curl -s localhost:8787/health
 | `CLAUDE_AGENT_MODEL` | `sonnet` | 请求没带 model 时的默认值 |
 | `MAX_CONCURRENCY` | `1` | 同时在跑的 Claude Code 子进程数。2 核 4G 建议保持 1 |
 | `PROMPT_CACHE_TTL` | `1h` | 缓存保留时长，`5m` 或 `1h`；留空＝跟随 Claude Code 默认 |
+| `DISABLED_TOOLS` | 见下 | 移出上下文的内置工具，逗号分隔；留空＝一个都不禁 |
 | `MCP_SERVERS_JSON` | 空 | MCP 配置（内联 JSON） |
 | `MCP_SERVERS_FILE` | 空 | MCP 配置（文件路径），`MCP_SERVERS_JSON` 优先 |
 
@@ -115,6 +116,16 @@ data: [DONE]
 
 `session` 事件带回 Claude Code 的会话 id。Dwell 把它存在 settings 表的
 `agent_sdk_session:<聊天键>` 下，下一轮作为 `resume` 传回来。桥接自己不存任何状态。
+
+## 内置工具
+
+Claude Code 自带 25 个工具（Read / Write / Bash / WebSearch…），全是给改代码用的，
+光工具说明就占一万多 token，而这条通道只是聊天。所以默认把它们用
+`disallowedTools` 移出上下文——传裸名字是移除，不只是禁止调用。
+
+想放回来：`DISABLED_TOOLS=` （留空）。想只留几个：把不要的列进去就行。
+
+MCP 工具名字长这样 `mcp__<服务>__<工具>`，不受这个清单影响。
 
 ## MCP（Ombre Brain 等）
 

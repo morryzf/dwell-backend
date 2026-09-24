@@ -19,6 +19,23 @@ const DEFAULT_MODEL = (process.env.CLAUDE_AGENT_MODEL || "sonnet").trim();
 const MAX_CONCURRENCY = Math.max(1, Number(process.env.MAX_CONCURRENCY || 1));
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
+// Claude Code 自带的工具，全是给改代码用的：光是它们的说明就占一万多 token，
+// 而 Dwell 这条通道只是聊天。裸名字传进 disallowedTools 会把工具移出上下文，
+// 不只是禁止调用。MCP 工具名字长这样 mcp__<服务>__<工具>，不受影响。
+const DEFAULT_DISABLED_TOOLS = [
+  "Task", "Bash", "CronCreate", "CronDelete", "CronList", "DesignSync", "Edit",
+  "EnterWorktree", "ExitWorktree", "ListAgents", "Monitor", "NotebookEdit",
+  "PushNotification", "Read", "RemoteTrigger", "ReportFindings", "ScheduleWakeup",
+  "SendMessage", "Skill", "TaskStop", "ToolSearch", "WebFetch", "WebSearch",
+  "Workflow", "Write",
+];
+// 留空＝一个都不禁，把 Claude Code 的整套工具原样交给模型。
+const DISABLED_TOOLS = (
+  process.env.DISABLED_TOOLS === undefined
+    ? DEFAULT_DISABLED_TOOLS
+    : process.env.DISABLED_TOOLS.split(/[,\s]+/)
+).map((name) => name.trim()).filter(Boolean);
+
 // 子进程里留着这两个变量就会走按量计费的 API，而不是订阅额度。
 const CHILD_ENV = { ...process.env };
 delete CHILD_ENV.ANTHROPIC_API_KEY;
@@ -146,6 +163,9 @@ async function runChat(res, request) {
   if (HAS_MCP) {
     options.mcpServers = MCP_SERVERS;
   }
+  if (DISABLED_TOOLS.length) {
+    options.disallowedTools = DISABLED_TOOLS;
+  }
 
   const includeThinking = request.include_thinking !== false;
   let sawResultUsage = false;
@@ -252,6 +272,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[bridge] 默认模型 ${DEFAULT_MODEL}，并发上限 ${MAX_CONCURRENCY}`);
   console.log(`[bridge] 门禁 token：${BRIDGE_TOKEN ? "已启用" : "未设置"}`);
   console.log(`[bridge] 缓存 TTL ${PROMPT_CACHE_TTL || "跟随默认"}`);
+  console.log(`[bridge] 移出上下文的内置工具 ${DISABLED_TOOLS.length} 个`);
   if (HAS_MCP) {
     console.log(`[bridge] MCP：${Object.keys(MCP_SERVERS).join(", ")}`);
   }
