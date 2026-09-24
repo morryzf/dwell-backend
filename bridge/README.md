@@ -70,6 +70,7 @@ curl -s localhost:8787/health
 | `BRIDGE_TOKEN` | 空 | 门禁 token。空＝不校验，只在 `127.0.0.1` 上才可接受 |
 | `CLAUDE_AGENT_MODEL` | `sonnet` | 请求没带 model 时的默认值 |
 | `MAX_CONCURRENCY` | `1` | 同时在跑的 Claude Code 子进程数。2 核 4G 建议保持 1 |
+| `PROMPT_CACHE_TTL` | `1h` | 缓存保留时长，`5m` 或 `1h`；留空＝跟随 Claude Code 默认 |
 | `MCP_SERVERS_JSON` | 空 | MCP 配置（内联 JSON） |
 | `MCP_SERVERS_FILE` | 空 | MCP 配置（文件路径），`MCP_SERVERS_JSON` 优先 |
 
@@ -141,4 +142,7 @@ export MCP_SERVERS_JSON='{"ombre":{"type":"http","url":"https://……/mcp","hea
   system 里的一句长度要求。
 - **成本数字不上报。** 订阅额度不按量计费，Agent SDK 的 `total_cost_usd` 是本地
   估算，Python 侧已经把它从 usage 里摘掉，不进 Dwell 的成本统计。token 数照常统计。
+- **缓存 TTL 钉在 1 小时。** 订阅在套餐额度内本来就是 1 小时，但一旦开始吃
+  usage credits 就会掉到 5 分钟。聊天常隔几十分钟才继续，5 分钟基本等于每次
+  都重建缓存，所以显式钉住（`PROMPT_CACHE_TTL`）。代价是缓存写入比 5 分钟贵些。
 - **没做缓存保活。** 交接文件里说先不做。

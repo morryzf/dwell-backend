@@ -24,6 +24,13 @@ const CHILD_ENV = { ...process.env };
 delete CHILD_ENV.ANTHROPIC_API_KEY;
 delete CHILD_ENV.ANTHROPIC_AUTH_TOKEN;
 
+// 订阅在套餐额度内本来就是 1 小时，但一开始吃 usage credits 就会掉到 5 分钟。
+// 聊天经常隔几十分钟才继续，掉到 5 分钟等于每次都重新建缓存，所以显式钉住。
+const PROMPT_CACHE_TTL = (process.env.PROMPT_CACHE_TTL || "1h").trim();
+if (PROMPT_CACHE_TTL) {
+  CHILD_ENV.CLAUDE_CODE_PROMPT_CACHE_TTL = PROMPT_CACHE_TTL;
+}
+
 function loadMcpServers() {
   const inline = (process.env.MCP_SERVERS_JSON || "").trim();
   const file = (process.env.MCP_SERVERS_FILE || "").trim();
@@ -244,6 +251,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[bridge] 监听 http://${HOST}:${PORT}`);
   console.log(`[bridge] 默认模型 ${DEFAULT_MODEL}，并发上限 ${MAX_CONCURRENCY}`);
   console.log(`[bridge] 门禁 token：${BRIDGE_TOKEN ? "已启用" : "未设置"}`);
+  console.log(`[bridge] 缓存 TTL ${PROMPT_CACHE_TTL || "跟随默认"}`);
   if (HAS_MCP) {
     console.log(`[bridge] MCP：${Object.keys(MCP_SERVERS).join(", ")}`);
   }
