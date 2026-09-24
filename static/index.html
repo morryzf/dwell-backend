@@ -860,6 +860,7 @@ html[data-theme="dark"] .composer {
   .ap-cache-help { margin: 7px 2px 0; color: var(--dim); font-size: 12.5px; line-height: 1.55; }
   .ap-section-description { margin: 2px 0 0; color: var(--dim); font-size: 12.5px; line-height: 1.55; }
   .provider-profile-list { margin-top: 12px; }
+  .group .provider-profile-row { padding: 10px 16px; font-size: 14.5px; gap: 10px; }
   .provider-profile-row { transition: transform 140ms var(--ease-out), background-color 160ms ease; }
   .provider-profile-row:active { transform: scale(.985); }
   .provider-profile-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -879,6 +880,7 @@ html[data-theme="dark"] .composer {
   }
   .ap-b:active { transform: scale(.985); }
   .ap-b.go { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .ap-b.danger { color: var(--danger, #c0566f); }
   .ap-msg { display: none; margin-top: 12px; padding: 11px 12px; border-radius: 11px; color: var(--green); background: var(--sage-track); font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
   .ap-msg.on { display: block; }
   .ap-msg.bad { color: var(--red); background: var(--red-track); }
@@ -10506,7 +10508,10 @@ function openProviderEditorPage(provider) {
     + '<div class="ap-cache-help">这里只决定怎样连接供应商；缓存时长在每间聊天的模型选择里设置。</div>'
     + '<div class="ap-lb">令牌</div>'
     + '<input class="ap-in" id="apTok" type="password" placeholder="粘贴 API 密钥">'
-    + '<div class="ap-btns single"><button class="ap-b go" id="apSave">保存供应商</button></div>'
+    + (editingProviderId
+        ? '<div class="ap-btns"><button class="ap-b danger" id="apDelete">删除供应商</button>'
+          + '<button class="ap-b go" id="apSave">保存供应商</button></div>'
+        : '<div class="ap-btns single"><button class="ap-b go" id="apSave">保存供应商</button></div>')
     + '<div class="ap-msg" id="apMsg"></div></div>';
   b.scrollTop = 0;
 
@@ -10527,6 +10532,27 @@ function openProviderEditorPage(provider) {
     msg.textContent = text;
     msg.className = 'ap-msg on' + (bad ? ' bad' : '');
   };
+  const deleteButton = document.getElementById('apDelete');
+  if (deleteButton) {
+    deleteButton.onclick = async () => {
+      if (!confirm('删掉供应商「' + (p.name || '') + '」？它保存的密钥也会一起没了。')) return;
+      deleteButton.disabled = true;
+      say('正在删除…');
+      try {
+        const response = await fetch('api/providers/' + encodeURIComponent(editingProviderId), {
+          method: 'DELETE',
+        });
+        const data = await response.json();
+        // 后端挡着：还有聊天在用这个供应商时不给删，理由照原样说给用户。
+        if (!response.ok || !data.ok) throw new Error(data.detail || '没有删掉');
+        loadApi();
+      } catch (e) {
+        deleteButton.disabled = false;
+        say('删不掉：' + e.message, true);
+      }
+    };
+  }
+
   document.getElementById('apSave').onclick = async () => {
     say('正在安全保存…');
     try {

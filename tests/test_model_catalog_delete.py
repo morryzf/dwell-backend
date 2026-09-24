@@ -1,7 +1,8 @@
-import os
 import tempfile
 import unittest
 from pathlib import Path
+
+from app import db
 
 
 class ModelCatalogDeleteTest(unittest.TestCase):
@@ -9,12 +10,12 @@ class ModelCatalogDeleteTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        # db 在别的测试里可能已经导入过了，环境变量这时改不动它，直接换路径。
         cls.tmp = tempfile.TemporaryDirectory()
-        os.environ["DWELL_DB"] = str(Path(cls.tmp.name) / "catalog.db")
-        from app import db
-
-        cls.db = db
+        cls.previous_path = db.DB_PATH
+        db.DB_PATH = str(Path(cls.tmp.name) / "catalog.db")
         db.init_db()
+        cls.db = db
         # 供应商名字有唯一约束，整个类共用一个。
         cls.provider = db.provider_upsert(
             "", "测试供应商", "https://example.test/v1", "", True,
@@ -22,6 +23,7 @@ class ModelCatalogDeleteTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        db.DB_PATH = cls.previous_path
         cls.tmp.cleanup()
 
     def test_deleting_removes_the_row_entirely(self):
