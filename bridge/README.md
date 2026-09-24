@@ -96,6 +96,7 @@ curl -s localhost:8787/health
   "system": "你是……",
   "prompt": "铺平后的对话",
   "include_thinking": true,
+  "effort": "high",
   "max_turns": 1,
   "session_id": "dwell-chat:xxx"
 }
@@ -116,6 +117,22 @@ data: [DONE]
 
 `session` 事件带回 Claude Code 的会话 id。Dwell 把它存在 settings 表的
 `agent_sdk_session:<聊天键>` 下，下一轮作为 `resume` 传回来。桥接自己不存任何状态。
+
+## thinking 和 effort
+
+Dwell 的两个设置直接对上 SDK 的选项：
+
+| Dwell | 传过来 | SDK |
+|---|---|---|
+| 显示思考 开 | `include_thinking: true` | `thinking: {type:"adaptive", display:"summarized"}` |
+| 显示思考 关 | `include_thinking: false` | `thinking: {type:"disabled"}` |
+| Effort 档位 | `effort: "high"` | `effort`（low/medium/high/xhigh/max） |
+
+要显式写 `display: "summarized"`：当前模型默认是 `omitted`，thinking 会是空的，
+Dwell 那边就什么都看不到。
+
+关掉 thinking 时，`xhigh` / `max` 会被丢弃——部分模型不接受这个组合，会直接 400。
+模型不支持的档位由 Claude Code 自己降级，桥接不拦。
 
 ## 内置工具
 

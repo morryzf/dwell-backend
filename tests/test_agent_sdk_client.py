@@ -128,14 +128,15 @@ class BridgePayloadTest(unittest.TestCase):
         self.assertEqual(payload["max_turns"], 8)
         self.assertNotIn("tools", payload)
 
-    def test_disabled_thinking_drops_the_effort(self):
+    def test_disabled_thinking_still_carries_the_effort(self):
+        # effort 关掉 thinking 时也管花多少 token；哪些组合能用由桥接判断。
         payload = build_bridge_payload(
             "sonnet", [{"role": "user", "content": "在吗"}],
             reasoning_effort="high", thinking_enabled=False,
         )
 
         self.assertFalse(payload["include_thinking"])
-        self.assertNotIn("effort", payload)
+        self.assertEqual(payload["effort"], "high")
 
     def test_max_tokens_becomes_a_length_note_in_the_system_prompt(self):
         payload = build_bridge_payload(

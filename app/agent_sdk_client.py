@@ -231,8 +231,9 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
     }
     if resume:
         payload["resume"] = resume
+    # effort 关掉 thinking 时依然有意义（它还管花多少 token），能不能用由桥接判断。
     effort = str(reasoning_effort or "").strip()
-    if effort and thinking_enabled:
+    if effort:
         payload["effort"] = effort
     return payload
 

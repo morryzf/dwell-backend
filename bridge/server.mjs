@@ -123,6 +123,10 @@ function writeEvent(res, event) {
 }
 
 // Agent SDK 的 usage 已经是 Anthropic 的形状，Python 那边按原样解析。
+const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
+// 关掉 thinking 时，部分模型不接受高档 effort，会直接 400。挡在这儿。
+const EFFORT_WITHOUT_THINKING = new Set(["low", "medium", "high"]);
+
 function usagePayload(usage) {
   if (!usage || typeof usage !== "object") return null;
   return {
@@ -168,6 +172,17 @@ async function runChat(res, request) {
   }
 
   const includeThinking = request.include_thinking !== false;
+  // Dwell 的「显示思考」开关本来就是改请求，不是只藏起来，所以这里真的关掉它。
+  // 开着时要显式要 summarized：当前模型默认是 omitted，thinking 会是空的。
+  options.thinking = includeThinking
+    ? { type: "adaptive", display: "summarized" }
+    : { type: "disabled" };
+
+  const effort = String(request.effort || "").trim();
+  if (EFFORT_LEVELS.has(effort)
+      && (includeThinking || EFFORT_WITHOUT_THINKING.has(effort))) {
+    options.effort = effort;
+  }
   let sawResultUsage = false;
   let sentSession = "";
 
