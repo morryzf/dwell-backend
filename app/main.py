@@ -2421,7 +2421,8 @@ async def providers_upsert(request: Request):
     provider_type = str(
         payload.get("provider_type", (existing or {}).get("provider_type") or "generic")
     ).strip()
-    if provider_type not in {"generic", "openrouter", "claude_compatible"}:
+    if provider_type not in {"generic", "openrouter", "claude_compatible",
+                             "claude_agent_sdk"}:
         raise HTTPException(400, "未知的供应商类型")
     # Cache duration is selected per chat, never as a provider-side default.
     prompt_cache_ttl = "off"

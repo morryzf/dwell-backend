@@ -586,6 +586,19 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
     if not model_id:
         yield {"type": "text", "text": "[配置错误] 这个聊天还没有选择模型"}
         return
+
+    if str(provider.get("provider_type") or "") == "claude_agent_sdk":
+        # 桥接服务用本机 Claude Code 的登录态走订阅额度，这里没有模型密钥可解。
+        from . import agent_sdk_client  # 延迟导入：桥接模块反过来要用本模块的工具函数
+
+        async for event in agent_sdk_client.stream_bridge_chat(
+            provider, model_id, messages, tools,
+            max_tokens=max_tokens, reasoning_effort=reasoning_effort,
+            thinking_enabled=thinking_enabled, session_id=session_id,
+        ):
+            yield event
+        return
+
     if not provider.get("api_key_box"):
         yield {"type": "text", "text": "[配置错误] 这个供应商还没有保存 API 密钥"}
         return
