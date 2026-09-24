@@ -112,6 +112,9 @@ data: [DONE]
 `usage` 只在 `result` 消息上取——Agent SDK 每步 assistant 消息上的
 `output_tokens` 是占位值，不是真实数字。
 
+`session` 事件带回 Claude Code 的会话 id。Dwell 把它存在 settings 表的
+`agent_sdk_session:<聊天键>` 下，下一轮作为 `resume` 传回来。桥接自己不存任何状态。
+
 ## MCP（Ombre Brain 等）
 
 Dwell 自己的 function tools 没法直接交给 Agent SDK，所以走这条通道时工具由
@@ -129,8 +132,11 @@ export MCP_SERVERS_JSON='{"ombre":{"type":"http","url":"https://……/mcp","hea
 
 ## 已知取舍
 
-- **多轮历史是铺平的。** Agent SDK 收的是一句 prompt，不是 role 数组，所以
-  Python 侧把历史渲染成 `<对话记录>` 块。换成 `resume` 会话是后续优化。
+- **多轮靠续会话，回退时才铺平。** Agent SDK 收的是一句 prompt，不是 role 数组。
+  平时 Python 侧带上 `resume`，Claude Code 自己记着之前说过什么，这轮只递新的
+  那一句；只有在会话对不上的时候，才把历史渲染成 `<对话记录>` 块重讲一遍。
+  对不上的情况有四种：换了模型、system 变了（记忆卡更新）、历史被改过或删过、
+  以及这轮没有新的用户发言（重新生成）。续会话失败会自动重来一次，用户无感。
 - **`max_tokens` 不是硬上限。** Agent SDK 没有这个参数，Dwell 只能把它写成
   system 里的一句长度要求。
 - **成本数字不上报。** 订阅额度不按量计费，Agent SDK 的 `total_cost_usd` 是本地

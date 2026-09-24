@@ -1334,7 +1334,8 @@ async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
             provider, selection["model_id"], messages, tools or None,
             reasoning_effort=selection.get("reasoning_effort"),
             thinking_enabled=bool(selection.get("show_thinking", 1)),
-            session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
+            # 这个键既是 OpenRouter 的缓存分组，也是 Claude Code 的会话归属。
+            session_id=f"dwell-chat:{chat_id}",
         ):
             if event.get("type") == "text":
                 parts.append(str(event.get("text") or ""))
@@ -4846,7 +4847,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 provider, selection["model_id"], messages, tools or None,
                 reasoning_effort=selection.get("reasoning_effort"),
                 thinking_enabled=show_thinking,
-                session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
+                # 这个键既是 OpenRouter 的缓存分组，也是 Claude Code 的会话归属。
+                session_id=f"dwell-chat:{chat_id}",
             ):
                 if event["type"] == "thinking":
                     append_stream_thinking(str(event.get("thinking") or ""))

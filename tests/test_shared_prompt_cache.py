@@ -37,7 +37,7 @@ class SharedPromptCacheSourceTest(unittest.TestCase):
             self.source.index("async def _heartbeat_decide"):
             self.source.index("async def _heartbeat_once")
         ]
-        self.assertIn('session_id=f"dwell-chat:{chat_id}" if cache_friendly else None', heartbeat)
+        self.assertIn('session_id=f"dwell-chat:{chat_id}",', heartbeat)
         self.assertIn("prompt_cache_enabled(provider, selection[\"model_id\"])", heartbeat)
 
     def test_proactive_watch_keeps_dynamic_context_after_the_anchor(self):

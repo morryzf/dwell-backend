@@ -7,7 +7,9 @@ from app.agent_sdk_client import (
     bridge_events,
     build_bridge_payload,
     build_prompt,
+    plan_turn,
     split_history,
+    turns_digest,
 )
 
 REAL_STREAM_BRIDGE_CHAT = agent_sdk_client.stream_bridge_chat
@@ -175,7 +177,7 @@ class BridgeEventsTest(unittest.TestCase):
         self.assertNotIn("cost", events[0]["usage"])
         self.assertNotIn("upstream_cost", events[0]["usage"])
 
-    def test_error_surfaces_as_text_and_stops_the_stream(self):
+    def test_error_stops_the_stream_and_stays_internal(self):
         rows = [
             'data: {"type":"error","message":"Claude Code 没起来"}',
             'data: {"type":"text","text":"不该出现"}',
@@ -183,8 +185,18 @@ class BridgeEventsTest(unittest.TestCase):
 
         events = _run(_collect(bridge_events(_lines(rows))))
 
+        # bridge_error 由上层决定是重试还是显示，不直接变成气泡。
         self.assertEqual(events, [
-            {"type": "text", "text": "[桥接错误] Claude Code 没起来"},
+            {"type": "bridge_error", "message": "Claude Code 没起来"},
+        ])
+
+    def test_session_id_comes_through_as_an_internal_event(self):
+        rows = ['data: {"type":"session","session_id":"abc-123"}']
+
+        events = _run(_collect(bridge_events(_lines(rows))))
+
+        self.assertEqual(events, [
+            {"type": "agent_session", "session_id": "abc-123"},
         ])
 
     def test_skips_blank_lines_and_broken_json(self):
@@ -193,6 +205,121 @@ class BridgeEventsTest(unittest.TestCase):
         events = _run(_collect(bridge_events(_lines(rows))))
 
         self.assertEqual(events, [{"type": "text", "text": "在"}])
+
+
+class PlanTurnTest(unittest.TestCase):
+    def setUp(self):
+        self.turns = [("用户", "在吗"), ("助手", "在")]
+        self.system = "你是 Cloudy"
+        self.state = {
+            "sid": "sess-1",
+            "model": "sonnet",
+            "sys": turns_digest([("system", self.system)]),
+            "n": 2,
+            "turns": turns_digest(self.turns),
+        }
+
+    def _next(self, extra):
+        return self.turns + extra
+
+    def test_resumes_and_only_sends_the_new_user_turn(self):
+        turns = self._next([("助手", "在"), ("用户", "再说一句")])
+
+        sid, outgoing = plan_turn(self.state, "sonnet", self.system, turns)
+
+        self.assertEqual(sid, "sess-1")
+        # 它自己那条回复它已经记着了，不该再抄回去。
+        self.assertEqual(outgoing, [("用户", "再说一句")])
+
+    def test_no_state_starts_from_scratch(self):
+        sid, outgoing = plan_turn(None, "sonnet", self.system, self.turns)
+
+        self.assertEqual(sid, "")
+        self.assertEqual(outgoing, self.turns)
+
+    def test_changed_model_starts_from_scratch(self):
+        turns = self._next([("助手", "在"), ("用户", "再说一句")])
+
+        sid, outgoing = plan_turn(self.state, "claude-opus-4-6", self.system, turns)
+
+        self.assertEqual(sid, "")
+        self.assertEqual(outgoing, turns)
+
+    def test_changed_system_starts_from_scratch(self):
+        # system 里有记忆卡，续上的会话看不到新的，所以必须重讲。
+        turns = self._next([("助手", "在"), ("用户", "再说一句")])
+
+        sid, outgoing = plan_turn(self.state, "sonnet", "你是 Cloudy，她刚体检", turns)
+
+        self.assertEqual(sid, "")
+        self.assertEqual(outgoing, turns)
+
+    def test_edited_history_starts_from_scratch(self):
+        turns = [("用户", "在吗吗吗"), ("助手", "在"), ("用户", "再说一句")]
+
+        sid, outgoing = plan_turn(self.state, "sonnet", self.system, turns)
+
+        self.assertEqual(sid, "")
+        self.assertEqual(outgoing, turns)
+
+    def test_deleted_history_starts_from_scratch(self):
+        sid, outgoing = plan_turn(self.state, "sonnet", self.system, [("用户", "在吗")])
+
+        self.assertEqual(sid, "")
+        self.assertEqual(outgoing, [("用户", "在吗")])
+
+    def test_nothing_new_to_say_starts_from_scratch(self):
+        # 重新生成：没有新的用户轮次，续上去会让它对着空气说话。
+        turns = self._next([("助手", "在")])
+
+        sid, outgoing = plan_turn(self.state, "sonnet", self.system, turns)
+
+        self.assertEqual(sid, "")
+        self.assertEqual(outgoing, turns)
+
+
+class BridgePayloadResumeTest(unittest.TestCase):
+    def test_resuming_sends_only_the_new_turn(self):
+        messages = [
+            {"role": "system", "content": "你是 Cloudy"},
+            {"role": "user", "content": "在吗"},
+            {"role": "assistant", "content": "在"},
+            {"role": "user", "content": "再说一句"},
+        ]
+        state = {
+            "sid": "sess-1",
+            "model": "sonnet",
+            "sys": turns_digest([("system", "你是 Cloudy")]),
+            "n": 1,
+            "turns": turns_digest([("用户", "在吗")]),
+        }
+
+        payload = build_bridge_payload("sonnet", messages, state=state)
+
+        self.assertEqual(payload["resume"], "sess-1")
+        self.assertEqual(payload["prompt"], "再说一句")
+        self.assertNotIn("对话记录", payload["prompt"])
+
+    def test_without_state_the_whole_history_is_flattened(self):
+        messages = [
+            {"role": "user", "content": "在吗"},
+            {"role": "assistant", "content": "在"},
+            {"role": "user", "content": "再说一句"},
+        ]
+
+        payload = build_bridge_payload("sonnet", messages)
+
+        self.assertNotIn("resume", payload)
+        self.assertIn("对话记录", payload["prompt"])
+
+    def test_bookkeeping_fields_are_stripped_before_sending(self):
+        payload = build_bridge_payload("sonnet", [{"role": "user", "content": "在吗"}])
+
+        self.assertIn("_turns", payload)
+        self.assertIn("_system", payload)
+        sent = {k: v for k, v in payload.items() if not k.startswith("_")}
+        self.assertNotIn("_turns", sent)
+        self.assertNotIn("_system", sent)
 
 
 class StreamChatDispatchTest(unittest.TestCase):

@@ -131,14 +131,33 @@ async function runChat(res, request) {
   if (system) {
     options.systemPrompt = system;
   }
+  // 续上一次的会话：Claude Code 自己记着之前说过什么，这轮只递新的那一句。
+  const resume = String(request.resume || "");
+  if (resume) {
+    options.resume = resume;
+  }
   if (HAS_MCP) {
     options.mcpServers = MCP_SERVERS;
   }
 
   const includeThinking = request.include_thinking !== false;
   let sawResultUsage = false;
+  let sentSession = "";
+
+  // 会话 id 要在正文之前送出去，这样出错时上层也知道该不该清掉旧状态。
+  const reportSession = (id) => {
+    const sid = String(id || "");
+    if (sid && sid !== sentSession) {
+      sentSession = sid;
+      writeEvent(res, { type: "session", session_id: sid });
+    }
+  };
 
   for await (const message of query({ prompt, options })) {
+    if (message.session_id) {
+      reportSession(message.session_id);
+    }
+
     if (message.type === "stream_event") {
       const delta = message.event?.delta;
       if (delta?.type === "text_delta" && delta.text) {
