@@ -60,8 +60,8 @@ PAIR_NOTE_TAIL = 30     # 注入块里逐条备注截断
 AGENT_NOTE_TAIL = 300   # 注入块里 agent_note 截断
 
 TAIL_RECENT = 3         # 注入块回看几单
-BENCH_WINDOW = 2        # 好评冷却看最近几张人类填的 submitted 单
-HIGH_STAR = 4           # 「高星」门槛
+BENCH_WINDOW = 3        # 好评冷却看最近几张人类填的 submitted 单
+HIGH_STAR = 4.5         # 「高星」门槛
 
 
 class SigilloError(Exception):
@@ -151,7 +151,7 @@ def _submitted_desc(chat_id: str) -> list[dict]:
 def benched_now(chat_id: str) -> list[dict]:
     """连着 BENCH_WINDOW 张人类亲手填的单里都出现、且每次都高星的 (dim,tag)。
 
-    agent 反向填的回执不算——冷却的语义是「对方连着两次打高星」，
+    agent 反向填的回执不算——冷却的语义是「对方连着几次都打高星」，
     agent 给自己打的星不是对方的口味证词。
     """
     try:
