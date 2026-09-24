@@ -1989,10 +1989,20 @@ html[data-theme="dark"] .note { color: #2f2b26; box-shadow: 0 3px 12px rgba(0,0,
           background: var(--panel); color: var(--text);
           font-variant-numeric: tabular-nums; transition: background .2s, color .2s; }
   .chip.on { background: var(--text); color: var(--bg); }
+  /* 空的 time 输入框什么都不显，在手机上就是个莫名其妙的空药片。
+     套一层壳，没选时间时让它读作「时间」，选了就让真值露出来。 */
+  .hadd .tmwrap { position: relative; display: inline-flex; align-items: center; }
+  .hadd .tmwrap::before {
+    content: '时间'; position: absolute; left: 12px; pointer-events: none;
+    color: var(--dim); font-size: 12.5px;
+  }
+  .hadd .tmwrap.set::before { content: none; }
+  .hadd .tmwrap:not(.set) input[type=time] { color: transparent; }
   .hadd input[type=time] {
     border: 0; border-radius: 999px; padding: 6px 12px;
     background: var(--panel); color: inherit; font: inherit; font-size: 12.5px;
     font-variant-numeric: tabular-nums; -webkit-appearance: none; appearance: none;
+    min-width: 76px;
   }
   .hadd .go { margin-left: auto; border: 0; border-radius: 999px; padding: 8px 20px;
               font-size: 13px; background: var(--text); color: var(--bg); font-weight: 500; }
@@ -9809,6 +9819,13 @@ function renderTodos(d) {
   const row = document.createElement('div');
   row.className = 'row';
   const tm = document.createElement('input'); tm.type = 'time';
+  tm.setAttribute('aria-label', '几点提醒');
+  const tmWrap = document.createElement('span');
+  tmWrap.className = 'tmwrap';
+  tmWrap.appendChild(tm);
+  const tmSync = () => tmWrap.classList.toggle('set', !!tm.value);
+  tm.addEventListener('input', tmSync);
+  tm.addEventListener('change', tmSync);
   const daily = document.createElement('button');
   daily.className = 'chip'; daily.textContent = '\u6bcf\u5929';
   let dailyOn = false;
@@ -9820,13 +9837,13 @@ function renderTodos(d) {
     if (!v) return;
     inp.value = '';
     todoAct({ action: 'add', list: 'hers', text: v, by: 'her', at: tm.value, fixed: dailyOn });
-    tm.value = ''; dailyOn = false; daily.classList.remove('on');
+    tm.value = ''; tmSync(); dailyOn = false; daily.classList.remove('on');
     add.classList.remove('open'); plus.style.display = '';
   };
   go.onclick = doAdd;
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) doAdd(); });
   plus.onclick = () => { add.classList.add('open'); plus.style.display = 'none'; inp.focus(); };
-  row.append(tm, daily, go);
+  row.append(tmWrap, daily, go);
   add.append(inp, row);
   c1.append(plus, add);
   todoBody.appendChild(c1);
