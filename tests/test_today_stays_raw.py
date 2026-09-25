@@ -74,17 +74,24 @@ class CutoffTest(unittest.TestCase):
         first = self._say("整六点这句", self.day_start)
         self.assertLess(main._memory_cutoff(self.chat["id"]), first)
 
-    def test_the_protected_run_never_outgrows_the_prompt_window(self):
-        """聊疯了的那天：今天最早的几条还是会被折成分段。
+    def test_a_talky_day_is_still_kept_whole(self):
+        """今天聊超 100 条也一条不折——上下文窗口会跟着长。"""
+        talky = main.CACHE_HISTORY_TARGET_MESSAGES + 60
+        rows = [self._say(f"今天第 {i} 句", self.day_start + 60 * i) for i in range(talky)]
+        self.assertLess(main._memory_cutoff(self.chat["id"]), rows[0],
+                        "窗口跟着今天长，就不该折今天的话")
 
-        进分段、等着变成记忆卡，好过既没折成分段、也没进上下文地凭空消失。
+    def test_only_the_hard_ceiling_folds_todays_oldest(self):
+        """撞到防爆硬顶时，最早的几条才会被折成分段。
+
+        进分段、等着变成记忆卡，好过既不在上下文里、也不在分段里地凭空消失。
         """
-        heavy = main.CACHE_HISTORY_TARGET_MESSAGES + 40
+        heavy = main.MAX_RAW_HISTORY_MESSAGES + 40
         rows = [self._say(f"今天第 {i} 句", self.day_start + 60 * i) for i in range(heavy)]
         cutoff = main._memory_cutoff(self.chat["id"])
-        self.assertGreater(cutoff, 0, "超出上下文窗口的那段必须被压走")
-        window_floor = rows[-main.CACHE_HISTORY_TARGET_MESSAGES]
-        self.assertLess(cutoff, window_floor, "压缩线不该咬进上下文窗口里")
+        self.assertGreater(cutoff, 0, "超出硬顶的那段必须折走")
+        self.assertLess(cutoff, rows[-main.MAX_RAW_HISTORY_MESSAGES],
+                        "折的线不该咬进窗口里")
 
 
 if __name__ == "__main__":

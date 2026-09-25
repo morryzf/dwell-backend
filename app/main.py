@@ -62,6 +62,9 @@ MEMORY_CARD_UPDATE_MIN_MESSAGES = 50
 MEMORY_SEGMENT_MESSAGES = 50
 CACHE_HISTORY_TARGET_MESSAGES = 100
 CACHE_HISTORY_MAX_MESSAGES = 150
+# 今天的原文全进上下文，不管多少条。这个数只是防爆的硬顶，
+# 一天真聊到这个量，再塞下去模型窗口也装不下了。
+MAX_RAW_HISTORY_MESSAGES = 400
 
 MEMORY_CARD_TYPES = {
     "stable_fact": "稳定事实",
@@ -503,12 +506,12 @@ def _memory_cutoff(chat_id: str) -> int:
     today_first = db.first_message_rowid_since(chat_id, db.day_start_ts())
     if today_first:
         cutoff = min(cutoff, today_first - 1)
-    # 保护区不能撑得比真正塞进提示词的窗口还大，不然中间会出现一段
-    # 既没折成分段、也没进上下文的空洞。聊得凶的那天，今天最早的几条
-    # 还是会被折走——进分段、等着变成记忆卡，好过凭空消失。
-    # （分段是记忆卡的原料；摘要读的是卡，不读分段。）
-    window = db.message_list(chat_id, limit=CACHE_HISTORY_TARGET_MESSAGES)
-    if len(window) >= CACHE_HISTORY_TARGET_MESSAGES:
+    # 上下文窗口现在自己会跟着「今天」长，所以今天的话本来就都在里面。
+    # 只有撞到 MAX_RAW_HISTORY_MESSAGES 那个防爆硬顶时，最早的几条会落到
+    # 窗口外——那段必须折成分段，不然既不在上下文里、也不在分段里，
+    # 真的没人看得见了。（分段是记忆卡的原料；摘要读的是卡，不读分段。）
+    window = db.message_list(chat_id, limit=MAX_RAW_HISTORY_MESSAGES)
+    if len(window) >= MAX_RAW_HISTORY_MESSAGES:
         cutoff = max(cutoff, int(window[0]["rowid"]) - 1)
     return max(0, cutoff)
 
@@ -1181,12 +1184,25 @@ def _chat_history_messages_from_rows(rows: list[dict]) -> list[dict]:
     ]
 
 
+def _history_window(chat_id: str, base: int) -> int:
+    """这一轮要带多少条原文。
+
+    至少 base 条，但今天说过的话一句不落——今天聊得多，窗口就跟着长。
+    MAX_RAW_HISTORY_MESSAGES 是防爆的硬顶，正常的一天碰不到。
+    """
+    today = db.message_count_since(chat_id, db.day_start_ts())
+    return max(1, min(MAX_RAW_HISTORY_MESSAGES, max(base, today)))
+
+
 def _chat_history_rows(chat_id: str, cache_friendly: bool) -> list[dict]:
     """Keep a cacheable history head fixed instead of sliding it every turn."""
     if not cache_friendly:
-        return db.message_list(chat_id, limit=CACHE_HISTORY_TARGET_MESSAGES)
+        return db.message_list(
+            chat_id, limit=_history_window(chat_id, CACHE_HISTORY_TARGET_MESSAGES)
+        )
 
-    rows = db.message_list(chat_id, limit=CACHE_HISTORY_MAX_MESSAGES + 1)
+    window = _history_window(chat_id, CACHE_HISTORY_MAX_MESSAGES)
+    rows = db.message_list(chat_id, limit=window + 1)
     if not rows:
         return []
     setting_key = f"prompt_cache_history_start:{chat_id}"
@@ -1205,10 +1221,10 @@ def _chat_history_rows(chat_id: str, cache_friendly: bool) -> list[dict]:
     anchor_is_loaded = any(
         int(row.get("rowid") or 0) == start_rowid for row in cacheable_rows
     )
-    if anchor_is_loaded and anchored and len(anchored) <= CACHE_HISTORY_MAX_MESSAGES:
+    if anchor_is_loaded and anchored and len(anchored) <= window:
         return anchored
 
-    selected = cacheable_rows[-CACHE_HISTORY_TARGET_MESSAGES:]
+    selected = cacheable_rows[-_history_window(chat_id, CACHE_HISTORY_TARGET_MESSAGES):]
     if selected:
         db.setting_set(setting_key, str(int(selected[0]["rowid"])))
     return selected
