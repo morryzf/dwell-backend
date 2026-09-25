@@ -94,6 +94,14 @@ class TodoTimeFieldTest(unittest.TestCase):
         self.assertIn(".hadd .tmwrap.set::before { content: none; }", HTML)
         self.assertIn(".hadd .tmwrap:not(.set) input[type=time] { color: transparent; }", HTML)
 
+    def test_it_is_the_same_pill_as_the_daily_chip(self):
+        # 药片的长相全在壳上，里头的 input 脱得只剩文字，
+        # 再用一个看不见的中文字把高度撑到和「每天」一样。
+        self.assertIn("border-radius: 999px; padding: 7px 14px; font-size: 12.5px;", HTML)
+        self.assertIn("content: '时'; width: 0; overflow: hidden; visibility: hidden;", HTML)
+        self.assertIn("height: 1.7em;", HTML)
+        self.assertIn("border: 0; padding: 0; margin: 0; background: transparent;", HTML)
+
     def test_the_label_follows_the_value(self):
         self.assertIn("const tmSync = () => tmWrap.classList.toggle('set', !!tm.value);", HTML)
         self.assertIn("tm.addEventListener('change', tmSync);", HTML)
