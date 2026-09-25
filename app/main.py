@@ -1225,22 +1225,26 @@ def _day_brief_lines(now: datetime) -> list[str]:
 
 
 def _day_brief_message(now: datetime) -> list[dict]:
-    """一天只给一次，当天 DAY_BRIEF_FROM_HOUR 点以后的头一句话才带上。"""
+    """当天 DAY_BRIEF_FROM_HOUR 点以后，每一轮都带上。
+
+    早先是一天只注入一次，结果是：那一轮他没顺口提，这些事今天就
+    再也不出现，她事后问「我今天有什么事」他也答不上来。改成每轮都在，
+    只在第二次起注明已经给过——也是事实，不是「别再说了」的指令。
+    """
     try:
         if now.hour < DAY_BRIEF_FROM_HOUR:
             return []
-        today = now.date().isoformat()
-        if db.setting_get(DAY_BRIEF_SETTING_KEY, "") == today:
-            return []
         lines = _day_brief_lines(now)
         if not lines:
-            # 今天暂时没东西可说，不记账——她中午添了新的，还赶得上。
             return []
-        db.setting_set(DAY_BRIEF_SETTING_KEY, today)
-        return [{
-            "role": "system",
-            "content": f"【{today} 今天】\n" + "\n".join(lines),
-        }]
+        today = db.day_key(now)
+        first_today = db.setting_get(DAY_BRIEF_SETTING_KEY, "") != today
+        if first_today:
+            db.setting_set(DAY_BRIEF_SETTING_KEY, today)
+        head = f"【{today} 今天】"
+        if not first_today:
+            head += "（这些今天已经给过你一次了）"
+        return [{"role": "system", "content": head + "\n" + "\n".join(lines)}]
     except Exception:
         # 提醒不值得拖垮发消息的主链路。
         return []
