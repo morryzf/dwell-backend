@@ -858,6 +858,16 @@ def day_start_ts(now: datetime | None = None) -> int:
     return int(start.timestamp())
 
 
+def message_count_since(chat_id: str, since_ts: int) -> int:
+    """这一天说了多少句。"""
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT COUNT(*) AS n FROM messages WHERE chat_id=? AND made>=? AND content<>''",
+            (chat_id, int(since_ts)),
+        ).fetchone()
+    return int((row and row["n"]) or 0)
+
+
 def first_message_rowid_since(chat_id: str, since_ts: int) -> int:
     """这一天的第一条消息是哪一行。一条都没有就返回 0。"""
     with conn() as cx:
