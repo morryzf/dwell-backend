@@ -42,17 +42,28 @@ class DayBriefTest(unittest.TestCase):
                          "没给出去就不该记账")
         self.assertIn("续期", self._text(), "6 点以后同一天该补上")
 
-    def test_only_once_a_day(self):
+    def test_every_turn_carries_it(self):
+        """一天只注入一次的话，那一轮他没顺口提，今天就再也找不回来了。"""
         db.cal_add_event(self.today, "Claude 订阅该续期了")
-        self.assertIn("续期", self._text())
-        self.assertEqual(self._text(), "", "同一天不该再说第二次")
-        # 第二天还会再提一次（顺延 3 天），但带上它原本的日期，不冒充今天的事。
+        first = self._text()
+        self.assertIn("续期", first)
+        self.assertNotIn("已经给过", first, "头一回不该说给过了")
+        second = self._text()
+        self.assertIn("续期", second, "后面每一轮都要还在")
+        self.assertIn("这些今天已经给过你一次了", second)
+
+    def test_a_new_day_is_first_again(self):
+        db.cal_add_event(self.today, "Claude 订阅该续期了")
+        self._text()
+        self._text()
+        # 第二天还在（顺延 3 天），但带上它原本的日期，不冒充今天的事。
         tomorrow = self.now + timedelta(days=1)
         again = self._text(tomorrow)
         self.assertIn("09-25 Claude", again)
         self.assertIn("2026-09-26", again)
+        self.assertNotIn("已经给过", again, "新的一天又是头一回")
 
-    def test_quiet_day_is_not_counted(self):
+    def test_quiet_day_says_nothing(self):
         self.assertEqual(self._text(), "", "没事就什么都不说")
         db.cal_add_event(self.today, "去拿药")
         self.assertIn("去拿药", self._text(), "她中午才添的，当天还赶得上")
@@ -62,7 +73,6 @@ class DayBriefTest(unittest.TestCase):
     def test_calendar_event_trails_for_three_days_then_stops(self):
         for back, expected in ((0, True), (3, True), (4, False)):
             with self.subTest(back=back):
-                db.setting_set(main.DAY_BRIEF_SETTING_KEY, "")
                 day = (self.now - timedelta(days=back)).date().isoformat()
                 for item in db.cal_all()["events"]:
                     db.cal_del_event(item["id"])
