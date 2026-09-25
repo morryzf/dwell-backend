@@ -1990,20 +1990,37 @@ html[data-theme="dark"] .note { color: #2f2b26; box-shadow: 0 3px 12px rgba(0,0,
           font-variant-numeric: tabular-nums; transition: background .2s, color .2s; }
   .chip.on { background: var(--text); color: var(--bg); }
   /* 空的 time 输入框什么都不显，在手机上就是个莫名其妙的空药片。
-     套一层壳，没选时间时让它读作「时间」，选了就让真值露出来。 */
-  .hadd .tmwrap { position: relative; display: inline-flex; align-items: center; }
+     套一层壳：药片的长相全在壳上（和 .chip 一模一样），
+     里头的 input 脱得只剩文字。没选时间时读作「时间」，
+     选了就让真值露出来。 */
+  .hadd .tmwrap {
+    position: relative; display: inline-flex; align-items: center;
+    border: 0; border-radius: 999px; padding: 7px 14px; font-size: 12.5px;
+    background: var(--panel); color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  /* 里头是拉丁数字，行高天生比中文矮。用一个看不见的中文字撑高度，
+     才能和旁边的「每天」严丝合缝。 */
+  .hadd .tmwrap::after {
+    content: '时'; width: 0; overflow: hidden; visibility: hidden;
+  }
   .hadd .tmwrap::before {
-    content: '时间'; position: absolute; left: 12px; pointer-events: none;
-    color: var(--dim); font-size: 12.5px;
+    content: '时间'; position: absolute; left: 14px; pointer-events: none;
+    color: var(--dim);
   }
   .hadd .tmwrap.set::before { content: none; }
   .hadd .tmwrap:not(.set) input[type=time] { color: transparent; }
   .hadd input[type=time] {
-    border: 0; border-radius: 999px; padding: 6px 12px;
-    background: var(--panel); color: inherit; font: inherit; font-size: 12.5px;
+    border: 0; padding: 0; margin: 0; background: transparent; color: inherit;
+    font: inherit; font-size: 12.5px; min-width: 44px;
+    /* UA 还会在 time 输入框上多摊 2px。告诉它就占一个行高，
+       和旁边「每天」的文字占得一样多。 */
+    height: 1.7em;
     font-variant-numeric: tabular-nums; -webkit-appearance: none; appearance: none;
-    min-width: 76px;
   }
+  /* iOS 会给 time 输入框塔上一堆自己的内边距和图标。 */
+  .hadd input[type=time]::-webkit-date-and-time-value { margin: 0; text-align: left; }
+  .hadd input[type=time]::-webkit-calendar-picker-indicator { display: none; }
   .hadd .go { margin-left: auto; border: 0; border-radius: 999px; padding: 8px 20px;
               font-size: 13px; background: var(--text); color: var(--bg); font-weight: 500; }
 
