@@ -281,6 +281,13 @@ html[data-theme="dark"] .glass,
     white-space: pre-wrap; word-break: break-word; line-height: 1.55;
     font-size: 14.5px;
   }
+  .chatfile {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 6px;
+    max-width: 100%; padding: 5px 10px; border-radius: 10px;
+    background: rgba(128,128,128,.14); color: var(--dim);
+    font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .chatfile + .chatfile { margin-left: 6px; }
   #log .gu img.chatimg, .bubble img.chatimg {
     width: auto; max-width: min(220px, 70%); max-height: min(220px, 28vh);
     object-fit: contain; border-radius: 14px; display: block; margin: 7px 0;
@@ -4673,6 +4680,19 @@ function appendMessageImages(el, images) {
   });
 }
 
+// 文件正文不进聊天记录，这里留的是「发过这个文件」这件事。
+function appendMessageFiles(el, files) {
+  (files || []).forEach(name => {
+    const text = String(name || '').trim();
+    if (!text) return;
+    const chip = document.createElement('span');
+    chip.className = 'chatfile';
+    chip.textContent = '📎 ' + text;
+    chip.title = text;
+    el.appendChild(chip);
+  });
+}
+
 function setupUserMessageFold(copy, bubble) {
   copy.classList.add('user-message-copy');
   requestAnimationFrame(() => {
@@ -4747,7 +4767,8 @@ function addMe(text, message) {
   var lastBubble;
   segments.forEach(function(seg, i) {
     seg = seg.trim();
-    if (!seg && !((message && message.images || []).length && i === segments.length - 1)) return;
+    var hasTail = ((message && message.images || []).length || (message && message.files || []).length);
+    if (!seg && !(hasTail && i === segments.length - 1)) return;
     var r = row('me');
     var b = document.createElement('div');
     b.className = 'bubble';
@@ -4757,7 +4778,10 @@ function addMe(text, message) {
     r.appendChild(b);
     renderRich(copy);
     setupUserMessageFold(copy, b);
-    if (i === segments.length - 1) appendMessageImages(b, message && message.images);
+    if (i === segments.length - 1) {
+      appendMessageImages(b, message && message.images);
+      appendMessageFiles(b, message && message.files);
+    }
     if (i === 0 && message) attachMessageActions(b, message);
     lastBubble = b;
   });
@@ -6069,7 +6093,10 @@ function renderSaid(msgs) {
         el.textContent = text;
         trimOrphanTail(el);            // 库里的半截消息拖着「课」这种孤尾——历史这条路也要摘
         renderRich(el);
-        if (index === segments.length - 1) appendMessageImages(el, m.images);
+        if (index === segments.length - 1) {
+          appendMessageImages(el, m.images);
+          appendMessageFiles(el, m.files);
+        }
         attachMessageActions(el, m);
         if (m.voice) voiceDecorate(el, m.id, 'ready');
         if (index === segments.length - 1) attachMessageUsage(el, m);
@@ -6253,7 +6280,7 @@ function handle(d) {
   lastEventAt = Date.now();
   if (d.type === 'echo') {
     if (armedFresh) setArmed(false);
-    addMe(d.text, { id: d.message_id, role: 'user', text: d.text, at: d.at, images: d.images || [] });
+    addMe(d.text, { id: d.message_id, role: 'user', text: d.text, at: d.at, images: d.images || [], files: d.files || [] });
     petSet('thinking');
     return;
   }
