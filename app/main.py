@@ -504,8 +504,9 @@ def _memory_cutoff(chat_id: str) -> int:
     if today_first:
         cutoff = min(cutoff, today_first - 1)
     # 保护区不能撑得比真正塞进提示词的窗口还大，不然中间会出现一段
-    # 既没压进摘要、也没进上下文的空洞。聊得凶的那天，今天最早的几条
-    # 还是会被压走——丢进摘要，好过凭空消失。
+    # 既没折成分段、也没进上下文的空洞。聊得凶的那天，今天最早的几条
+    # 还是会被折走——进分段、等着变成记忆卡，好过凭空消失。
+    # （分段是记忆卡的原料；摘要读的是卡，不读分段。）
     window = db.message_list(chat_id, limit=CACHE_HISTORY_TARGET_MESSAGES)
     if len(window) >= CACHE_HISTORY_TARGET_MESSAGES:
         cutoff = max(cutoff, int(window[0]["rowid"]) - 1)

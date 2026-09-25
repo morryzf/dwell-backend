@@ -75,9 +75,9 @@ class CutoffTest(unittest.TestCase):
         self.assertLess(main._memory_cutoff(self.chat["id"]), first)
 
     def test_the_protected_run_never_outgrows_the_prompt_window(self):
-        """聊疯了的那天：今天最早的几条还是会被压走。
+        """聊疯了的那天：今天最早的几条还是会被折成分段。
 
-        丢进摘要，好过既没压进摘要、也没进上下文地凭空消失。
+        进分段、等着变成记忆卡，好过既没折成分段、也没进上下文地凭空消失。
         """
         heavy = main.CACHE_HISTORY_TARGET_MESSAGES + 40
         rows = [self._say(f"今天第 {i} 句", self.day_start + 60 * i) for i in range(heavy)]
