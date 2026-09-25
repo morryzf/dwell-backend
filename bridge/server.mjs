@@ -141,8 +141,10 @@ function usagePayload(usage) {
 
 async function runChat(res, request) {
   const prompt = String(request.prompt || "");
-  if (!prompt) {
-    writeEvent(res, { type: "error", message: "prompt 不能为空" });
+  const images = Array.isArray(request.images) ? request.images : [];
+  // 只发一张图、一个字都不写，也是一条消息。
+  if (!prompt && !images.length) {
+    writeEvent(res, { type: "error", message: "这一轮没有任何内容" });
     return;
   }
 
@@ -193,7 +195,7 @@ async function runChat(res, request) {
     options.effort = effort;
   }
   try {
-    await streamTurn(res, prompt, options, includeThinking);
+    await streamTurn(res, turnInput(prompt, images), options, includeThinking);
   } catch (error) {
     if (timedOut) {
       throw new Error(`这一轮超过 ${Math.round(TURN_TIMEOUT_MS / 1000)} 秒没跑完，已中止`);
@@ -202,6 +204,24 @@ async function runChat(res, request) {
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+// 带图的一轮只能走流式输入：字符串 prompt 没有地方放图片块。
+// 图在前、字在后；空的文字块会被上游拒绝，所以没写字就只发图。
+function turnInput(prompt, images) {
+  const blocks = (Array.isArray(images) ? images : [])
+    .filter((source) => source && typeof source === "object")
+    .map((source) => ({ type: "image", source }));
+  if (!blocks.length) return prompt;
+  if (prompt) blocks.push({ type: "text", text: prompt });
+  return (async function* () {
+    yield {
+      type: "user",
+      message: { role: "user", content: blocks },
+      parent_tool_use_id: null,
+      session_id: "",
+    };
+  })();
 }
 
 async function streamTurn(res, prompt, options, includeThinking) {

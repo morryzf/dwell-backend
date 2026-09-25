@@ -7,6 +7,7 @@ from app.agent_sdk_client import (
     bridge_events,
     build_bridge_payload,
     build_prompt,
+    image_blocks,
     plan_turn,
     split_history,
     turns_digest,
@@ -300,6 +301,62 @@ class PlanTurnTest(unittest.TestCase):
 
         self.assertEqual(sid, "")
         self.assertEqual(outgoing, turns)
+
+
+class ImageBlocksTest(unittest.TestCase):
+    """之前图片被整个丢掉了：只取文字，image_url 块无声消失。"""
+
+    IMG = {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD"}}
+
+    def test_data_urls_become_base64_sources(self):
+        blocks = image_blocks([{"role": "user", "content": [
+            {"type": "text", "text": "这是什么"}, self.IMG,
+        ]}])
+
+        self.assertEqual(blocks, [
+            {"type": "base64", "media_type": "image/jpeg", "data": "QUJD"},
+        ])
+
+    def test_http_urls_pass_through(self):
+        blocks = image_blocks([{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": "https://example.test/a.png"}},
+        ]}])
+
+        self.assertEqual(blocks, [{"type": "url", "url": "https://example.test/a.png"}])
+
+    def test_only_the_latest_user_turn_counts(self):
+        # 原图只进这一轮的请求，历史里本来就没有图。
+        blocks = image_blocks([
+            {"role": "user", "content": [self.IMG]},
+            {"role": "assistant", "content": "嗯"},
+            {"role": "user", "content": "那这个呢"},
+        ])
+
+        self.assertEqual(blocks, [])
+
+    def test_plain_text_turns_have_none(self):
+        self.assertEqual(image_blocks([{"role": "user", "content": "在吗"}]), [])
+
+    def test_payload_carries_them_and_keeps_the_text(self):
+        payload = build_bridge_payload("sonnet", [{"role": "user", "content": [
+            {"type": "text", "text": "这是什么"}, self.IMG,
+        ]}])
+
+        self.assertEqual(payload["prompt"], "这是什么")
+        self.assertEqual(len(payload["images"]), 1)
+
+    def test_an_image_with_no_words_is_still_a_message(self):
+        payload = build_bridge_payload(
+            "sonnet", [{"role": "user", "content": [self.IMG]}],
+        )
+
+        self.assertEqual(payload["prompt"], "")
+        self.assertEqual(len(payload["images"]), 1)
+
+    def test_payload_omits_the_field_when_there_is_no_picture(self):
+        payload = build_bridge_payload("sonnet", [{"role": "user", "content": "在吗"}])
+
+        self.assertNotIn("images", payload)
 
 
 class BridgePayloadResumeTest(unittest.TestCase):

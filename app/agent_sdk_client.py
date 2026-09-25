@@ -39,6 +39,41 @@ def _plain_text(content) -> str:
     return "\n".join(content_texts(content)).strip()
 
 
+def image_blocks(messages: list) -> list[dict]:
+    """取出这一轮要发的图片。
+
+    原图只进这一轮的请求，不写进聊天历史（Dwell 一直是这么做的），所以只看
+    最后一条用户消息。返回 Anthropic 的 image source 形状，桥接原样转给 SDK。
+    """
+    for message in reversed(messages or []):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            return []
+        blocks: list[dict] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "image" and isinstance(part.get("source"), dict):
+                blocks.append(dict(part["source"]))
+                continue
+            if part.get("type") != "image_url":
+                continue
+            raw = part.get("image_url")
+            url = raw.get("url") if isinstance(raw, dict) else raw
+            if not isinstance(url, str) or not url:
+                continue
+            if url.startswith("data:") and ";base64," in url:
+                head, data = url.split(",", 1)
+                media_type = head[5:].split(";", 1)[0] or "image/jpeg"
+                blocks.append({"type": "base64", "media_type": media_type, "data": data})
+            elif url.startswith(("https://", "http://")):
+                blocks.append({"type": "url", "url": url})
+        return blocks
+    return []
+
+
 def split_history(messages: list) -> tuple[str, list[tuple[str, str]], list[str]]:
     """把中立历史拆成 system 文本、轮次列表、以及本轮的临时上下文。
 
@@ -218,6 +253,7 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
     resume, outgoing = plan_turn(state, str(model_id or ""), system, turns)
     # 临时上下文跟着本轮走，不进 system，也不算进轮次指纹。
     prompt = "\n\n".join(context + [build_prompt(outgoing)])
+    images = image_blocks(messages)
 
     payload = {
         "model": str(model_id or ""),
@@ -229,6 +265,8 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
         "_turns": turns,
         "_system": system,
     }
+    if images:
+        payload["images"] = images
     if resume:
         payload["resume"] = resume
     # effort 关掉 thinking 时依然有意义（它还管花多少 token），能不能用由桥接判断。
@@ -319,7 +357,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
         reasoning_effort=reasoning_effort, thinking_enabled=thinking_enabled,
         state=load_state(chat_key),
     )
-    if not payload["prompt"]:
+    if not payload["prompt"] and not payload.get("images"):
         yield {"type": "text", "text": "[配置错误] 这次没有可以发给 Claude Code 的内容"}
         return
 

@@ -97,6 +97,7 @@ curl -s localhost:8787/health
   "system": "你是……",
   "prompt": "铺平后的对话",
   "include_thinking": true,
+  "images": [{"type": "base64", "media_type": "image/jpeg", "data": "…"}],
   "effort": "high",
   "max_turns": 1,
   "session_id": "dwell-chat:xxx"
@@ -128,6 +129,15 @@ data: [DONE]
 
 Dwell 主动断开（用户放弃、后端超时）也会中止这一轮——没人要的回复没必要
 继续占着槽位。
+
+## 图片
+
+带图的一轮走流式输入：字符串 prompt 没有地方放图片块。图在前、字在后；
+没写字就只发图——空的文字块会被上游拒绝。没有图时仍旧直接传字符串。
+
+`images` 里是 Anthropic 的 image source（`base64` 或 `url`），桥接原样转给 SDK。
+原图只进这一轮的请求，不写进聊天历史——Dwell 一直是这么做的，所以只看最后
+一条用户消息。
 
 ## thinking 和 effort
 
