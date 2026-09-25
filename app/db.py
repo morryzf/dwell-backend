@@ -848,6 +848,26 @@ def todos_reset_fixed_for_new_day(now: datetime | None = None) -> bool:
     return True
 
 
+
+def day_start_ts(now: datetime | None = None) -> int:
+    """当前这一天是从哪一刻开始的。凌晨两点还算前一天。"""
+    now = now or cn_now()
+    start = (now - timedelta(hours=DAY_START_HOUR)).replace(
+        hour=DAY_START_HOUR, minute=0, second=0, microsecond=0
+    )
+    return int(start.timestamp())
+
+
+def first_message_rowid_since(chat_id: str, since_ts: int) -> int:
+    """这一天的第一条消息是哪一行。一条都没有就返回 0。"""
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT MIN(rowid) AS first FROM messages WHERE chat_id=? AND made>=?",
+            (chat_id, int(since_ts)),
+        ).fetchone()
+    return int((row and row["first"]) or 0)
+
+
 def todos_all(now: datetime | None = None) -> dict:
     """两栏一起给。排序交给前端——它知道"现在几点"，服务器不该猜。"""
     todos_reset_fixed_for_new_day(now)

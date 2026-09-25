@@ -492,11 +492,24 @@ def _emit(chat_id: str, event: dict):
         pass
 
 def _memory_cutoff(chat_id: str) -> int:
-    """近期原文不压缩。返回可安全写进长期摘要的最后一个 rowid。"""
+    """近期原文不压缩。返回可安全写进长期摘要的最后一个 rowid。
+
+    两道锁，哪道紧听哪道：最近 MEMORY_TAIL_MESSAGES 条不压；
+    今天说过的话也一条都不压，哪怕今天聊超了那个条数。
+    「今天」跟待办和提醒用同一个起点（早 6 点）。
+    """
     recent = db.message_list(chat_id, limit=MEMORY_TAIL_MESSAGES)
-    if len(recent) < MEMORY_TAIL_MESSAGES:
-        return 0
-    return max(0, int(recent[0]["rowid"]) - 1)
+    cutoff = 0 if len(recent) < MEMORY_TAIL_MESSAGES else int(recent[0]["rowid"]) - 1
+    today_first = db.first_message_rowid_since(chat_id, db.day_start_ts())
+    if today_first:
+        cutoff = min(cutoff, today_first - 1)
+    # 保护区不能撑得比真正塞进提示词的窗口还大，不然中间会出现一段
+    # 既没压进摘要、也没进上下文的空洞。聊得凶的那天，今天最早的几条
+    # 还是会被压走——丢进摘要，好过凭空消失。
+    window = db.message_list(chat_id, limit=CACHE_HISTORY_TARGET_MESSAGES)
+    if len(window) >= CACHE_HISTORY_TARGET_MESSAGES:
+        cutoff = max(cutoff, int(window[0]["rowid"]) - 1)
+    return max(0, cutoff)
 
 
 def _memory_transcript(rows: list[dict]) -> str:
