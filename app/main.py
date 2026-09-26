@@ -494,6 +494,42 @@ def _emit(chat_id: str, event: dict):
     except asyncio.QueueFull:
         pass
 
+def _stranded_topup_cutoff(chat_id: str, today_first: int) -> int:
+    """昨天聊得少、今天聊得猛时，借今天最早的几条凑够一批做卡的素材。
+
+    两边的节奏本来就不一样：原文窗口按「今天有多少条」走，做卡按「攒够 50 条」
+    走。今天一过 100 条，昨天那几句立刻滑出窗口，可它们又不够 50 条做不成卡
+    ——两头都不在，模型是真的看不见了。
+
+    这时候把这一批往今天延一点，凑够 50 条一起做卡。今天的原文一条都不会少：
+    分段只是做卡的素材，从不进提示词。这些话于是既在原文里，又有了一张卡。
+
+    返回可以延伸到的 rowid；0 表示不必延伸。
+    """
+    processed = _memory_card_segmented_through(chat_id)
+    pending = db.chat_memory_source_messages(
+        chat_id, processed, today_first - 1, MEMORY_CARD_UPDATE_MIN_MESSAGES
+    )
+    # 没有积压，或者积压本来就够一批了，都不用借。
+    if not pending or len(pending) >= MEMORY_CARD_UPDATE_MIN_MESSAGES:
+        return 0
+    # 积压的还在原文窗口里 → 模型看得见，不着急做卡。用不带缓存的那个窗口
+    # 作判据：它是两条路里较小的一个，宁可早一点做卡，也不要留着洞。
+    window = db.message_list(
+        chat_id, limit=_history_window(chat_id, CACHE_HISTORY_TARGET_MESSAGES)
+    )
+    if window and int(pending[0]["rowid"]) >= int(window[0]["rowid"]):
+        return 0
+    short_by = MEMORY_CARD_UPDATE_MIN_MESSAGES - len(pending)
+    topup = db.chat_memory_source_messages(
+        chat_id, today_first - 1, db.message_max_id(chat_id), short_by
+    )
+    # 今天也还没攒够，等下一轮再说——半批的素材做不出好卡。
+    if len(topup) < short_by:
+        return 0
+    return int(topup[-1]["rowid"])
+
+
 def _memory_cutoff(chat_id: str) -> int:
     """近期原文不压缩。返回可安全写进长期摘要的最后一个 rowid。
 
@@ -505,7 +541,9 @@ def _memory_cutoff(chat_id: str) -> int:
     cutoff = 0 if len(recent) < MEMORY_TAIL_MESSAGES else int(recent[0]["rowid"]) - 1
     today_first = db.first_message_rowid_since(chat_id, db.day_start_ts())
     if today_first:
-        cutoff = min(cutoff, today_first - 1)
+        # 借今天最早的几条来凑批，但不能越过上面那道「最近 N 条不动」的锁。
+        topup = min(cutoff, _stranded_topup_cutoff(chat_id, today_first))
+        cutoff = max(min(cutoff, today_first - 1), topup)
     # 上下文窗口现在自己会跟着「今天」长，所以今天的话本来就都在里面。
     # 只有撞到 MAX_RAW_HISTORY_MESSAGES 那个防爆硬顶时，最早的几条会落到
     # 窗口外——那段必须折成分段，不然既不在上下文里、也不在分段里，
