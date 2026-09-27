@@ -216,5 +216,54 @@ class SharedConsoleTest(unittest.TestCase):
         )
 
 
+class BorrowedOverviewPayloadTest(unittest.TestCase):
+    """控制台要说出「这份摘要是借来的」，否则新窗口写着「还没有」而模型一直在用。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.previous_path = db.DB_PATH
+        db.DB_PATH = str(Path(self.tmp.name) / "borrowed.db")
+        db.init_db()
+
+    def tearDown(self):
+        db.DB_PATH = self.previous_path
+        self.tmp.cleanup()
+
+    def _with_overview(self, name, text):
+        chat_id = db.chat_add(name)["id"]
+        with db.conn() as cx:
+            cx.execute(
+                "INSERT INTO chat_memory_state (chat_id,enabled,overview,generated_at) "
+                "VALUES (?,1,?,?)",
+                (chat_id, text, int(time.time())),
+            )
+        return chat_id
+
+    def test_a_fresh_window_is_told_whose_overview_it_is_using(self):
+        self._with_overview("旧窗口", "我们目前的样子")
+        fresh = db.chat_add("新窗口")["id"]
+
+        shared = db.shared_memory_overview()
+
+        self.assertEqual(shared["overview"], "我们目前的样子")
+        self.assertNotEqual(shared["chat_id"], fresh)
+        self.assertEqual(db.chat_get(shared["chat_id"])["name"], "旧窗口")
+
+    def test_a_window_with_its_own_overview_is_not_borrowing(self):
+        own = self._with_overview("自己有", "自己那一份")
+
+        shared = db.shared_memory_overview()
+
+        # 自己就是最新的那一份，界面不该显示成「来自别处」。
+        self.assertEqual(shared["chat_id"], own)
+
+    def test_a_window_that_opted_out_borrows_nothing(self):
+        self._with_overview("别的窗口", "别人的总览")
+        private = db.chat_add("关掉的窗口")["id"]
+        db.memory_shared_set(private, False)
+
+        self.assertFalse(db.memory_shared_enabled(private))
+
+
 if __name__ == "__main__":
     unittest.main()

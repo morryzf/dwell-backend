@@ -4018,6 +4018,17 @@ async def long_context_get(chat_id: str):
     state["memory_card_update_threshold"] = MEMORY_CARD_UPDATE_MIN_MESSAGES
     state["versions"] = db.chat_memory_versions(chat_id)
     state["version_count"] = len(state["versions"])
+    # 互通开着时模型读的是公共摘要。控制台不跟着显示的话，新窗口会写着
+    # 「还没有正式摘要」，而模型其实一直看得见——那是界面在骗人。
+    state["shared_enabled"] = db.memory_shared_enabled(chat_id)
+    state["shared_overview"] = {}
+    if state["shared_enabled"]:
+        shared = db.shared_memory_overview()
+        if shared and shared.get("chat_id") != chat_id:
+            source = db.chat_get(shared["chat_id"]) or {}
+            state["shared_overview"] = {
+                **shared, "chat_name": source.get("name") or "别的窗口",
+            }
     return {"ok": True, **state}
 
 
