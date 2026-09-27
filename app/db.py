@@ -2079,13 +2079,18 @@ def memory_card_embeddings(chat_id: str) -> list[dict]:
     made 是今天、事情却是几周前的，拿 made 当日期会把模型带偏。来源消息找不到
     时（手工加的卡）退回 made。
     """
+    # 互通开着的聊天共用一个卡池；关掉的只看自己的，也不把自己的借出去。
+    ids = memory_shared_chat_ids() if memory_shared_enabled(chat_id) else [chat_id]
+    if chat_id not in ids:
+        ids = [*ids, chat_id]
+    marks = ",".join("?" for _ in ids)
     with conn() as cx:
         rows = cx.execute(
-            "SELECT c.id,c.content,c.embedding_json,c.memory_type,c.topics_json,"
+            "SELECT c.id,c.chat_id,c.content,c.embedding_json,c.memory_type,c.topics_json,"
             "c.importance,c.retention,c.valid_until,c.status,c.made,c.updated,"
             "(SELECT m.made FROM messages m WHERE m.rowid=c.source_start_rowid) AS source_made "
-            "FROM memory_cards c WHERE c.chat_id=? AND c.status<>'archived'",
-            (chat_id,),
+            f"FROM memory_cards c WHERE c.chat_id IN ({marks}) AND c.status<>'archived'",
+            ids,
         ).fetchall()
     result = []
     for row in rows:
@@ -2191,6 +2196,46 @@ def sigillo_enabled(chat_id: str) -> bool:
 
 def sigillo_set(chat_id: str, enabled: bool) -> None:
     setting_set(f"sigillo_enabled:{chat_id}", "1" if enabled else "0")
+
+
+def memory_shared_enabled(chat_id: str) -> bool:
+    """这个聊天跟别的聊天共不共享记忆。默认共享——Cloudy 只有一个。"""
+    return setting_get(f"memory_shared:{chat_id}", "1") != "0"
+
+
+def memory_shared_set(chat_id: str, enabled: bool) -> None:
+    setting_set(f"memory_shared:{chat_id}", "1" if enabled else "0")
+
+
+def memory_shared_chat_ids() -> list[str]:
+    """所有开着互通的聊天。没设过的算开着。"""
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT c.id FROM chats c "
+            "LEFT JOIN settings s ON s.key = 'memory_shared:' || c.id "
+            "WHERE COALESCE(s.value, '1') <> '0'"
+        ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def shared_memory_overview() -> dict:
+    """互通的聊天共用的摘要：取这些聊天里最新的那一份。
+
+    每个互通聊天都从同一个公共卡池长出自己那版摘要，内容大同小异。取最新的，
+    新窗口一开就有，不用等它自己攒够消息再生成一遍。
+    """
+    ids = memory_shared_chat_ids()
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    with conn() as cx:
+        row = cx.execute(
+            f"SELECT chat_id,overview,generated_at FROM chat_memory_state "
+            f"WHERE chat_id IN ({marks}) AND enabled=1 AND overview<>'' "
+            f"ORDER BY generated_at DESC, rowid DESC LIMIT 1",
+            ids,
+        ).fetchone()
+    return dict(row) if row else {}
 
 
 def memory_card_injection_enabled(chat_id: str) -> bool:

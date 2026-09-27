@@ -11438,6 +11438,7 @@ function memorySettingsHtml(modelState, cardState, embeddingState, sigilloState)
       + `</div>`
     : '';
   return `<div class="ap-section">`
+    + memorySwitchRow('记忆互通', '和其他窗口共用同一套记忆卡与摘要。关掉之后，这个窗口只看自己的，自己的也不外流。', 'memorySharedToggle', cardState.shared_enabled)
     + memorySwitchRow('按需记忆', '每次回复只挑最多 5 条真正相关的卡片；不相关时一条也不会带入。', 'memoryInjectionToggle', cardState.injection_enabled)
     + `<div class="gnote">${cardState.injection_enabled ? '每累计 50 条旧消息会自动生成待确认记忆卡。' : '已暂停带入，但每累计 50 条旧消息仍会自动生成待确认记忆卡。'}</div></div>`
     + sigilloBlock
@@ -11486,6 +11487,8 @@ function wireMemorySwitch(id, enabled, send) {
 }
 
 function wireMemorySettings(chat, cardState, sigilloState) {
+  wireMemorySwitch('memorySharedToggle', !!cardState.shared_enabled, next =>
+    memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-shared',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:next})}));
   wireMemorySwitch('memoryInjectionToggle', !!cardState.injection_enabled, next =>
     memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/injection',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:next})}));
   wireMemorySwitch('sigilloToggle', !!(sigilloState && sigilloState.enabled), next =>
