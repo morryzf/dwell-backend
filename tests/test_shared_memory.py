@@ -139,5 +139,82 @@ class SharedOverviewTest(unittest.TestCase):
         self.assertEqual(db.shared_memory_overview(), {})
 
 
+class SharedConsoleTest(unittest.TestCase):
+    """控制台要跟模型看到的对得上。
+
+    模型读公共池，控制台只列本窗口那几张的话，新窗口会显示成空的——
+    看起来像记忆丢了，其实好好的。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.previous_path = db.DB_PATH
+        db.DB_PATH = str(Path(self.tmp.name) / "console.db")
+        db.init_db()
+
+    def tearDown(self):
+        db.DB_PATH = self.previous_path
+        self.tmp.cleanup()
+
+    def _card(self, chat_id, content, status="active"):
+        message = db.message_add(chat_id, "user", content)
+        now = int(time.time())
+        with db.conn() as cx:
+            rowid = cx.execute(
+                "SELECT rowid FROM messages WHERE id=?", (message["id"],)
+            ).fetchone()["rowid"]
+            cx.execute(
+                "INSERT INTO memory_cards (id,chat_id,content,memory_type,topics_json,"
+                "importance,retention,status,source_start_rowid,source_end_rowid,made,updated) "
+                "VALUES (?,?,?,'stable_fact','[]','normal','long_term',?,?,?,?,?)",
+                (db.new_id(), chat_id, content, status, rowid, rowid, now, now),
+            )
+
+    def test_the_console_lists_the_whole_shared_pool(self):
+        old = db.chat_add("旧窗口")["id"]
+        self._card(old, "她周四要去体检")
+        fresh = db.chat_add("新窗口")["id"]
+
+        contents = [card["content"] for card in db.memory_card_list(fresh)]
+
+        self.assertIn("她周四要去体检", contents)
+
+    def test_each_card_says_which_window_wrote_it(self):
+        # 前端拿 chat_id 决定把编辑发给谁，拿 chat_name 显示「来自 X」。
+        old = db.chat_add("旧窗口")["id"]
+        self._card(old, "她周四要去体检")
+        fresh = db.chat_add("新窗口")["id"]
+
+        card = next(
+            item for item in db.memory_card_list(fresh)
+            if item["content"] == "她周四要去体检"
+        )
+
+        self.assertEqual(card["chat_id"], old)
+        self.assertEqual(card["chat_name"], "旧窗口")
+
+    def test_a_window_that_opted_out_only_lists_its_own(self):
+        other = db.chat_add("别人的窗口")["id"]
+        self._card(other, "别人的事")
+        private = db.chat_add("关掉的窗口")["id"]
+        self._card(private, "自己的事")
+        db.memory_shared_set(private, False)
+
+        contents = [card["content"] for card in db.memory_card_list(private)]
+
+        self.assertEqual(contents, ["自己的事"])
+
+    def test_archived_cards_only_show_when_asked_for(self):
+        old = db.chat_add("旧窗口")["id"]
+        self._card(old, "归档的事", status="archived")
+        fresh = db.chat_add("新窗口")["id"]
+
+        self.assertNotIn("归档的事", [c["content"] for c in db.memory_card_list(fresh)])
+        self.assertIn(
+            "归档的事",
+            [c["content"] for c in db.memory_card_list(fresh, include_archived=True)],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

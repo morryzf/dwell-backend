@@ -1849,18 +1849,25 @@ def memory_card_state_set(chat_id: str, status: str, error: str = "", generated:
 
 
 def memory_card_list(chat_id: str, include_archived: bool = False) -> list[dict]:
+    """记忆控制台看到的卡片。
+
+    互通开着时列出整个公共池——模型看的就是这些，控制台只显示本窗口那几张
+    会让人以为记忆丢了。每张卡带上 chat_name，界面才说得清它是哪个窗口记下的；
+    chat_id 本来就在，前端据此把编辑和归档发给卡片真正的归属聊天。
+    """
+    ids = memory_shared_chat_ids() if memory_shared_enabled(chat_id) else [chat_id]
+    if chat_id not in ids:
+        ids = [*ids, chat_id]
+    marks = ",".join("?" for _ in ids)
+    archived = "" if include_archived else "AND c.status<>'archived' "
     with conn() as cx:
-        if include_archived:
-            rows = cx.execute(
-                "SELECT * FROM memory_cards WHERE chat_id=? ORDER BY updated DESC, rowid DESC",
-                (chat_id,),
-            ).fetchall()
-        else:
-            rows = cx.execute(
-                "SELECT * FROM memory_cards WHERE chat_id=? AND status<>'archived' "
-                "ORDER BY updated DESC, rowid DESC",
-                (chat_id,),
-            ).fetchall()
+        rows = cx.execute(
+            f"SELECT c.*, ch.name AS chat_name FROM memory_cards c "
+            f"LEFT JOIN chats ch ON ch.id=c.chat_id "
+            f"WHERE c.chat_id IN ({marks}) {archived}"
+            f"ORDER BY c.updated DESC, c.rowid DESC",
+            ids,
+        ).fetchall()
     return [_memory_card_dict(row) for row in rows]
 
 
