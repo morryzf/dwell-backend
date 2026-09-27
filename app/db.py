@@ -365,6 +365,17 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL DEFAULT ''
 );
 
+-- 重写规则：撞到这些话就把这一轮打回去重说，并附上为什么。
+-- 全局共用——这是 Cloudy 怎么说话的事，不属于某一个窗口。
+CREATE TABLE IF NOT EXISTS rewrite_rules (
+    id           TEXT PRIMARY KEY,
+    phrases_json TEXT NOT NULL DEFAULT '[]',
+    reason       TEXT NOT NULL DEFAULT '',
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    made         INTEGER NOT NULL,
+    updated      INTEGER NOT NULL
+);
+
 -- 模型供应商。密钥密文由 provider_store 加解密，绝不返回给浏览器。
 CREATE TABLE IF NOT EXISTS provider_profiles (
     id               TEXT PRIMARY KEY,
@@ -2203,6 +2214,68 @@ def sigillo_enabled(chat_id: str) -> bool:
 
 def sigillo_set(chat_id: str, enabled: bool) -> None:
     setting_set(f"sigillo_enabled:{chat_id}", "1" if enabled else "0")
+
+
+REWRITE_RULE_MAX = 20
+REWRITE_PHRASE_MAX = 40
+
+
+def _rewrite_rule_dict(row) -> dict:
+    item = dict(row)
+    try:
+        phrases = json.loads(item.pop("phrases_json", "[]") or "[]")
+    except (TypeError, json.JSONDecodeError):
+        phrases = []
+    item["phrases"] = [str(p) for p in phrases if str(p).strip()]
+    item["enabled"] = bool(item["enabled"])
+    return item
+
+
+def rewrite_rule_list(enabled_only: bool = False) -> list[dict]:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT * FROM rewrite_rules "
+            + ("WHERE enabled=1 " if enabled_only else "")
+            + "ORDER BY made ASC, rowid ASC"
+        ).fetchall()
+    return [_rewrite_rule_dict(row) for row in rows]
+
+
+def rewrite_rule_upsert(rule_id: str, phrases: list[str], reason: str,
+                        enabled: bool = True) -> dict:
+    """存一条规则。空短语的规则留不住——它会拦下每一句话。"""
+    cleaned = []
+    for phrase in phrases or []:
+        text = str(phrase).strip()[:120]
+        if text and text not in cleaned:
+            cleaned.append(text)
+    cleaned = cleaned[:REWRITE_PHRASE_MAX]
+    if not cleaned:
+        raise ValueError("至少要有一个触发词")
+    if not str(reason or "").strip():
+        raise ValueError("要写清楚为什么打回，模型才知道往哪儿改")
+    now = int(time.time())
+    rule_id = rule_id or new_id()
+    with conn() as cx:
+        if not cx.execute("SELECT 1 FROM rewrite_rules WHERE id=?", (rule_id,)).fetchone():
+            if cx.execute("SELECT COUNT(*) AS n FROM rewrite_rules").fetchone()["n"] >= REWRITE_RULE_MAX:
+                raise ValueError(f"最多 {REWRITE_RULE_MAX} 条规则")
+        cx.execute(
+            "INSERT INTO rewrite_rules (id,phrases_json,reason,enabled,made,updated) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "phrases_json=excluded.phrases_json,reason=excluded.reason,"
+            "enabled=excluded.enabled,updated=excluded.updated",
+            (rule_id, json.dumps(cleaned, ensure_ascii=False),
+             str(reason).strip()[:600], 1 if enabled else 0, now, now),
+        )
+        row = cx.execute("SELECT * FROM rewrite_rules WHERE id=?", (rule_id,)).fetchone()
+    return _rewrite_rule_dict(row)
+
+
+def rewrite_rule_delete(rule_id: str) -> bool:
+    with conn() as cx:
+        cur = cx.execute("DELETE FROM rewrite_rules WHERE id=?", (rule_id,))
+    return cur.rowcount > 0
 
 
 def memory_shared_enabled(chat_id: str) -> bool:

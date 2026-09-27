@@ -129,6 +129,45 @@ const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 // 关掉 thinking 时，部分模型不接受高档 effort，会直接 400。挡在这儿。
 const EFFORT_WITHOUT_THINKING = new Set(["low", "medium", "high"]);
 
+// —— 重写规则 ——
+//
+// 撞到这些话就把这一轮打回去，让它重说一遍，并告诉它为什么。规则每轮都由
+// Dwell 传过来，改完立刻生效——桥接自己不存，也不认识它们从哪儿来。
+//
+// 只有这条通道能做：它靠 Claude Code 的 Stop 钩子，模型说完、真要收尾之前
+// 还能拦一次。HTTP API 那条路上回复吐完就结束了，没有这个位置。
+
+function normalizeRules(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((rule) => ({
+      phrases: (Array.isArray(rule?.phrases) ? rule.phrases : [])
+        .map((phrase) => String(phrase || "").trim())
+        .filter(Boolean),
+      reason: String(rule?.reason || "").trim(),
+    }))
+    // 没有触发词的规则会拦下每一句话；没有理由的规则它不知道往哪儿改。
+    .filter((rule) => rule.phrases.length && rule.reason);
+}
+
+function firstBreach(rules, text) {
+  const body = String(text || "");
+  if (!body.trim()) return null;
+  const folded = body.toLowerCase();
+  for (const rule of rules) {
+    const hit = rule.phrases.filter((phrase) => folded.includes(phrase.toLowerCase()));
+    if (hit.length) return { rule, hit };
+  }
+  return null;
+}
+
+function blockReason({ rule, hit }) {
+  const quoted = hit.map((phrase) => `「${phrase}」`).join("");
+  return `你刚才那一版里出现了${quoted}。${rule.reason}\n`
+    + "重新说一遍。不要提这次打回，"
+    + "也不要解释，直接给新的那一版。";
+}
+
 function usagePayload(usage) {
   if (!usage || typeof usage !== "object") return null;
   return {
@@ -194,6 +233,33 @@ async function runChat(res, request) {
       && (includeThinking || EFFORT_WITHOUT_THINKING.has(effort))) {
     options.effort = effort;
   }
+
+  const rules = normalizeRules(request.rewrite_rules);
+  if (rules.length) {
+    // 打回之后它还要再说一遍，那是多出来的一轮——不放宽就会撞上 maxTurns。
+    options.maxTurns += 1;
+    options.hooks = {
+      Stop: [{
+        hooks: [async (input) => {
+          // 已经打回过一次了。再拦下去就没完没了——它可能根本绕不开那句话，
+          // 而一句都说不出来比说了句现成话更糟。
+          if (input.stop_hook_active) return {};
+          const breach = firstBreach(rules, input.last_assistant_message || "");
+          if (!breach) return {};
+          // 记一笔，让她知道这一版是重说的；这不是回复的一部分，走思考面板。
+          writeEvent(res, {
+            type: "notice",
+            message: `打回重说：撞到了${
+              breach.hit.map((phrase) => `「${phrase}」`).join("")}`,
+          });
+          // 已经吐出去的那一版要当场抹掉，否则两版首尾相接，像它精神分裂。
+          writeEvent(res, { type: "reset" });
+          return { decision: "block", reason: blockReason(breach) };
+        }],
+      }],
+    };
+  }
+
   try {
     await streamTurn(res, turnInput(prompt, images), options, includeThinking);
   } catch (error) {

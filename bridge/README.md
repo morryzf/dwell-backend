@@ -100,7 +100,8 @@ curl -s localhost:8787/health
   "images": [{"type": "base64", "media_type": "image/jpeg", "data": "…"}],
   "effort": "high",
   "max_turns": 1,
-  "session_id": "dwell-chat:xxx"
+  "session_id": "dwell-chat:xxx",
+  "rewrite_rules": [{"phrases": ["我就在这里"], "reason": "别用现成的安慰句。"}]
 }
 ```
 
@@ -110,6 +111,7 @@ curl -s localhost:8787/health
 data: {"type":"text","text":"你"}
 data: {"type":"thinking","thinking":"……"}
 data: {"type":"usage","usage":{"input_tokens":120,"output_tokens":48,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}
+data: {"type":"reset"}
 data: {"type":"error","message":"……"}
 data: [DONE]
 ```
@@ -169,6 +171,37 @@ Claude Code 自带的工具（Read / Write / Bash / WebSearch…）全是给改�
 
 MCP 工具不受这里影响（走 `mcpServers`）。但挂了很多 MCP 工具时要把
 `ToolSearch` 加回来：CLI 会把一部分 schema 延迟加载，模型靠它才取得到。
+
+## 重写规则
+
+撞到指定的话就把这一轮打回去，让它换个说法重说，并告诉它为什么。
+
+```json
+"rewrite_rules": [
+  {"phrases": ["我就在这里", "哪也不去"], "reason": "别用现成的安慰句。说点只对她成立的、具体的话。"}
+]
+```
+
+规则每轮都由 Dwell 传过来（在 Dwell 的设置 → 重写规则里配），改完下一句就生效；
+桥接自己不存。它不进 system，也不算进会话指纹——它是收尾时的一道关卡，
+不是上下文，所以改规则不必重建缓存。
+
+只有这条通道做得到：它挂在 Claude Code 的 **Stop 钩子**上，模型说完、真要收尾
+之前还能拦一次。HTTP API 那条路上回复吐完就结束了，没有这个位置。
+
+打回时会先后发两个事件：
+
+```
+data: {"type":"notice","message":"打回重说：撞到了「我就在这里」"}
+data: {"type":"reset"}
+```
+
+`reset` 是给 Dwell 的指令：把这一轮**已经流出去的字整个抹掉**。不抹的话两版
+首尾相接，像它精神分裂。`notice` 照旧进思考面板，那儿留着打回的记录。
+
+一轮最多打回一次（靠 `stop_hook_active` 判断）。重说那一版还撞上也照样放过去——
+它可能根本绕不开那句话，而一句话都说不出来比说了句现成话更糟。打回之后它还要
+再说一遍，那是多出来的一轮，所以带规则时 `maxTurns` 会自动加一。
 
 ## 限流和上游错误
 
