@@ -4000,6 +4000,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>模型供应商<span class="chev">›</span></button>
         <button class="grow" id="mcpRow"><span class="ic" data-i="tool"></span>MCP 工具<span class="chev">›</span></button>
         <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
+        <button class="grow" id="rewriteRulesRow"><span class="ic" data-i="layers"></span>重写规则<span class="chev">›</span></button>
         <button class="grow" id="systemLogRow"><span class="ic" data-i="fileText"></span>系统日志<span class="chev">›</span></button>
         <button class="grow" id="kelivoImportRow"><span class="ic" data-i="plus"></span>导入 Kelivo 聊天记录<span class="chev">›</span></button>
       </div>
@@ -4177,6 +4178,13 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="sheet"><div class="grabber"></div><div class="head">
     <button class="hbtn" data-close="wakeTarget"><span class="ic" data-i="x"></span></button><div class="ht">主动消息发到哪里</div><div class="hspace"></div>
   </div><div class="body" id="wakeTargetBody"></div></div>
+</div>
+
+<div class="sheetWrap" id="rewriteRulesSheet">
+  <div class="shade" data-close="rewriteRules"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="rewriteRules"><span class="ic" data-i="x"></span></button><div class="ht">重写规则</div><div class="hspace"></div>
+  </div><div class="body" id="rewriteRulesBody"></div></div>
 </div>
 
 <div class="sheetWrap" id="instructionsSheet">
@@ -4900,6 +4908,9 @@ function openThinkSheet(idx) {
   thinkBodyEl.textContent = thinkStore[idx].text;
   sheets.think.classList.add('open');
 }
+// 这一轮已经吐出来的气泡。被重写规则打回时要把它们整个撤掉——
+// 不撤的话两版首尾相接，像它精神分裂。每轮开头和收尾都清空。
+let turnBubbles = [];
 function ensureGu() {
   if (guEl) return guEl;
   closeThink(); closeGroup(); processBand = null;
@@ -4907,6 +4918,7 @@ function ensureGu() {
   const d = document.createElement('div');
   d.className = 'gu';
   r.appendChild(d);
+  turnBubbles.push(r);
   guEl = d;
   scroll();
   return guEl;
@@ -6286,11 +6298,12 @@ function handle(d) {
   if (d.type === 'echo') {
     if (armedFresh) setArmed(false);
     addMe(d.text, { id: d.message_id, role: 'user', text: d.text, at: d.at, images: d.images || [], files: d.files || [] });
+    turnBubbles = [];
     petSet('thinking');
     return;
   }
-  if (d.type === 'system' && d.subtype === 'newchat') { setArmed(false); log.innerHTML = ''; guEl = null; earliestSeq = null; olderBtn = null; note(d.text); return; }
-  if (d.type === 'system' && d.subtype === 'switched') { setArmed(false); log.innerHTML = ''; guEl = null; earliestSeq = null; olderBtn = null; note(d.text); return; }
+  if (d.type === 'system' && d.subtype === 'newchat') { setArmed(false); log.innerHTML = ''; guEl = null; turnBubbles = []; earliestSeq = null; olderBtn = null; note(d.text); return; }
+  if (d.type === 'system' && d.subtype === 'switched') { setArmed(false); log.innerHTML = ''; guEl = null; turnBubbles = []; earliestSeq = null; olderBtn = null; note(d.text); return; }
   if (d.type === 'system' && d.subtype === 'regenerating') {
     regeneratingMessageId = d.message_id || '';
     const replacedIds = Array.isArray(d.message_ids) && d.message_ids.length
@@ -6300,11 +6313,21 @@ function handle(d) {
       document.querySelectorAll('#log .row[data-message-id="' + CSS.escape(id) + '"]')
         .forEach(row => row.remove());
     }
+    turnBubbles = [];
     guEl = null; endThink(); closeGroup(); setBusy(true); petSet('thinking'); return;
   }
   if (d.type === 'system' && d.subtype === 'voice_reply') { voiceNextId = d.message_id || ''; return; }
   if (d.type === 'tool_call' && d.tool) { addToolUse(d.tool); return; }
   if (d.type === 'tool_result') { markToolDone(d.tool_call_id, d.is_error, d.content); return; }
+  if (d.type === 'assistant_reset') {
+    // 撞到重写规则被打回了：抹掉这一版，等它重说。
+    // 思考面板不动——打回的理由记在那儿。
+    for (const r of turnBubbles) r.remove();
+    turnBubbles = [];
+    guEl = null; closeGroup(); processBand = null;
+    petSet('thinking'); scroll();
+    return;
+  }
   if (d.type === 'assistant_split') {
     const el = guEl;
     if (el) {
@@ -6405,6 +6428,7 @@ function handle(d) {
     if (!d.is_error) cacheGlowStart();
     const voiceJustSaid = guEl && guEl._voiceId ? guEl._voiceId : '';
     voiceNextId = '';
+    turnBubbles = [];
     guEl?.querySelector('.caret')?.remove();
     guEl = null; endThink(); closeGroup(); processBand = null;
     if (regeneratingMessageId) {
@@ -6458,6 +6482,7 @@ function handle(d) {
     return;
   }
   if (d.type === 'system' && d.subtype === 'stopped') {
+    turnBubbles = [];
     guEl?.querySelector('.caret')?.remove();
     guEl = null; endThink(); closeGroup(); processBand = null;
     voiceNextId = ''; voiceSettle('');   // 说到一半被叫停：有字的定稿成可播，没字的标失败
@@ -7149,6 +7174,7 @@ const sheets = {
   heartbeat: document.getElementById('heartbeatSheet'),
   focus: document.getElementById('focusSheet'),
   instructions: document.getElementById('instructionsSheet'),
+  rewriteRules: document.getElementById('rewriteRulesSheet'),
   chatInstructions: document.getElementById('chatInstructionsSheet'),
   longContext: document.getElementById('longContextSheet'),
   settings: document.getElementById('settingsSheet'),
@@ -11345,6 +11371,74 @@ async function loadInstructions(editId = '') {
 document.getElementById('instructionsBtn').onclick = () => { sheets.chatInstructions.classList.add('open'); loadChatInstructions(); };
 document.getElementById('instructionsRow').onclick = () => { sheets.instructions.classList.add('open'); loadInstructions(); };
 refreshInstructionButton();
+
+/* ---------- 重写规则：它说完、还没交出来之前，再拦一道 ----------
+   撞到写在这儿的话就把这一轮打回去，附上「为什么」，让它换个说法重说。
+   规则是全局的——这是 Cloudy 怎么说话的事，不属于某一个窗口。 */
+function rewriteRuleCard(rule) {
+  const fresh = !rule.id;
+  return `<div class="ap-section" data-rewrite-rule="${instructionEsc(rule.id || '')}">`
+    + `<div class="ap-section-title">${fresh ? '新规则' : '规则'}</div>`
+    + `<div class="ap-lb">撞到这些话就打回</div>`
+    + `<textarea class="ap-in rewrite-phrases" rows="3" placeholder="一行一个，不分大小写&#10;我就在这里&#10;哪也不去">${instructionEsc((rule.phrases || []).join('\n'))}</textarea>`
+    + `<div class="ap-lb">告诉它为什么</div>`
+    + `<textarea class="ap-in rewrite-reason" rows="3" maxlength="600" placeholder="别用现成的安慰句。说点只对她成立的、具体的话。">${instructionEsc(rule.reason || '')}</textarea>`
+    + `<label class="ap-lb" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="rewrite-enabled" ${rule.enabled === false ? '' : 'checked'}><span>开着</span></label>`
+    + `<div class="ap-btns ${fresh ? 'single' : ''}"><button class="ap-b go rewrite-save">${fresh ? '添加这条' : '保存修改'}</button>${fresh ? '' : '<button class="ap-b rewrite-delete">删除</button>'}</div>`
+    + `<div class="ap-msg rewrite-msg"></div></div>`;
+}
+
+async function loadRewriteRules(withDraft = false) {
+  const body = document.getElementById('rewriteRulesBody');
+  body.innerHTML = '<div class="gnote">正在读规则…</div>';
+  let d;
+  try { d = await (await fetch('api/rewrite-rules', {cache:'no-store'})).json(); }
+  catch { body.innerHTML = '<div class="gnote">规则没拿到，等会儿再开一次。</div>'; return; }
+  const items = d.items || [];
+  const max = Number(d.max_rules || 20);
+  const full = items.length >= max;
+  const cards = items.map(rewriteRuleCard).join('')
+    + ((withDraft && !full) ? rewriteRuleCard({phrases: [], reason: '', enabled: true}) : '');
+  body.innerHTML = `<div class="sh-head"><h1>重写规则</h1><div class="sub">它说完、还没交出来之前拦一道：撞到这些话就打回，让它重说。所有窗口共用。</div></div>`
+    + `<div class="gnote">只有走 Claude Code 通道的聊天生效——别的供应商没有「说完再拦一次」的位置。</div>`
+    + `<div class="gnote">一轮最多打回一次。重说那一版还撞上也照样放过去：一句话都说不出来，比说了句现成话更糟。</div>`
+    + (cards || '<div class="gnote">还没有规则。加第一条吧。</div>')
+    + (full ? `<div class="gnote">已经有 ${max} 条了，删掉一条才能再加。</div>`
+            : `<div class="ap-btns single"><button class="ap-b" id="rewriteRuleAdd">＋ 加一条规则</button></div>`);
+  wireRewriteRules();
+}
+
+function wireRewriteRules() {
+  const add = document.getElementById('rewriteRuleAdd');
+  if (add) add.onclick = () => loadRewriteRules(true);
+  document.querySelectorAll('[data-rewrite-rule]').forEach(card => {
+    const id = card.dataset.rewriteRule;
+    const msg = card.querySelector('.rewrite-msg');
+    const say = (text, bad) => { msg.textContent = text; msg.className = 'ap-msg rewrite-msg on' + (bad ? ' bad' : ''); };
+    card.querySelector('.rewrite-save').onclick = async () => {
+      const phrases = card.querySelector('.rewrite-phrases').value.split('\n').map(line => line.trim()).filter(Boolean);
+      const reason = card.querySelector('.rewrite-reason').value.trim();
+      const enabled = card.querySelector('.rewrite-enabled').checked;
+      if (!phrases.length) { say('至少写一个触发词——空的规则会拦下每一句话。', true); return; }
+      if (!reason) { say('要写清楚为什么打回，它才知道往哪儿改。', true); return; }
+      try {
+        const r = await (await fetch('api/rewrite-rules', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id, phrases, reason, enabled})})).json();
+        if (!r.ok) throw new Error(r.detail || '没有保存');
+        loadRewriteRules();
+      } catch (e) { say('没存上：' + e.message, true); }
+    };
+    const del = card.querySelector('.rewrite-delete');
+    if (del) del.onclick = async () => {
+      if (!confirm('删掉这条规则？以后撞到这些话就不再打回了。')) return;
+      try {
+        const r = await fetch('api/rewrite-rules/' + encodeURIComponent(id), {method:'DELETE'});
+        if (!r.ok) throw new Error('没有删除');
+        loadRewriteRules();
+      } catch (e) { say('没删掉：' + e.message, true); }
+    };
+  });
+}
+document.getElementById('rewriteRulesRow').onclick = () => { sheets.rewriteRules.classList.add('open'); loadRewriteRules(); };
 
 /* ---------- 长期上下文：原聊天不动，只为当前窗口保留可重建的压缩记录 ---------- */
 let longContextPoll = null;

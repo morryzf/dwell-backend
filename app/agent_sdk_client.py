@@ -253,15 +253,30 @@ def _length_hint(max_tokens: int | None) -> str:
     return f"请把回复控制在大约 {budget} 个 token 以内。"
 
 
+def enabled_rewrite_rules() -> list[dict]:
+    """撞到就打回重说的那几条规则。全局共用——这是 Cloudy 怎么说话的事。
+
+    读不到就当没有：规则是给回复挑刺的，不该反过来挡下这次回复。
+    """
+    try:
+        return db.rewrite_rule_list(enabled_only=True)
+    except Exception:
+        return []
+
+
 def build_bridge_payload(model_id: str, messages: list, tools: list | None = None,
                          max_tokens: int | None = None,
                          reasoning_effort: str | None = None,
                          thinking_enabled: bool = True,
-                         state: dict | None = None) -> dict:
+                         state: dict | None = None,
+                         rewrite_rules: list[dict] | None = None) -> dict:
     """组装一次桥接请求。
 
     tools 只用来判断这轮要不要多跑几圈：Dwell 的 function tools 无法直接交给
     Agent SDK，真正的工具在桥接侧由 MCP 提供，所以这里不透传它们的 schema。
+
+    rewrite_rules 每轮都重新带过去，所以改完规则下一句就生效。它不进 system，
+    也不算进会话指纹——它是收尾时的一道关卡，不是上下文，改了不必重建缓存。
 
     payload 里额外带上 `_turns` / `_system`，给调用方存会话状态用；发请求前摘掉。
     """
@@ -289,6 +304,13 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
         payload["images"] = images
     if resume:
         payload["resume"] = resume
+    rules = [
+        {"phrases": list(rule["phrases"]), "reason": str(rule["reason"]).strip()}
+        for rule in (rewrite_rules or [])
+        if isinstance(rule, dict) and rule.get("phrases") and str(rule.get("reason") or "").strip()
+    ]
+    if rules:
+        payload["rewrite_rules"] = rules
     # effort 关掉 thinking 时依然有意义（它还管花多少 token），能不能用由桥接判断。
     effort = str(reasoning_effort or "").strip()
     if effort:
@@ -332,6 +354,9 @@ async def bridge_events(lines):
             text = str(event.get("message") or "")
             if text:
                 yield {"type": "thinking", "thinking": f"（{text}）\n"}
+        elif kind == "reset":
+            # 桥接把上一版打回了。已经吐出去的字要抹掉，不然两版首尾相接。
+            yield {"type": "reset"}
         elif kind == "session":
             sid = str(event.get("session_id") or "")
             if sid:
@@ -365,17 +390,18 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                              max_tokens: int | None = None,
                              reasoning_effort: str | None = None,
                              thinking_enabled: bool = True,
-                             session_key: str = ""):
+                             session_key: str = "", rewrite_guard: bool = False):
     """通过桥接服务跑一轮对话。密钥是可选的：它是桥接服务的门禁，不是模型凭据。
 
     session_key 为空就每轮从头讲：心跳这类不属于这段对话的入口不该续会话，
     更不该把聊天存下的会话状态冲掉。
     """
     chat_key = str(session_key or "")
+    rules = enabled_rewrite_rules() if rewrite_guard else []
     payload = build_bridge_payload(
         model_id, messages, tools, max_tokens=max_tokens,
         reasoning_effort=reasoning_effort, thinking_enabled=thinking_enabled,
-        state=load_state(chat_key),
+        state=load_state(chat_key), rewrite_rules=rules,
     )
     if not payload["prompt"] and not payload.get("images"):
         yield {"type": "text", "text": "[配置错误] 这次没有可以发给 Claude Code 的内容"}
@@ -416,7 +442,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                     payload = build_bridge_payload(
                         model_id, messages, tools, max_tokens=max_tokens,
                         reasoning_effort=reasoning_effort,
-                        thinking_enabled=thinking_enabled,
+                        thinking_enabled=thinking_enabled, rewrite_rules=rules,
                     )
                     continue
 

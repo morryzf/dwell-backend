@@ -1521,9 +1521,13 @@ async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
             reasoning_effort=selection.get("reasoning_effort"),
             thinking_enabled=bool(selection.get("show_thinking", 1)),
             session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
+            rewrite_guard=True,
         ):
             if event.get("type") == "text":
                 parts.append(str(event.get("text") or ""))
+            elif event.get("type") == "reset":
+                # 这一版被打回了，重说的那版从头攒起。
+                parts.clear()
             elif event.get("type") == "tool_calls":
                 calls.extend(event.get("calls") or [])
         if not calls:
@@ -4151,6 +4155,36 @@ async def memory_cards_get(chat_id: str, include_archived: bool = False):
     }
 
 
+@app.get("/api/rewrite-rules", dependencies=authed)
+async def rewrite_rules_get():
+    return {"ok": True, "items": db.rewrite_rule_list(),
+            "max_rules": db.REWRITE_RULE_MAX, "max_phrases": db.REWRITE_PHRASE_MAX}
+
+
+@app.post("/api/rewrite-rules", dependencies=authed)
+async def rewrite_rules_upsert(request: Request):
+    payload = await _read_json(request)
+    phrases = payload.get("phrases")
+    if not isinstance(phrases, list):
+        raise HTTPException(400, "phrases 要是一个列表")
+    try:
+        rule = db.rewrite_rule_upsert(
+            str(payload.get("id") or "").strip(), phrases,
+            str(payload.get("reason") or ""),
+            bool(payload.get("enabled", True)),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "rule": rule}
+
+
+@app.delete("/api/rewrite-rules/{rule_id}", dependencies=authed)
+async def rewrite_rules_delete(rule_id: str):
+    if not db.rewrite_rule_delete(rule_id):
+        raise HTTPException(404, "找不到这条规则")
+    return {"ok": True}
+
+
 @app.put("/api/chats/{chat_id}/memory-shared", dependencies=authed)
 async def memory_shared_put(chat_id: str, request: Request):
     if not db.chat_get(chat_id):
@@ -5009,6 +5043,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     natural_split = _REPLY_SPLIT_RE
     split_pending = ""
     current_message_id = msg_id
+    # 这一轮已经落地的气泡。被打回时要把 msg_id 之后那几条一起收回去。
+    reply_message_ids = [msg_id]
     tts_turn_id = msg_id
     reply_started = time.perf_counter()
     model_duration_ms = 0
@@ -5075,7 +5111,25 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         db.message_usage_update(current_message_id, {"tts_turn_id": tts_turn_id})
         _emit(chat_id, {"type": "assistant_split", "message_id": current_message_id, "text": text})
         current_message_id = db.message_add(chat_id, "assistant", "")["id"]
+        reply_message_ids.append(current_message_id)
         buf = []
+
+    def reset_stream():
+        """这一版被打回了：把已经吐出去的字抹掉，重说的那版从头写。
+
+        抹的只是正文。思考面板留着——打回的理由就记在那儿，不然她只看到
+        它忽然从头再说一遍，不知道发生了什么。
+        """
+        nonlocal current_message_id, buf, split_pending
+        buf = []
+        split_pending = ""
+        # 分条时前面那几条已经落库了，一起收回去，别留下半截旧版。
+        for extra in reply_message_ids[1:]:
+            db.message_delete(extra)
+        del reply_message_ids[1:]
+        current_message_id = msg_id
+        db.message_update(msg_id, "")
+        _emit(chat_id, {"type": "assistant_reset", "message_id": msg_id})
 
     def consume_stream_chunk(chunk: str, final: bool = False):
         nonlocal split_pending
@@ -5135,6 +5189,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 thinking_enabled=show_thinking,
                 session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
                 agent_session_key=f"dwell-chat:{chat_id}",
+                rewrite_guard=True,
             ):
                 if event["type"] == "thinking":
                     append_stream_thinking(str(event.get("thinking") or ""))
@@ -5143,6 +5198,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     consume_stream_chunk(chunk)
                 elif event["type"] == "tool_calls":
                     calls.extend(event["calls"])
+                elif event["type"] == "reset":
+                    reset_stream()
                 elif event["type"] == "cache_status":
                     cache_protocol = str(event.get("protocol") or "")
                     cache_auth_mode = str(event.get("auth_mode") or "")
