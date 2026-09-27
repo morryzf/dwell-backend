@@ -141,9 +141,24 @@ def turns_digest(turns: list[tuple[str, str]]) -> str:
     return digest.hexdigest()
 
 
+# 锚点取末尾几轮：一轮用户 + 一轮回复 + 再一轮用户，足够认出位置，
+# 又不至于因为一两句重复的「嗯」认错地方。
+ANCHOR_TURNS = 3
+
+
+def _anchor(turns: list[tuple[str, str]]) -> tuple[str, int]:
+    """给「已经递出去到哪儿了」取个指纹。"""
+    size = min(ANCHOR_TURNS, len(turns))
+    return (turns_digest(turns[len(turns) - size:]) if size else ""), size
+
+
 def plan_turn(state: dict | None, model_id: str, system: str,
               turns: list[tuple[str, str]]) -> tuple[str, list[tuple[str, str]]]:
     """决定这轮是续上旧会话还是从头讲一遍。
+
+    按内容在末尾对齐，不按位置。原文窗口是滑动的——聊满之后每轮都会挤掉最旧
+    的几条，开头一直在变。早先的版本把指纹锚在开头，于是窗口一满就再也对不上，
+    每轮都在重讲整段。
 
     返回 (要续的会话 id, 这次要递过去的轮次)。会话 id 为空就是从头开始。
     任何一处对不上都退回从头：宁可多花一次，也不能让 Claude Code 的上下文
@@ -158,19 +173,23 @@ def plan_turn(state: dict | None, model_id: str, system: str,
     if state.get("sys") != turns_digest([("system", system)]):
         return "", turns
 
-    known = int(state.get("n") or 0)
-    if not 0 < known <= len(turns):
-        return "", turns
-    if turns_digest(turns[:known]) != state.get("turns"):
+    anchor = str(state.get("anchor") or "")
+    size = int(state.get("anchor_len") or 0)
+    if not anchor or not 0 < size <= len(turns):
         return "", turns
 
-    fresh = turns[known:]
-    # 它自己那条回复它本来就记着，别再抄回去。
-    while fresh and fresh[0][0] == SPEAKER_ASSISTANT:
-        fresh = fresh[1:]
-    if not fresh:
-        return "", turns
-    return sid, fresh
+    # 从后往前找锚点：越靠后越可能是它，重复的短句也就不容易认错。
+    for end in range(len(turns), size - 1, -1):
+        if turns_digest(turns[end - size:end]) != anchor:
+            continue
+        fresh = turns[end:]
+        # 它自己那条回复它本来就记着，别再抄回去。
+        while fresh and fresh[0][0] == SPEAKER_ASSISTANT:
+            fresh = fresh[1:]
+        if not fresh:
+            return "", turns
+        return sid, fresh
+    return "", turns
 
 
 def load_state(chat_key: str) -> dict | None:
@@ -193,19 +212,20 @@ def save_state(chat_key: str, sid: str, model_id: str, system: str,
                turns: list[tuple[str, str]]) -> None:
     """记下 Claude Code 这次的会话 id，以及它已经听过哪些轮次。
 
-    存的是「递出去时」的轮次，不含它自己刚生成的那条回复——下一轮
-    plan_turn 会把那条当成已知的开头跳过。
+    存的是「递出去时」最后几轮的指纹。下一轮按内容找回这个位置，它后面的
+    才是新的——它自己刚生成的那条回复会被当成已知的开头跳过。
     """
     if not chat_key or not sid:
         return
     # 状态只是下一轮的优化。写不进去顶多下次重讲一遍，不该连累已经说完的这条回复。
     try:
+        anchor, size = _anchor(turns)
         db.setting_set(SESSION_SETTING_PREFIX + chat_key, json.dumps({
             "sid": sid,
             "model": model_id,
             "sys": turns_digest([("system", system)]),
-            "n": len(turns),
-            "turns": turns_digest(turns),
+            "anchor": anchor,
+            "anchor_len": size,
         }, ensure_ascii=False))
     except Exception:
         pass

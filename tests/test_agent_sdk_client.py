@@ -4,6 +4,7 @@ import unittest
 
 from app import agent_sdk_client, llm_client
 from app.agent_sdk_client import (
+    _anchor,
     bridge_events,
     build_bridge_payload,
     build_prompt,
@@ -236,12 +237,13 @@ class PlanTurnTest(unittest.TestCase):
     def setUp(self):
         self.turns = [("用户", "在吗"), ("助手", "在")]
         self.system = "你是 Cloudy"
+        anchor, size = _anchor(self.turns)
         self.state = {
             "sid": "sess-1",
             "model": "sonnet",
             "sys": turns_digest([("system", self.system)]),
-            "n": 2,
-            "turns": turns_digest(self.turns),
+            "anchor": anchor,
+            "anchor_len": size,
         }
 
     def _next(self, extra):
@@ -292,6 +294,38 @@ class PlanTurnTest(unittest.TestCase):
 
         self.assertEqual(sid, "")
         self.assertEqual(outgoing, [("用户", "在吗")])
+
+    def test_a_sliding_window_still_resumes(self):
+        """原文窗口聊满之后每轮都会挤掉最旧的几条，开头一直在变。
+
+        早先的版本把指纹锚在开头，于是窗口一满就再也对不上——真实聊天里
+        resume 从来没生效过，每轮都在重讲整段。
+        """
+        older = [("用户", f"旧的第{i}句") for i in range(5)]
+        window_before = older + self.turns
+        anchor, size = _anchor(window_before)
+        state = {
+            "sid": "sess-1", "model": "sonnet",
+            "sys": turns_digest([("system", self.system)]),
+            "anchor": anchor, "anchor_len": size,
+        }
+        # 下一轮：又说了两句，最旧的两条被挤出窗口
+        window_after = window_before[2:] + [("助手", "在"), ("用户", "再说一句")]
+
+        sid, outgoing = plan_turn(state, "sonnet", self.system, window_after)
+
+        self.assertEqual(sid, "sess-1")
+        self.assertEqual(outgoing, [("用户", "再说一句")])
+
+    def test_state_written_by_an_older_version_just_starts_over(self):
+        stale = {"sid": "sess-1", "model": "sonnet",
+                 "sys": turns_digest([("system", self.system)]),
+                 "n": 2, "turns": turns_digest(self.turns)}
+
+        sid, outgoing = plan_turn(stale, "sonnet", self.system, self.turns)
+
+        self.assertEqual(sid, "")
+        self.assertEqual(outgoing, self.turns)
 
     def test_nothing_new_to_say_starts_from_scratch(self):
         # 重新生成：没有新的用户轮次，续上去会让它对着空气说话。
@@ -367,12 +401,13 @@ class BridgePayloadResumeTest(unittest.TestCase):
             {"role": "assistant", "content": "在"},
             {"role": "user", "content": "再说一句"},
         ]
+        anchor, size = _anchor([("用户", "在吗")])
         state = {
             "sid": "sess-1",
             "model": "sonnet",
             "sys": turns_digest([("system", "你是 Cloudy")]),
-            "n": 1,
-            "turns": turns_digest([("用户", "在吗")]),
+            "anchor": anchor,
+            "anchor_len": size,
         }
 
         payload = build_bridge_payload("sonnet", messages, state=state)
