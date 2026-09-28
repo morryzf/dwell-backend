@@ -1836,6 +1836,30 @@ def _memory_card_dict(row: sqlite3.Row | dict | None) -> dict | None:
     return item
 
 
+MEMORY_POOL_VERSION_KEY = "memory_pool_version"
+
+
+def memory_pool_version() -> str:
+    """记忆池改过几次。续会话的通道拿它当指纹的一部分。
+
+    已经递给 Claude Code 的卡是死的——它把整段会话都记着，删卡、改卡、归档
+    都追不回来。只有重开一段会话才能让它真的忘掉，所以池子一动就要让指纹
+    对不上。版本是全局的：互通开着时一个窗口改的卡本来就会进别的窗口的池子，
+    分窗口记反而会漏。
+    """
+    return setting_get(MEMORY_POOL_VERSION_KEY, "0")
+
+
+def memory_pool_touch() -> None:
+    with conn() as cx:
+        cx.execute(
+            "INSERT INTO settings (key,value) VALUES (?,'1') "
+            "ON CONFLICT(key) DO UPDATE SET "
+            "value=CAST(CAST(settings.value AS INTEGER)+1 AS TEXT)",
+            (MEMORY_POOL_VERSION_KEY,),
+        )
+
+
 def memory_card_state_get(chat_id: str) -> dict:
     with conn() as cx:
         row = cx.execute(
@@ -2070,6 +2094,7 @@ def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
             row,
         )
         cx.execute("DELETE FROM memory_card_drafts WHERE id=?", (draft_id,))
+    memory_pool_touch()
     return memory_card_get(chat_id, row["id"])
 
 
@@ -2097,6 +2122,7 @@ def memory_card_update(chat_id: str, card_id: str, chosen: dict) -> dict:
         )
     if not cur.rowcount:
         raise ValueError("没有找到这张记忆卡片")
+    memory_pool_touch()
     return memory_card_get(chat_id, card_id)
 
 
@@ -2210,6 +2236,8 @@ def memory_card_archive(chat_id: str, card_id: str) -> bool:
             "UPDATE memory_cards SET status='archived',updated=? WHERE id=? AND chat_id=?",
             (int(time.time()), card_id, chat_id),
         )
+    if cur.rowcount:
+        memory_pool_touch()
     return cur.rowcount > 0
 
 
@@ -2220,6 +2248,8 @@ def memory_card_delete_permanently(chat_id: str, card_id: str) -> bool:
             "DELETE FROM memory_cards WHERE id=? AND chat_id=? AND status='archived'",
             (card_id, chat_id),
         )
+    if cur.rowcount:
+        memory_pool_touch()
     return cur.rowcount > 0
 
 
@@ -2301,6 +2331,8 @@ def memory_shared_enabled(chat_id: str) -> bool:
 
 def memory_shared_set(chat_id: str, enabled: bool) -> None:
     setting_set(f"memory_shared:{chat_id}", "1" if enabled else "0")
+    # 互通决定池子里有谁。关掉之后别人的卡不再进来，但已经递出去的还在。
+    memory_pool_touch()
 
 
 def memory_shared_chat_ids() -> list[str]:
@@ -2340,6 +2372,8 @@ def memory_card_injection_enabled(chat_id: str) -> bool:
 
 def memory_card_injection_set(chat_id: str, enabled: bool) -> None:
     setting_set(f"memory_cards_enabled:{chat_id}", "1" if enabled else "0")
+    # 关掉之后不再递新的卡，但已经递出去的还在它脑子里——得重开一段会话。
+    memory_pool_touch()
 
 
 def memory_card_usage_record(

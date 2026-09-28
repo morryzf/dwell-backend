@@ -408,6 +408,7 @@ class BridgePayloadResumeTest(unittest.TestCase):
             "sys": turns_digest([("system", "你是 Cloudy")]),
             "anchor": anchor,
             "anchor_len": size,
+            "cards": agent_sdk_client.memory_pool_version(),
         }
 
         payload = build_bridge_payload("sonnet", messages, state=state)
