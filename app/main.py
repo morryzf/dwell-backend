@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import time
 import uuid
+from collections import Counter
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -685,12 +686,30 @@ async def _memory_segment_summary(
     return summary.strip()[:6000]
 
 
+def _memory_drop_note(drops: dict[str, list[str]]) -> str:
+    """把这一趟丢掉的卡说成一句人话。没丢就是空串。"""
+    reasons = [reason for items in drops.values() for reason in items]
+    if not reasons:
+        return ""
+    counted = Counter(reasons).most_common(4)
+    detail = "、".join(f"{reason}（{count}）" for reason, count in counted)
+    return (f"这一趟有 {len(reasons)} 张卡没留下：{detail}。"
+            "出的卡全被挡下的分段没有标成处理过，下次还会再试一遍。")
+
+
 async def _stage_memory_card_suggestions(
-    chat_id: str, provider: dict, model_id: str, segments: list[dict]
+    chat_id: str, provider: dict, model_id: str, segments: list[dict],
+    drops: dict[str, list[str]] | None = None,
 ) -> None:
-    """为新分段提出短记忆卡片；只落草稿，不改变正式记忆或聊天上下文。"""
+    """为新分段提出短记忆卡片；只落草稿，不改变正式记忆或聊天上下文。
+
+    drops 由调用方在一整趟里共用：一趟分好几批送，面板上那句话要说的是整趟
+    丢了多少，而不是最后一批丢了多少。
+    """
     if not segments:
         return
+    if drops is None:
+        drops = {}
     db.memory_card_state_set(chat_id, "running")
     source_items = []
     source_map = {}
@@ -732,25 +751,39 @@ async def _stage_memory_card_suggestions(
         proposals = []
         for raw in raw_cards[:40]:
             if not isinstance(raw, dict):
+                drops.setdefault("", []).append("返回的卡片不是一个对象")
                 continue
             key = str(raw.get("source") or "")
             segment = source_map.get(key)
-            if not segment or per_source.get(key, 0) >= 4:
+            if not segment:
+                drops.setdefault("", []).append("卡片没说它来自哪一段")
+                continue
+            if per_source.get(key, 0) >= 4:
                 continue
             try:
                 clean = _memory_card_clean(raw)
-            except ValueError:
+            except ValueError as exc:
+                # 以前这里一声不响。卡被挡下、分段照样标成处理过，那批原文的卡
+                # 就此永久丢失，而面板上看起来只是「跑了一趟，什么也没出」。
+                drops.setdefault(key, []).append(str(exc))
                 continue
             clean["source_segment_id"] = segment["id"]
             proposals.append(clean)
             per_source[key] = per_source.get(key, 0) + 1
         db.memory_card_stage(chat_id, proposals)
         for key, segment in source_map.items():
+            if not per_source.get(key, 0) and drops.get(key):
+                # 这一段不是「没什么值得记的」，是出的卡全被挡下了。标成处理过
+                # 就再也不会重试——留着它，下一趟还救得回来。
+                continue
             db.memory_card_segment_mark(chat_id, segment["id"], per_source.get(key, 0))
         state = db.memory_card_state_get(chat_id)
-        db.memory_card_state_set(chat_id, "review" if state["draft_count"] else "ready", generated=True)
+        db.memory_card_state_set(
+            chat_id, "review" if state["draft_count"] else "ready",
+            generated=True, note=_memory_drop_note(drops),
+        )
     except Exception as exc:
-        db.memory_card_state_set(chat_id, "error", str(exc), generated=True)
+        db.memory_card_state_set(chat_id, "error", str(exc), generated=True, note="")
 
 
 async def _generate_unprocessed_memory_card_suggestions(
@@ -762,9 +795,10 @@ async def _generate_unprocessed_memory_card_suggestions(
         if require_segments:
             raise RuntimeError("没有尚未整理的新分段")
         return False
+    drops: dict[str, list[str]] = {}
     for start in range(0, len(segments), 4):
         await _stage_memory_card_suggestions(
-            chat_id, provider, model_id, segments[start:start + 4]
+            chat_id, provider, model_id, segments[start:start + 4], drops
         )
         if db.memory_card_state_get(chat_id)["status"] == "error":
             return False
