@@ -280,6 +280,9 @@ CREATE TABLE IF NOT EXISTS memory_card_state (
     chat_id       TEXT PRIMARY KEY,
     status        TEXT NOT NULL DEFAULT 'idle',
     error         TEXT NOT NULL DEFAULT '',
+    -- 这一趟丢掉了哪些卡。不是错误——那一趟「成功」了，只是出的卡没留下。
+    -- 以前这种情况面板上一个字都不说，看起来就是「跑了，但什么也没出」。
+    note          TEXT NOT NULL DEFAULT '',
     generated_at  INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
 );
@@ -510,6 +513,11 @@ def init_db():
             cx.execute("ALTER TABLE chats ADD COLUMN show_thinking INTEGER NOT NULL DEFAULT 1")
         if "prompt_cache_ttl" not in cols:
             cx.execute("ALTER TABLE chats ADD COLUMN prompt_cache_ttl TEXT NOT NULL DEFAULT ''")
+        card_state_cols = {
+            r["name"] for r in cx.execute("PRAGMA table_info(memory_card_state)").fetchall()
+        }
+        if "note" not in card_state_cols:
+            cx.execute("ALTER TABLE memory_card_state ADD COLUMN note TEXT NOT NULL DEFAULT ''")
         provider_cols = {
             r["name"] for r in cx.execute("PRAGMA table_info(provider_profiles)").fetchall()
         }
@@ -1831,7 +1839,7 @@ def _memory_card_dict(row: sqlite3.Row | dict | None) -> dict | None:
 def memory_card_state_get(chat_id: str) -> dict:
     with conn() as cx:
         row = cx.execute(
-            "SELECT status,error,generated_at FROM memory_card_state WHERE chat_id=?",
+            "SELECT status,error,note,generated_at FROM memory_card_state WHERE chat_id=?",
             (chat_id,),
         ).fetchone()
         draft_count = cx.execute(
@@ -1840,22 +1848,30 @@ def memory_card_state_get(chat_id: str) -> dict:
         card_count = cx.execute(
             "SELECT COUNT(*) FROM memory_cards WHERE chat_id=? AND status<>'archived'", (chat_id,)
         ).fetchone()[0]
-    out = dict(row) if row else {"status": "idle", "error": "", "generated_at": 0}
+    out = dict(row) if row else {"status": "idle", "error": "", "note": "", "generated_at": 0}
     out["draft_count"] = int(draft_count)
     out["card_count"] = int(card_count)
     return out
 
 
-def memory_card_state_set(chat_id: str, status: str, error: str = "", generated: bool = False) -> None:
+def memory_card_state_set(chat_id: str, status: str, error: str = "",
+                          generated: bool = False, note: str | None = None) -> None:
+    """note=None 表示不动它；传空串才是清掉。
+
+    状态在不少地方被顺手刷新（比如打开面板时），那些地方不该把上一趟留下的
+    「丢了几张卡」抹掉——只有真正跑了一趟的人才有资格改写它。
+    """
     now = int(time.time()) if generated else 0
     with conn() as cx:
         cx.execute(
-            """INSERT INTO memory_card_state (chat_id,status,error,generated_at)
-               VALUES (?,?,?,?)
+            """INSERT INTO memory_card_state (chat_id,status,error,note,generated_at)
+               VALUES (?,?,?,?,?)
                ON CONFLICT(chat_id) DO UPDATE SET status=excluded.status,error=excluded.error,
+               note=CASE WHEN ? THEN excluded.note ELSE memory_card_state.note END,
                generated_at=CASE WHEN excluded.generated_at>0 THEN excluded.generated_at
                                  ELSE memory_card_state.generated_at END""",
-            (chat_id, status[:40], error[:1000], now),
+            (chat_id, status[:40], error[:1000], (note or "")[:1000], now,
+             1 if note is not None else 0),
         )
 
 
