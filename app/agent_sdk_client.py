@@ -152,8 +152,16 @@ def _anchor(turns: list[tuple[str, str]]) -> tuple[str, int]:
     return (turns_digest(turns[len(turns) - size:]) if size else ""), size
 
 
+def memory_pool_version() -> str:
+    """记忆池的版本。读不到就当没变——它只是个优化，不该挡下这次回复。"""
+    try:
+        return db.memory_pool_version()
+    except Exception:
+        return ""
+
+
 def plan_turn(state: dict | None, model_id: str, system: str,
-              turns: list[tuple[str, str]]) -> tuple[str, list[tuple[str, str]]]:
+              turns: list[tuple[str, str]], cards: str = "") -> tuple[str, list[tuple[str, str]]]:
     """决定这轮是续上旧会话还是从头讲一遍。
 
     按内容在末尾对齐，不按位置。原文窗口是滑动的——聊满之后每轮都会挤掉最旧
@@ -169,8 +177,12 @@ def plan_turn(state: dict | None, model_id: str, system: str,
     sid = str(state.get("sid") or "")
     if not sid or state.get("model") != model_id:
         return "", turns
-    # system 里有记忆卡，换了就必须重讲——续上的会话看不到新的 system。
     if state.get("sys") != turns_digest([("system", system)]):
+        return "", turns
+    # 记忆卡是每轮随 prompt 递过去的，Claude Code 把每一轮都记着——她把一张卡
+    # 收起来、改掉、删掉，已经递出去的那几份都追不回来。池子一动就重开一段
+    # 会话，是让它真的忘掉的唯一办法。
+    if state.get("cards", "") != cards:
         return "", turns
 
     anchor = str(state.get("anchor") or "")
@@ -209,7 +221,7 @@ def load_state(chat_key: str) -> dict | None:
 
 
 def save_state(chat_key: str, sid: str, model_id: str, system: str,
-               turns: list[tuple[str, str]]) -> None:
+               turns: list[tuple[str, str]], cards: str = "") -> None:
     """记下 Claude Code 这次的会话 id，以及它已经听过哪些轮次。
 
     存的是「递出去时」最后几轮的指纹。下一轮按内容找回这个位置，它后面的
@@ -226,6 +238,7 @@ def save_state(chat_key: str, sid: str, model_id: str, system: str,
             "sys": turns_digest([("system", system)]),
             "anchor": anchor,
             "anchor_len": size,
+            "cards": cards,
         }, ensure_ascii=False))
     except Exception:
         pass
@@ -285,7 +298,8 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
     if hint:
         system = f"{system}\n\n{hint}".strip()
 
-    resume, outgoing = plan_turn(state, str(model_id or ""), system, turns)
+    cards_version = memory_pool_version()
+    resume, outgoing = plan_turn(state, str(model_id or ""), system, turns, cards_version)
     # 临时上下文跟着本轮走，不进 system，也不算进轮次指纹。
     prompt = "\n\n".join(context + [build_prompt(outgoing)])
     images = image_blocks(messages)
@@ -299,6 +313,7 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
         "max_turns": 8 if tools else 1,
         "_turns": turns,
         "_system": system,
+        "_cards": cards_version,
     }
     if images:
         payload["images"] = images
@@ -452,7 +467,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                 elif sid:
                     save_state(
                         chat_key, sid, str(model_id or ""),
-                        payload["_system"], payload["_turns"],
+                        payload["_system"], payload["_turns"], payload.get("_cards", ""),
                     )
                 return
     except httpx.RequestError as exc:
