@@ -4671,6 +4671,30 @@ let guEl = null;
 /* ---------- 基础排版 ---------- */
 function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 90; }
 function scroll(force) { if (force || atBottom()) log.scrollTop = log.scrollHeight; updateScrollBtn(); }
+/* 刚摆完消息时图片还没下来（历史图是 lazy 的，也没有尺寸占位），字体也还在路上。
+   只按一次底，它们随后撑高，滚动条还停在旧数字上，看到的就是靠前一点的位置。
+   所以这一小会儿一直扶着底，手一碰就松开。 */
+let bottomLockUntil = 0, bottomLockFrame = 0;
+function releaseBottomLock() {
+  bottomLockUntil = 0;
+  if (bottomLockFrame) { cancelAnimationFrame(bottomLockFrame); bottomLockFrame = 0; }
+}
+function lockToBottom(ms = 1200) {
+  bottomLockUntil = performance.now() + ms;
+  if (bottomLockFrame) return;
+  const step = () => {
+    bottomLockFrame = 0;
+    if (performance.now() > bottomLockUntil) return;
+    log.scrollTop = log.scrollHeight;
+    updateScrollBtn();
+    bottomLockFrame = requestAnimationFrame(step);
+  };
+  bottomLockFrame = requestAnimationFrame(step);
+}
+['wheel', 'touchstart', 'mousedown'].forEach(type => {
+  log.addEventListener(type, releaseBottomLock, { passive: true });
+});
+document.addEventListener('keydown', releaseBottomLock, { passive: true });   // 翻页键、方向键也是手动
 const scrollBottomBtn = document.getElementById('scrollBottom');
 function updateScrollBtn() { scrollBottomBtn.classList.toggle('show', !atBottom()); }
 log.addEventListener('scroll', updateScrollBtn, { passive: true });
@@ -4795,7 +4819,7 @@ function addMe(text, message) {
       appendMessageImages(b, message && message.images);
       appendMessageFiles(b, message && message.files);
     }
-    if (i === 0 && message) attachMessageActions(b, message);
+    if (message) attachMessageActions(b, message);   // 每段各归各位，编辑时仍指向同一条原消息
     lastBubble = b;
   });
   if (!lastBubble) {
@@ -6176,6 +6200,7 @@ async function loadSaid(focusMessageId = '') {
     if (msgs.length) earliestSeq = msgs[0].seq;
     ensureOlderBtn(!!d.more);
     scroll(true);
+    lockToBottom();
     return d.upto || 0;
   } catch (e) { return 0; }
 }
@@ -7882,10 +7907,12 @@ async function openSearchChatHit(hit) {
     if (latestUpto) cursor = latestUpto;
     var focusEl = document.querySelector('#log .row[data-message-id="' + CSS.escape(hit.message_id) + '"]');
     if (focusEl) {
+      releaseBottomLock();                 // 这一趟是去找那句话的，别再扶着底
       focusEl.scrollIntoView({ block: 'center' });
     } else {
       var focusUpto = await loadSaid(hit.message_id);
       if (focusUpto) cursor = focusUpto;
+      releaseBottomLock();
       document.querySelector('#log .row[data-message-id="' + CSS.escape(hit.message_id) + '"]')
         ?.scrollIntoView({ block: 'center' });
     }
