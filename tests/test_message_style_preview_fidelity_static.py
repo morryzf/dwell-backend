@@ -4,8 +4,11 @@ INDEX = Path("static/index.html").read_text(encoding="utf-8")
 
 
 def test_message_preview_uses_same_glass_depth_as_live_bubbles():
-    shadow = "inset 0 1px 0 rgba(255,255,255,.16), 0 6px 20px rgba(72,54,64,.075)"
+    # 顶上那条亮线已经去掉：真气泡和预览都只剩同一层投影，边交给「玻璃边」一起画。
+    shadow = "0 6px 20px rgba(72,54,64,.075)"
     assert INDEX.count(shadow) >= 3
+    assert "inset 0 1px 0 rgba(255,255,255,.16)" not in INDEX
+    assert ".msg-preview-me::before, .msg-preview-cloudy::before" in INDEX
     assert "#messageStyleSheet .sheet {" in INDEX
     assert "backdrop-filter: none !important;" in INDEX
 
