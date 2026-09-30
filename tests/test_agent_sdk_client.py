@@ -479,5 +479,173 @@ class StreamChatDispatchTest(unittest.TestCase):
         self.assertIn("还没有保存 API 密钥", events[0]["text"])
 
 
+def _card_message(*cards):
+    """和 main._memory_card_blocks 同形：开头、每张卡一块、结尾。"""
+    key = agent_sdk_client.MEMORY_CARD_KEY
+    return {"role": "system", "content": [
+        {"type": "text", "text": "【本轮按需取回的记忆卡】\n<cards>"},
+        *({"type": "text", "text": f"- {text}", key: cid} for cid, text in cards),
+        {"type": "text", "text": "</cards>"},
+    ]}
+
+
+def _resumable(seen_cards=None):
+    history = [
+        {"role": "system", "content": "你是 Cloudy"},
+        {"role": "user", "content": "在吗"},
+        {"role": "assistant", "content": "在"},
+    ]
+    anchor, size = _anchor([("用户", "在吗")])
+    state = {
+        "sid": "sess-1",
+        "model": "sonnet",
+        "sys": turns_digest([("system", "你是 Cloudy")]),
+        "anchor": anchor,
+        "anchor_len": size,
+        "cards": agent_sdk_client.memory_pool_version(),
+    }
+    if seen_cards is not None:
+        state["seen_cards"] = seen_cards
+    return history, state
+
+
+class MemoryCardDedupeTest(unittest.TestCase):
+    """续会话时 Claude Code 记着递过的卡，同一段会话里不再重递。"""
+
+    def test_resuming_only_sends_cards_this_session_has_not_seen(self):
+        history, state = _resumable(seen_cards=["c1"])
+        messages = history + [
+            {"role": "user", "content": "今天吃什么"},
+            _card_message(("c1", "喜欢吃辣"), ("c2", "最近在减脂")),
+        ]
+
+        payload = build_bridge_payload("sonnet", messages, state=state)
+
+        self.assertEqual(payload["resume"], "sess-1")
+        self.assertNotIn("喜欢吃辣", payload["prompt"])
+        self.assertIn("最近在减脂", payload["prompt"])
+        self.assertIn("【本轮按需取回的记忆卡】", payload["prompt"])
+        self.assertTrue(payload["prompt"].endswith("今天吃什么"))
+
+    def test_when_every_card_was_seen_the_card_note_is_left_out(self):
+        history, state = _resumable(seen_cards=["c1", "c2"])
+        messages = history + [
+            {"role": "user", "content": "今天吃什么"},
+            {"role": "system", "content": "【用户设备时间】周二"},
+            _card_message(("c1", "喜欢吃辣"), ("c2", "最近在减脂")),
+        ]
+
+        payload = build_bridge_payload("sonnet", messages, state=state)
+
+        self.assertNotIn("记忆卡", payload["prompt"])
+        self.assertNotIn("<cards>", payload["prompt"])
+        # 别的临时上下文照常走
+        self.assertIn("【用户设备时间】周二", payload["prompt"])
+
+    def test_a_fresh_session_gets_every_card_regardless_of_old_bookkeeping(self):
+        history, state = _resumable(seen_cards=["c1", "c2"])
+        state["model"] = "opus"          # 换了模型，只能从头讲
+        messages = history + [
+            {"role": "user", "content": "今天吃什么"},
+            _card_message(("c1", "喜欢吃辣"), ("c2", "最近在减脂")),
+        ]
+
+        payload = build_bridge_payload("sonnet", messages, state=state)
+
+        self.assertNotIn("resume", payload)
+        self.assertIn("喜欢吃辣", payload["prompt"])
+        self.assertIn("最近在减脂", payload["prompt"])
+        self.assertEqual(payload["_seen_cards"], ["c1", "c2"])
+
+    def test_bookkeeping_adds_this_turn_s_cards_to_what_the_session_has_seen(self):
+        history, state = _resumable(seen_cards=["c0", "c1"])
+        messages = history + [
+            {"role": "user", "content": "今天吃什么"},
+            _card_message(("c1", "喜欢吃辣"), ("c2", "最近在减脂")),
+        ]
+
+        payload = build_bridge_payload("sonnet", messages, state=state)
+
+        self.assertEqual(payload["_seen_cards"], ["c0", "c1", "c2"])
+        sent = {k for k in payload if not k.startswith("_")}
+        self.assertNotIn("_seen_cards", sent)
+
+    def test_state_without_the_field_is_treated_as_nothing_seen(self):
+        history, state = _resumable()          # 旧版本写下的状态没有这个字段
+        messages = history + [
+            {"role": "user", "content": "今天吃什么"},
+            _card_message(("c1", "喜欢吃辣")),
+        ]
+
+        payload = build_bridge_payload("sonnet", messages, state=state)
+
+        self.assertEqual(payload["resume"], "sess-1")
+        self.assertIn("喜欢吃辣", payload["prompt"])
+
+    def test_plain_messages_pass_through_untouched(self):
+        messages = [
+            {"role": "system", "content": "你是 Cloudy"},
+            {"role": "user", "content": [{"type": "text", "text": "看图"}]},
+        ]
+        self.assertEqual(agent_sdk_client.forget_seen_cards(messages, {"c1"}), messages)
+        self.assertEqual(agent_sdk_client.offered_cards(messages), set())
+
+
+class CompactionBookkeepingTest(unittest.TestCase):
+    def test_bridge_compaction_becomes_an_internal_event(self):
+        rows = ['data: {"type": "compacted"}', 'data: {"type": "text", "text": "在"}']
+        events = _run(_collect(bridge_events(_lines(rows))))
+        self.assertEqual(events, [{"type": "agent_compacted"}, {"type": "text", "text": "在"}])
+
+    def _run_turn(self, bridge_rows):
+        history, state = _resumable(seen_cards=["c1"])
+        messages = history + [
+            {"role": "user", "content": "今天吃什么"},
+            _card_message(("c2", "最近在减脂")),
+        ]
+        saved = {}
+        originals = (agent_sdk_client._attempt, agent_sdk_client.load_state,
+                     agent_sdk_client.save_state)
+
+        async def fake_attempt(client, url, headers, payload, box):
+            for row in bridge_rows:
+                yield row
+
+        def fake_save(chat_key, sid, model_id, system, turns, cards="", seen_cards=None):
+            saved["sid"] = sid
+            saved["seen_cards"] = seen_cards
+
+        agent_sdk_client._attempt = fake_attempt
+        agent_sdk_client.load_state = lambda key: state
+        agent_sdk_client.save_state = fake_save
+        try:
+            events = _run(_collect(agent_sdk_client.stream_bridge_chat(
+                {"base_url": "http://127.0.0.1:8787", "api_key_box": ""},
+                "sonnet", messages, session_key="dwell-chat:abc",
+            )))
+        finally:
+            (agent_sdk_client._attempt, agent_sdk_client.load_state,
+             agent_sdk_client.save_state) = originals
+        return events, saved
+
+    def test_a_normal_turn_remembers_every_card_the_session_now_holds(self):
+        events, saved = self._run_turn([
+            {"type": "agent_session", "session_id": "sess-1"},
+            {"type": "text", "text": "吃点清淡的"},
+        ])
+        self.assertEqual(events, [{"type": "text", "text": "吃点清淡的"}])
+        self.assertEqual(saved["seen_cards"], ["c1", "c2"])
+
+    def test_after_compaction_every_card_is_offered_again(self):
+        events, saved = self._run_turn([
+            {"type": "agent_session", "session_id": "sess-1"},
+            {"type": "agent_compacted"},
+            {"type": "text", "text": "吃点清淡的"},
+        ])
+        # 压缩是内部记账，不该漏给前端
+        self.assertEqual(events, [{"type": "text", "text": "吃点清淡的"}])
+        self.assertEqual(saved["seen_cards"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
