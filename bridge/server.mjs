@@ -318,6 +318,12 @@ async function streamTurn(res, prompt, options, includeThinking) {
       continue;
     }
 
+    // 会话被压缩过：早先递进去的记忆卡可能已经被总结掉了，上层据此重新记账。
+    if (message.type === "system" && message.subtype === "compact_boundary") {
+      writeEvent(res, { type: "compacted" });
+      continue;
+    }
+
     // 限流和上游错误：不转发的话，用户只看到长时间没反应，不知道是卡了还是在排队。
     if (message.type === "system" && message.subtype === "api_retry") {
       const seconds = Math.round(Number(message.retry_delay_ms || 0) / 1000);

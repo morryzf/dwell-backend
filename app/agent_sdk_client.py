@@ -74,6 +74,51 @@ def image_blocks(messages: list) -> list[dict]:
     return []
 
 
+# 记忆卡在消息里是一块块带 id 的正文（见 main._memory_card_blocks）。
+# Claude Code 会把每轮的 prompt 原样记进会话，续会话时递过一次的卡它一直记着；
+# 同一段会话里再递一遍，只会让每句话前面都堆着同样的几张卡。
+MEMORY_CARD_KEY = "memory_card_id"
+
+
+def offered_cards(messages: list) -> set[str]:
+    """这一轮挑出来的记忆卡 id。"""
+    ids: set[str] = set()
+    for message in messages or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if isinstance(part, dict) and part.get(MEMORY_CARD_KEY):
+                ids.add(str(part[MEMORY_CARD_KEY]))
+    return ids
+
+
+def forget_seen_cards(messages: list, seen: set[str]) -> list:
+    """摘掉这段会话里已经递过的卡；一张新卡都不剩，整条卡片说明也不必再发。"""
+    kept = []
+    for message in messages or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list) or not any(
+            isinstance(part, dict) and part.get(MEMORY_CARD_KEY) for part in content
+        ):
+            kept.append(message)
+            continue
+        parts = [
+            part for part in content
+            if not (isinstance(part, dict) and str(part.get(MEMORY_CARD_KEY) or "") in seen)
+        ]
+        if any(isinstance(part, dict) and part.get(MEMORY_CARD_KEY) for part in parts):
+            kept.append({**message, "content": parts})
+    return kept
+
+
+def _seen_cards(state: dict | None) -> set[str]:
+    raw = state.get("seen_cards") if isinstance(state, dict) else None
+    if not isinstance(raw, list):
+        return set()
+    return {str(item) for item in raw if item}
+
+
 def split_history(messages: list) -> tuple[str, list[tuple[str, str]], list[str]]:
     """把中立历史拆成 system 文本、轮次列表、以及本轮的临时上下文。
 
@@ -221,7 +266,8 @@ def load_state(chat_key: str) -> dict | None:
 
 
 def save_state(chat_key: str, sid: str, model_id: str, system: str,
-               turns: list[tuple[str, str]], cards: str = "") -> None:
+               turns: list[tuple[str, str]], cards: str = "",
+               seen_cards: list[str] | None = None) -> None:
     """记下 Claude Code 这次的会话 id，以及它已经听过哪些轮次。
 
     存的是「递出去时」最后几轮的指纹。下一轮按内容找回这个位置，它后面的
@@ -239,6 +285,7 @@ def save_state(chat_key: str, sid: str, model_id: str, system: str,
             "anchor": anchor,
             "anchor_len": size,
             "cards": cards,
+            "seen_cards": sorted(seen_cards or []),
         }, ensure_ascii=False))
     except Exception:
         pass
@@ -291,7 +338,7 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
     rewrite_rules 每轮都重新带过去，所以改完规则下一句就生效。它不进 system，
     也不算进会话指纹——它是收尾时的一道关卡，不是上下文，改了不必重建缓存。
 
-    payload 里额外带上 `_turns` / `_system`，给调用方存会话状态用；发请求前摘掉。
+    payload 里额外带上 `_turns` / `_system` / `_seen_cards`，给调用方存会话状态用；发请求前摘掉。
     """
     system, turns, context = split_history(messages)
     hint = _length_hint(max_tokens)
@@ -300,6 +347,10 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
 
     cards_version = memory_pool_version()
     resume, outgoing = plan_turn(state, str(model_id or ""), system, turns, cards_version)
+    # 从头讲的会话里还没有任何卡，续上的会话里递过的那些它都记着。
+    seen = _seen_cards(state) if resume else set()
+    if seen:
+        _, _, context = split_history(forget_seen_cards(messages, seen))
     # 临时上下文跟着本轮走，不进 system，也不算进轮次指纹。
     prompt = "\n\n".join(context + [build_prompt(outgoing)])
     images = image_blocks(messages)
@@ -314,6 +365,7 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
         "_turns": turns,
         "_system": system,
         "_cards": cards_version,
+        "_seen_cards": sorted(seen | offered_cards(messages)),
     }
     if images:
         payload["images"] = images
@@ -376,6 +428,8 @@ async def bridge_events(lines):
             sid = str(event.get("session_id") or "")
             if sid:
                 yield {"type": "agent_session", "session_id": sid}
+        elif kind == "compacted":
+            yield {"type": "agent_compacted"}
         elif kind == "error":
             message = str(event.get("message") or "Claude Agent SDK 调用失败")[:500]
             yield {"type": "bridge_error", "message": message}
@@ -440,9 +494,13 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                 spoke = False
                 failed = ""
                 sid = ""
+                compacted = False
                 async for event in _attempt(client, url, headers, payload, box):
                     if event["type"] == "agent_session":
                         sid = event["session_id"]
+                        continue
+                    if event["type"] == "agent_compacted":
+                        compacted = True
                         continue
                     if event["type"] == "bridge_error":
                         failed = event["message"]
@@ -465,9 +523,11 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                     clear_state(chat_key)
                     yield {"type": "text", "text": f"[桥接错误] {failed}"}
                 elif sid:
+                    # 压缩会把早先的卡总结掉，下一轮起重新递。
                     save_state(
                         chat_key, sid, str(model_id or ""),
                         payload["_system"], payload["_turns"], payload.get("_cards", ""),
+                        seen_cards=[] if compacted else payload.get("_seen_cards", []),
                     )
                 return
     except httpx.RequestError as exc:
