@@ -2739,7 +2739,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     -webkit-appearance: none; appearance: none;
     width: 22px; height: 22px; border-radius: 50%;
     background: #e8b4c4;
-    border: 2px solid rgba(255,255,255,.7);
+    border: 1px solid rgba(255,255,255,.7);
     box-shadow: 0 2px 8px rgba(140,85,108,.22);
     margin-top: -8.5px;
   }
@@ -2752,7 +2752,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     background: linear-gradient(90deg, var(--accent), var(--accent-soft));
   }
   input[type="range"].ap-in::-moz-range-thumb {
-    width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,.7);
+    width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(255,255,255,.7);
     background: #e8b4c4;
     box-shadow: 0 2px 8px rgba(140,85,108,.22);
   }
@@ -2777,6 +2777,38 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     }
   }
   #backgroundOverlay { accent-color: var(--accent); }
+  /* 气泡样式 / 玻璃样式的调节条、语音窗的进度条：不用系统自带的样子（外面一圈粗框、轨道发黑），
+     和背景遮罩那根一个画法——细轨道，左边填粉，圆钮只描一圈 1px 的白边。 */
+  :is(.msg-style-control input[type="range"], #ttsPlayerSeek) {
+    -webkit-appearance: none; appearance: none; background: transparent; border: 0; outline: 0;
+    height: 24px; margin: 0; padding: 0; cursor: pointer;
+  }
+  :is(.msg-style-control input[type="range"], #ttsPlayerSeek)::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 2px; border: 0;
+    background: linear-gradient(90deg, var(--accent) var(--range-pct, 0%), rgba(158,112,133,.16) var(--range-pct, 0%));
+  }
+  :is(.msg-style-control input[type="range"], #ttsPlayerSeek)::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 18px; height: 18px; border-radius: 50%; margin-top: -7px;
+    background: #e8b4c4; border: 1px solid rgba(255,255,255,.7);
+    box-shadow: 0 1px 5px rgba(140,85,108,.22);
+  }
+  #ttsPlayerSeek::-webkit-slider-thumb { width: 14px; height: 14px; margin-top: -5px; }
+  :is(.msg-style-control input[type="range"], #ttsPlayerSeek)::-moz-range-track { height: 4px; border-radius: 2px; border: 0; background: rgba(158,112,133,.16); }
+  :is(.msg-style-control input[type="range"], #ttsPlayerSeek)::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
+  :is(.msg-style-control input[type="range"], #ttsPlayerSeek)::-moz-range-thumb {
+    width: 16px; height: 16px; border-radius: 50%; background: #e8b4c4; border: 1px solid rgba(255,255,255,.7);
+  }
+  html[data-theme="dark"] :is(.msg-style-control input[type="range"], #ttsPlayerSeek)::-webkit-slider-runnable-track {
+    background: linear-gradient(90deg, var(--accent) var(--range-pct, 0%), rgba(255,220,235,.12) var(--range-pct, 0%));
+  }
+  html[data-theme="dark"] :is(.msg-style-control input[type="range"], #ttsPlayerSeek)::-webkit-slider-thumb { background: #c08a9c; border-color: rgba(255,235,244,.35); }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) :is(.msg-style-control input[type="range"], #ttsPlayerSeek)::-webkit-slider-runnable-track {
+      background: linear-gradient(90deg, var(--accent) var(--range-pct, 0%), rgba(255,220,235,.12) var(--range-pct, 0%));
+    }
+    html:not([data-theme="light"]) :is(.msg-style-control input[type="range"], #ttsPlayerSeek)::-webkit-slider-thumb { background: #c08a9c; border-color: rgba(255,235,244,.35); }
+  }
   .lk-time {
     position: relative;
     --clock-glass-top: rgba(244,221,231,.84);
@@ -5403,7 +5435,7 @@ function openMessageEditor(message) {
   body.querySelector('#editMessageText').value = message.text || '';
   body.querySelector('#editMessageSave').onclick = async () => {
     const content = body.querySelector('#editMessageText').value.trim(); const msg = body.querySelector('#editMessageMsg');
-    try { const r = await (await fetch('api/messages/' + encodeURIComponent(message.id), {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})})).json(); if(!r.ok) throw new Error(r.detail||'没有保存'); sheets.editMessage.classList.remove('open'); await loadSaid(); if (r.format_learned_now) note('（保存好了，Cloudy 会参考你校正过的分条节奏）'); }
+    try { const r = await (await fetch('api/messages/' + encodeURIComponent(message.id), {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})})).json(); if(!r.ok) throw new Error(r.detail||'没有保存'); sheets.editMessage.classList.remove('open'); await reloadSaidKeepingPlace(message.id); if (r.format_learned_now) note('（保存好了，Cloudy 会参考你校正过的分条节奏）'); }
     catch (e) { msg.textContent = '没存上：' + e.message; msg.className = 'ap-msg on bad'; }
   };
   sheets.editMessage.classList.add('open');
@@ -6448,6 +6480,28 @@ async function loadSaid(focusMessageId = '') {
     lockToBottom();
     return d.upto || 0;
   } catch (e) { return 0; }
+}
+
+/* 重画整段聊天，但眼睛停在原来那句上（编辑完保存用）。loadSaid 默认会滚到最新，
+   这里记下那句离顶边多远，重画后放回去；原来就在底部的照旧贴底。 */
+async function reloadSaidKeepingPlace(messageId) {
+  const edge = () => log.getBoundingClientRect().top;
+  const find = id => id ? log.querySelector('.row[data-message-id="' + CSS.escape(id) + '"]') : null;
+  const anchor = find(messageId)
+    || [...log.querySelectorAll('.row[data-message-id]')].find(el => el.getBoundingClientRect().bottom > edge());
+  const anchorId = anchor ? anchor.dataset.messageId : '';
+  const offset = anchor ? anchor.getBoundingClientRect().top - edge() : 0;
+  const wasBottom = atBottom();
+  // 先按平常那样读最新一段；那句话太早、不在里面，再按它读——按它读的那段到它为止，
+  // 它会排在最后，所以不能一上来就用。
+  let upto = await loadSaid();
+  if (anchorId && !find(anchorId)) upto = await loadSaid(anchorId);
+  if (wasBottom) return upto;
+  releaseBottomLock();
+  const again = find(anchorId);
+  if (again) log.scrollTop += again.getBoundingClientRect().top - edge() - offset;
+  updateScrollBtn();
+  return upto;
 }
 
 let resultSyncTimer = null;
@@ -7914,7 +7968,7 @@ async function playTts(messageId, userInitiated = false, cachedOnly = false) {
   document.getElementById('ttsPlayerStatus').textContent = cachedOnly ? '正在读取缓存…' : '正在生成或读取缓存…';
   document.getElementById('ttsPlayerCurrent').textContent = '0:00';
   document.getElementById('ttsPlayerDuration').textContent = '0:00';
-  ttsPlayerSeek.value = 0; ttsPlayerToggle.disabled = true;
+  ttsPlayerSeek.value = 0; paintRange(ttsPlayerSeek); ttsPlayerToggle.disabled = true;
   setTtsPlayerIcon(ttsPlayerToggle, 'dots');
   try {
     const suffix = cachedOnly ? '?cached_only=true' : '';
@@ -7941,13 +7995,13 @@ async function playTts(messageId, userInitiated = false, cachedOnly = false) {
     audio.ontimeupdate = () => {
       if (playerRunId !== ttsState.playerRunId) return;
       document.getElementById('ttsPlayerCurrent').textContent = ttsClock(audio.currentTime);
-      if (Number.isFinite(audio.duration) && audio.duration > 0) ttsPlayerSeek.value = Math.round(audio.currentTime / audio.duration * 1000);
+      if (Number.isFinite(audio.duration) && audio.duration > 0) { ttsPlayerSeek.value = Math.round(audio.currentTime / audio.duration * 1000); paintRange(ttsPlayerSeek); }
     };
     audio.onplay = () => { if (playerRunId === ttsState.playerRunId) setTtsPlayerIcon(ttsPlayerToggle, 'mediaPause'); };
     audio.onpause = () => { if (playerRunId === ttsState.playerRunId && !audio.ended) setTtsPlayerIcon(ttsPlayerToggle, 'mediaPlay'); };
     audio.onended = () => {
       if (playerRunId !== ttsState.playerRunId) return;
-      setTtsPlayerIcon(ttsPlayerToggle, 'mediaPlay'); ttsPlayerSeek.value = 1000;
+      setTtsPlayerIcon(ttsPlayerToggle, 'mediaPlay'); ttsPlayerSeek.value = 1000; paintRange(ttsPlayerSeek);
       const index = ttsQueueIndex();
       const next = index >= 0 ? ttsState.queue[index + 1] : null;
       if (ttsState.playMode === 'continuous' && next) {
@@ -11383,6 +11437,18 @@ const MESSAGE_STYLE_CONTROLS = [
   { key: 'text', label: '文字颜色', type: 'color' },
   { key: 'radius', label: '圆角半径', type: 'range', min: 4, max: 32, step: 1 }
 ];
+/* 调节条左边那段粉色靠 --range-pct 画。手拖时统一在这里更新；代码直接改 value 的地方
+   （语音进度、重画面板）自己调一下 paintRange。 */
+function paintRange(inp) {
+  const min = Number(inp.min) || 0, max = Number(inp.max) || 100;
+  const pct = max > min ? (Number(inp.value) - min) / (max - min) * 100 : 0;
+  inp.style.setProperty('--range-pct', Math.max(0, Math.min(100, pct)) + '%');
+}
+function paintRanges(root) { (root || document).querySelectorAll('input[type="range"]').forEach(paintRange); }
+document.addEventListener('input', event => {
+  if (event.target instanceof HTMLInputElement && event.target.type === 'range') paintRange(event.target);
+}, true);
+
 function renderMessageStyleSettings() {
   const body = document.getElementById('messageStyleBody');
   const roleLabel = messageStyleRole === 'me' ? '我的消息' : 'Cloudy 的消息';
@@ -11448,6 +11514,7 @@ function renderMessageStyleSettings() {
     controls.appendChild(wrap);
   });
   renderInterfaceGlassControls();
+  paintRanges(body);
 
   body.querySelector('#messageStyleCopy').onclick = () => {
     messageStyleState[otherRole][messageStyleTab] = cloneMessageStyle(current);
