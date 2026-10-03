@@ -101,9 +101,16 @@ curl -s localhost:8787/health
   "effort": "high",
   "max_turns": 1,
   "session_id": "dwell-chat:xxx",
-  "rewrite_rules": [{"phrases": ["我就在这里"], "reason": "别用现成的安慰句。"}]
+  "rewrite_rules": [{"phrases": ["我就在这里"], "reason": "别用现成的安慰句。"}],
+  "mcp_servers": {"dwell": {"type": "http", "url": "https://dwell.example.com/mcp/home",
+                            "headers": {"Authorization": "Bearer <一次性通行证>"}}}
 }
 ```
+
+`mcp_servers` 是这一轮额外交给 Claude Code 的 MCP，和环境变量里配的合在一起（同名以请求为准）。
+Dwell 用它把家里的待办、日记、日历交过来：Claude Code 需要时回调 Dwell 的 `/mcp/home`，
+凭 Dwell 每轮签发的通行证进门。只接受 `http` / `sse` 两种远程类型，不会因为请求在本机起进程。
+所以**这台机器要能访问到 Dwell 的外部地址**。
 
 响应是 SSE，每行一个事件，最后以 `data: [DONE]` 收尾：
 
