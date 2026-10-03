@@ -19,7 +19,7 @@
 | `OMBRE_MCP_TOKEN` | 可选：Ombre Brain 的静态 MCP Token；只设置在 Zeabur 环境变量中 |
 | `OMBRE_MCP_TIMEOUT` | 可选：读取记忆的超时秒数，默认 `12` |
 | `VAPID_SUBJECT` | 可选：Web Push 联系地址，默认 `mailto:dwell@localhost` |
-| `DWELL_PUBLIC_URL` | 可选：Dwell 的外部地址，例如 `https://dwell.example.com`。走 Claude Agent SDK 时，Claude Code 按这个地址回调家里的工具；不设就用她最近一次登录访问的地址 |
+| `DWELL_PUBLIC_URL` | 可选：Dwell 的外部地址，例如 `https://dwell.example.com`。走 Claude Agent SDK 时，Claude Code 按这个地址回调聊天里的工具（待办、日记、日历、sigillo、网页、外部 MCP）。Dwell 和 Claude Code 在同一台机器上时可以填 `http://127.0.0.1:<端口>`；不设就用她最近一次登录访问的地址 |
 
 当 `OMBRE_MCP_URL` 与 `OMBRE_MCP_TOKEN` 都设置后，dwell 会在每次回复前通过
 Ombre Brain 的 MCP 调用 `I` 和 `breath`，并将结果作为对话参考。记忆服务临时不可用时，

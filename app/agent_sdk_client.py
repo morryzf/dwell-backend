@@ -336,7 +336,7 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
     tools 只用来判断这轮要不要多跑几圈：Dwell 的 function tools 无法直接交给
     Agent SDK，真正的工具由 MCP 提供（见 mcp_servers），所以这里不透传它们的 schema。
 
-    mcp_servers 是这一轮 Claude Code 可以回调的 MCP（目前就是 Dwell 家里的工具），
+    mcp_servers 是这一轮 Claude Code 可以回调的 MCP（Dwell 这间聊天的整套工具），
     桥接把它和自己环境里配的合在一起。里面带着一次性的通行证，每轮都换，
     但它不进 prompt，也不进会话指纹，所以不影响续会话和缓存。
 

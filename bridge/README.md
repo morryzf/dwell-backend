@@ -108,7 +108,7 @@ curl -s localhost:8787/health
 ```
 
 `mcp_servers` 是这一轮额外交给 Claude Code 的 MCP，和环境变量里配的合在一起（同名以请求为准）。
-Dwell 用它把家里的待办、日记、日历交过来：Claude Code 需要时回调 Dwell 的 `/mcp/home`，
+Dwell 用它把这间聊天的整套工具（待办、日记、日历、sigillo、网页、外部 MCP）交过来：Claude Code 需要时回调 Dwell 的 `/mcp/home`，
 凭 Dwell 每轮签发的通行证进门。只接受 `http` / `sse` 两种远程类型，不会因为请求在本机起进程。
 所以**这台机器要能访问到 Dwell 的外部地址**。
 

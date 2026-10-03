@@ -8,6 +8,7 @@ import json
 import os
 import unittest
 import uuid
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
@@ -111,24 +112,84 @@ class HomeMcpTest(unittest.TestCase):
         self.assertTrue(result["isError"])
         self.assertEqual(db.cal_events_on("2026-10-05"), [])
 
+    def _names(self, grant):
+        return {tool["name"] for tool in self._post(_rpc("tools/list"), grant).json()["result"]["tools"]}
+
     def test_turning_home_tools_off_closes_the_door(self):
         grant = home_mcp.make_grant(self.chat_id)
         db.chat_home_todos_set(self.chat_id, False)
-        tools = self._post(_rpc("tools/list"), grant).json()["result"]["tools"]
-        self.assertEqual(tools, [])
+        names = self._names(grant)
+        self.assertNotIn("DwellCalendarAdd", names)
+        self.assertIn("WebSearch", names)
+        result = self._call(grant, "DwellCalendarAdd", {"date": "2026-10-05", "text": "x"})
+        self.assertTrue(result["isError"])
+        self.assertEqual(db.cal_events_on("2026-10-05"), [])
+
+    def test_web_tools_go_through_the_shared_executor(self):
+        grant = home_mcp.make_grant(self.chat_id)
+        self.assertIn("WebFetch", self._names(grant))
+
+        async def fake_search(query):
+            return json.dumps({"results": [query]}, ensure_ascii=False)
+
+        with mock.patch.object(main, "web_search", fake_search):
+            result = self._call(grant, "WebSearch", {"query": "明天天气"})
+        self.assertFalse(result["isError"])
+        self.assertIn("明天天气", result["content"][0]["text"])
+
+    def test_sigillo_follows_the_chat_switch(self):
+        grant = home_mcp.make_grant(self.chat_id)
+        self.assertNotIn("SigilloCreate", self._names(grant))
+        db.sigillo_set(self.chat_id, True)
+        self.assertIn("SigilloCreate", self._names(grant))
+        result = self._call(grant, "SigilloRecent", {})
+        self.assertFalse(result["isError"])
+        self.assertIn('"count"', result["content"][0]["text"])
+        # 心跳只读：开单这种写操作看不到。
+        self.assertNotIn("SigilloCreate", self._names(home_mcp.make_grant(self.chat_id, read_only=True)))
+
+    def test_external_mcp_tools_are_proxied_with_shorter_names(self):
+        server = {"id": "ombre1", "name": "Ombre"}
+        listed = [{"type": "function", "function": {
+            "name": "mcp__ombre1__breath", "description": "读一段记忆",
+            "parameters": {"type": "object", "properties": {"q": {"type": "string"}}},
+        }}]
+        calls = []
+
+        async def fake_list(srv):
+            return listed
+
+        async def fake_call(srv, tool_name, arguments):
+            calls.append((srv["id"], tool_name, arguments))
+            return json.dumps({"is_error": False, "content": [{"type": "text", "text": "她喜欢海"}]},
+                              ensure_ascii=False)
+
+        main._mcp_list_cache.clear()
+        with mock.patch.object(main.db, "chat_mcp_servers", lambda chat_id: [server]), \
+                mock.patch.object(main, "mcp_list_tools", fake_list), \
+                mock.patch.object(main, "mcp_call_tool", fake_call):
+            grant = home_mcp.make_grant(self.chat_id)
+            self.assertIn("ombre1__breath", self._names(grant))
+            result = self._call(grant, "ombre1__breath", {"q": "海"})
+        main._mcp_list_cache.clear()
+        self.assertFalse(result["isError"])
+        self.assertEqual(calls, [("ombre1", "breath", {"q": "海"})])
 
     def test_agent_sdk_chat_gets_the_server_config(self):
         os.environ["DWELL_PUBLIC_URL"] = "https://dwell.example.com/"
         sdk = {"provider_type": "claude_agent_sdk"}
-        config = main._agent_home_mcp(sdk, self.chat_id, "m1")
+        config = main._agent_tools_mcp(sdk, self.chat_id, "m1")
         self.assertEqual(config["dwell"]["type"], "http")
         self.assertEqual(config["dwell"]["url"], "https://dwell.example.com/mcp/home")
         grant = home_mcp.bearer(config["dwell"]["headers"]["Authorization"])
         self.assertEqual(home_mcp.read_grant(grant)["message_id"], "m1")
 
-        self.assertIsNone(main._agent_home_mcp({"provider_type": "openai"}, self.chat_id))
+        self.assertIsNone(main._agent_tools_mcp({"provider_type": "openai"}, self.chat_id))
+        # 家里的工具关着也照样给：网页工具、sigillo、外部 MCP 都走这一条。
         db.chat_home_todos_set(self.chat_id, False)
-        self.assertIsNone(main._agent_home_mcp(sdk, self.chat_id))
+        self.assertIsNotNone(main._agent_tools_mcp(sdk, self.chat_id))
+        os.environ.pop("DWELL_PUBLIC_URL")
+        self.assertIsNone(main._agent_tools_mcp(sdk, self.chat_id))
 
     def test_public_url_is_learned_from_logged_in_requests_only(self):
         self.client.get("/api/health", headers={"host": "evil.example", "x-forwarded-proto": "https"})
