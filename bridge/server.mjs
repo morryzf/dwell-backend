@@ -65,7 +65,30 @@ function loadMcpServers() {
 }
 
 const MCP_SERVERS = loadMcpServers();
-const HAS_MCP = Object.keys(MCP_SERVERS).length > 0;
+
+// Dwell 每轮可以带上自己的 MCP（家里的待办、日记、日历），由 Claude Code 回调
+// Dwell。只收远程的 http / sse：stdio 会在这台机器上起进程，不能让一个请求决定。
+const REMOTE_MCP_TYPES = new Set(["http", "sse"]);
+
+function requestMcpServers(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const servers = {};
+  for (const [name, config] of Object.entries(raw)) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) continue;
+    if (!config || typeof config !== "object") continue;
+    const type = String(config.type || "");
+    const url = String(config.url || "");
+    if (!REMOTE_MCP_TYPES.has(type) || !/^https?:\/\//.test(url)) continue;
+    const headers = {};
+    if (config.headers && typeof config.headers === "object") {
+      for (const [key, value] of Object.entries(config.headers)) {
+        headers[String(key)] = String(value);
+      }
+    }
+    servers[name] = { type, url, headers };
+  }
+  return servers;
+}
 
 let running = 0;
 const waiting = [];
@@ -216,8 +239,10 @@ async function runChat(res, request) {
   if (resume) {
     options.resume = resume;
   }
-  if (HAS_MCP) {
-    options.mcpServers = MCP_SERVERS;
+  // 同名时以这一轮带来的为准：通行证每轮都换。
+  const mcpServers = { ...MCP_SERVERS, ...requestMcpServers(request.mcp_servers) };
+  if (Object.keys(mcpServers).length) {
+    options.mcpServers = mcpServers;
   }
   options.tools = BUILTIN_TOOLS;
 
@@ -418,7 +443,7 @@ server.listen(PORT, HOST, () => {
       : "Claude Code 全套"
   }`);
   console.log(`[bridge] 单轮上限 ${TURN_TIMEOUT_MS ? Math.round(TURN_TIMEOUT_MS / 1000) + " 秒" : "不限"}`);
-  if (HAS_MCP) {
+  if (Object.keys(MCP_SERVERS).length) {
     console.log(`[bridge] MCP：${Object.keys(MCP_SERVERS).join(", ")}`);
   }
 });

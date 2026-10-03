@@ -329,11 +329,16 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
                          reasoning_effort: str | None = None,
                          thinking_enabled: bool = True,
                          state: dict | None = None,
-                         rewrite_rules: list[dict] | None = None) -> dict:
+                         rewrite_rules: list[dict] | None = None,
+                         mcp_servers: dict | None = None) -> dict:
     """组装一次桥接请求。
 
     tools 只用来判断这轮要不要多跑几圈：Dwell 的 function tools 无法直接交给
-    Agent SDK，真正的工具在桥接侧由 MCP 提供，所以这里不透传它们的 schema。
+    Agent SDK，真正的工具由 MCP 提供（见 mcp_servers），所以这里不透传它们的 schema。
+
+    mcp_servers 是这一轮 Claude Code 可以回调的 MCP（目前就是 Dwell 家里的工具），
+    桥接把它和自己环境里配的合在一起。里面带着一次性的通行证，每轮都换，
+    但它不进 prompt，也不进会话指纹，所以不影响续会话和缓存。
 
     rewrite_rules 每轮都重新带过去，所以改完规则下一句就生效。它不进 system，
     也不算进会话指纹——它是收尾时的一道关卡，不是上下文，改了不必重建缓存。
@@ -361,7 +366,7 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
         "prompt": prompt,
         "include_thinking": bool(thinking_enabled),
         # 没有工具时一轮就该收尾；留给 MCP 的余量在桥接侧按需要放大。
-        "max_turns": 8 if tools else 1,
+        "max_turns": 8 if tools or mcp_servers else 1,
         "_turns": turns,
         "_system": system,
         "_cards": cards_version,
@@ -378,6 +383,8 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
     ]
     if rules:
         payload["rewrite_rules"] = rules
+    if mcp_servers:
+        payload["mcp_servers"] = mcp_servers
     # effort 关掉 thinking 时依然有意义（它还管花多少 token），能不能用由桥接判断。
     effort = str(reasoning_effort or "").strip()
     if effort:
@@ -459,7 +466,8 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                              max_tokens: int | None = None,
                              reasoning_effort: str | None = None,
                              thinking_enabled: bool = True,
-                             session_key: str = "", rewrite_guard: bool = False):
+                             session_key: str = "", rewrite_guard: bool = False,
+                             mcp_servers: dict | None = None):
     """通过桥接服务跑一轮对话。密钥是可选的：它是桥接服务的门禁，不是模型凭据。
 
     session_key 为空就每轮从头讲：心跳这类不属于这段对话的入口不该续会话，
@@ -470,7 +478,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
     payload = build_bridge_payload(
         model_id, messages, tools, max_tokens=max_tokens,
         reasoning_effort=reasoning_effort, thinking_enabled=thinking_enabled,
-        state=load_state(chat_key), rewrite_rules=rules,
+        state=load_state(chat_key), rewrite_rules=rules, mcp_servers=mcp_servers,
     )
     if not payload["prompt"] and not payload.get("images"):
         yield {"type": "text", "text": "[配置错误] 这次没有可以发给 Claude Code 的内容"}
@@ -516,6 +524,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                         model_id, messages, tools, max_tokens=max_tokens,
                         reasoning_effort=reasoning_effort,
                         thinking_enabled=thinking_enabled, rewrite_rules=rules,
+                        mcp_servers=mcp_servers,
                     )
                     continue
 

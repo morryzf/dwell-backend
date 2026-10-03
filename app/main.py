@@ -26,7 +26,7 @@ import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from . import auth, db, file_text, provider_secrets, push_service, sigillo, study
+from . import auth, db, file_text, home_mcp, provider_secrets, push_service, sigillo, study
 from app.pet_assets import ensure_pet_assets
 from app.agent_sdk_client import MEMORY_CARD_KEY
 from app.llm_client import prompt_cache_enabled, stream_chat
@@ -1556,6 +1556,7 @@ async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
             reasoning_effort=selection.get("reasoning_effort"),
             thinking_enabled=bool(selection.get("show_thinking", 1)),
             session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
+            agent_mcp_servers=_agent_home_mcp(provider, chat_id, read_only=True),
             rewrite_guard=True,
         ):
             if event.get("type") == "text":
@@ -1937,11 +1938,75 @@ def _finish_system_log(
         pass
 
 
+PUBLIC_URL_SETTING_KEY = "public_base_url"
+
+
+def _remember_public_url(request: Request) -> None:
+    """记下她从哪个地址打开的 Dwell，桥接那边的 Claude Code 要按这个地址回调。
+
+    只认登录过的请求：Host 头谁都能填，不能让陌生请求把回调地址改走。
+    """
+    if os.environ.get("DWELL_PUBLIC_URL", "").strip():
+        return
+    try:
+        if not auth.is_authed(request):
+            return
+        proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "https")
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+        proto = proto.split(",")[0].strip()
+        host = host.split(",")[0].strip()
+        if not host or proto not in {"http", "https"}:
+            return
+        url = f"{proto}://{host}"
+        if db.setting_get(PUBLIC_URL_SETTING_KEY, "") != url:
+            db.setting_set(PUBLIC_URL_SETTING_KEY, url)
+    except Exception:
+        pass
+
+
+def _public_url() -> str:
+    configured = os.environ.get("DWELL_PUBLIC_URL", "").strip().rstrip("/")
+    if configured:
+        return configured
+    try:
+        return db.setting_get(PUBLIC_URL_SETTING_KEY, "").rstrip("/")
+    except Exception:
+        return ""
+
+
+def _agent_home_mcp(provider: dict | None, chat_id: str, message_id: str = "",
+                    read_only: bool = False) -> dict | None:
+    """走 Claude Agent SDK 时，把家里的工具作为 MCP 交给桥接。
+
+    别的通道照旧用 function tools，这里返回 None。这间聊天没开家里的工具、
+    或者还不知道 Dwell 的外部地址，也返回 None——那就是没有工具，不是出错。
+    """
+    if str((provider or {}).get("provider_type") or "") != "claude_agent_sdk":
+        return None
+    if not db.chat_home_todos_enabled(chat_id):
+        return None
+    base = _public_url()
+    if not base:
+        return None
+    grant = home_mcp.make_grant(chat_id, message_id, read_only=read_only)
+    return home_mcp.server_config(base, grant)
+
+
+def _home_mcp_tools(read_only: bool) -> list[dict]:
+    tools = [
+        tool for tool in HOME_TOOLS
+        if not read_only or tool["function"]["name"] in HEARTBEAT_READ_HOME_TOOLS
+    ]
+    return home_mcp.mcp_tools(tools)
+
+
 @app.middleware("http")
 async def _system_request_log(request: Request, call_next):
     """记录会改变数据的 API 调用；不读取请求正文、请求头或查询参数。"""
     path = request.url.path
     method = request.method.upper()
+    if path.startswith("/api/"):
+        _remember_public_url(request)
     should_log = (
         path.startswith("/api/")
         and method in {"POST", "PUT", "PATCH", "DELETE"}
@@ -5345,6 +5410,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 thinking_enabled=show_thinking,
                 session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
                 agent_session_key=f"dwell-chat:{chat_id}",
+                agent_mcp_servers=_agent_home_mcp(provider, chat_id, current_message_id),
                 rewrite_guard=True,
             ):
                 if event["type"] == "thinking":
@@ -5791,6 +5857,64 @@ async def wake_say(request: Request):
         f"/?chat={chat_id}&from=push",
     )
     return {"ok": True, "chat_id": chat_id, "id": message["id"], "push": push_result}
+
+
+# ---------------------------------------------------------------- 家里工具的 MCP 端点
+
+@app.post(home_mcp.ENDPOINT_PATH)
+async def home_mcp_endpoint(request: Request):
+    """Claude Code 通过桥接回调这里，用家里的工具。凭每轮签发的通行证进门。"""
+    grant = home_mcp.read_grant(home_mcp.bearer(request.headers.get("authorization", "")))
+    if not grant or not db.chat_get(grant["chat_id"]):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    chat_id = grant["chat_id"]
+    message_id = grant["message_id"]
+    # 聊天里关掉了家里的工具，已经发出去的通行证也跟着失效。
+    tools = _home_mcp_tools(grant["read_only"]) if db.chat_home_todos_enabled(chat_id) else []
+
+    async def call(name: str, arguments: dict):
+        record = None
+        if message_id:
+            record = db.tool_call_add(
+                chat_id, message_id, name, json.dumps(arguments, ensure_ascii=False)
+            )
+            _emit(chat_id, {"type": "tool_call", "tool": {
+                "id": record["id"], "name": name, "input": arguments,
+            }})
+        try:
+            result, is_error = home_tool(name, arguments), False
+        except Exception as exc:
+            result = json.dumps({"is_error": True, "content": [{"type": "text", "text": str(exc)}]},
+                                ensure_ascii=False)
+            is_error = True
+        if record:
+            db.tool_call_finish(record["id"], result, is_error)
+            _emit(chat_id, {"type": "tool_result", "tool_call_id": record["id"],
+                            "is_error": is_error, "content": result})
+        return result, is_error
+
+    body = home_mcp.parse_body(await request.body())
+    if isinstance(body, list):
+        replies = [reply for reply in [await home_mcp.handle_message(item, tools, call) for item in body] if reply]
+    elif body is None:
+        return JSONResponse(home_mcp._error(None, -32700, "Parse error"), status_code=400)
+    else:
+        reply = await home_mcp.handle_message(body, tools, call)
+        replies = reply
+    if not replies:
+        return Response(status_code=202)
+    return JSONResponse(replies)
+
+
+@app.get(home_mcp.ENDPOINT_PATH)
+async def home_mcp_stream():
+    """不开服务端推送流；规范允许直接回 405。"""
+    return Response(status_code=405, headers={"Allow": "POST"})
+
+
+@app.delete(home_mcp.ENDPOINT_PATH)
+async def home_mcp_close():
+    return Response(status_code=405, headers={"Allow": "POST"})
 
 
 # ---------------------------------------------------------------- 健康检查
