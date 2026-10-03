@@ -1400,8 +1400,9 @@ def _day_brief_message(now: datetime) -> list[dict]:
         return []
 
 
-async def _chat_tools(chat_id: str) -> tuple[list[dict], dict[str, object]]:
+async def _chat_tools(chat_id: str, list_tools=None) -> tuple[list[dict], dict[str, object]]:
     """Return the same ordered tool surface for every entry point in one chat."""
+    list_tools = list_tools or mcp_list_tools
     tools = list(WEB_TOOLS)
     tool_map: dict[str, object] = {
         "WebSearch": "builtin:search",
@@ -1417,13 +1418,45 @@ async def _chat_tools(chat_id: str) -> tuple[list[dict], dict[str, object]]:
             tool_map[tool["function"]["name"]] = "builtin:sigillo"
     for server in db.chat_mcp_servers(chat_id):
         try:
-            server_tools = await mcp_list_tools(server)
+            server_tools = await list_tools(server)
         except McpConnectionError:
             continue
         for tool in server_tools:
             tools.append(tool)
             tool_map[tool["function"]["name"]] = server
     return tools, tool_map
+
+
+def _tool_error_text(exc: Exception) -> str:
+    return json.dumps({"is_error": True, "content": [{"type": "text", "text": str(exc)}]},
+                      ensure_ascii=False)
+
+
+async def _run_chat_tool(chat_id: str, name: str, server: object,
+                         arguments: dict) -> tuple[str, bool]:
+    """执行一次聊天工具调用，返回 (结果文本, 是否出错)。
+
+    普通聊天和 Claude Agent SDK 回调的 MCP 端点共用这一处，两条路上同一把工具
+    行为一致。出错不抛，交给模型看——它看得懂错在哪就能自己改对重来。
+    """
+    try:
+        if server == "builtin:search":
+            return await web_search(arguments.get("query", "")), False
+        if server == "builtin:fetch":
+            return await web_fetch(arguments.get("url", "")), False
+        if server == "builtin:home":
+            return home_tool(name, arguments), False
+        if server == "builtin:sigillo":
+            return sigillo_tool(chat_id, name, arguments), False
+        if not server:
+            raise ValueError("模型请求了未启用的 MCP 工具")
+        result = await mcp_call_tool(server, name.split("__", 2)[-1], arguments)
+        try:
+            return result, bool(json.loads(result).get("is_error", False))
+        except (TypeError, AttributeError, json.JSONDecodeError):
+            return result, False
+    except Exception as exc:
+        return _tool_error_text(exc), True
 
 
 def _heartbeat_context(chat_id: str, now: datetime, interval: int,
@@ -1556,7 +1589,7 @@ async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
             reasoning_effort=selection.get("reasoning_effort"),
             thinking_enabled=bool(selection.get("show_thinking", 1)),
             session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
-            agent_mcp_servers=_agent_home_mcp(provider, chat_id, read_only=True),
+            agent_mcp_servers=_agent_tools_mcp(provider, chat_id, read_only=True),
             rewrite_guard=True,
         ):
             if event.get("type") == "text":
@@ -1974,16 +2007,15 @@ def _public_url() -> str:
         return ""
 
 
-def _agent_home_mcp(provider: dict | None, chat_id: str, message_id: str = "",
-                    read_only: bool = False) -> dict | None:
-    """走 Claude Agent SDK 时，把家里的工具作为 MCP 交给桥接。
+def _agent_tools_mcp(provider: dict | None, chat_id: str, message_id: str = "",
+                     read_only: bool = False) -> dict | None:
+    """走 Claude Agent SDK 时，把这间聊天的整套工具作为一个 MCP 交给桥接。
 
-    别的通道照旧用 function tools，这里返回 None。这间聊天没开家里的工具、
-    或者还不知道 Dwell 的外部地址，也返回 None——那就是没有工具，不是出错。
+    别的通道照旧用 function tools，这里返回 None。还不知道 Dwell 的外部地址
+    也返回 None——那就是没有工具，不是出错。具体给哪些工具，由端点在被调用时
+    按这间聊天当下的设置决定，所以这里不必看开关。
     """
     if str((provider or {}).get("provider_type") or "") != "claude_agent_sdk":
-        return None
-    if not db.chat_home_todos_enabled(chat_id):
         return None
     base = _public_url()
     if not base:
@@ -1992,12 +2024,49 @@ def _agent_home_mcp(provider: dict | None, chat_id: str, message_id: str = "",
     return home_mcp.server_config(base, grant)
 
 
-def _home_mcp_tools(read_only: bool) -> list[dict]:
-    tools = [
-        tool for tool in HOME_TOOLS
-        if not read_only or tool["function"]["name"] in HEARTBEAT_READ_HOME_TOOLS
-    ]
-    return home_mcp.mcp_tools(tools)
+# 外部 MCP 的工具清单短暂记一会儿：Claude Code 一轮里先列一次、再调好几次，
+# 每次都是一个独立的 HTTP 请求，不必每次都去外部服务器重新列一遍。
+_MCP_LIST_TTL = 60
+_mcp_list_cache: dict[str, tuple[float, list[dict]]] = {}
+
+
+async def _cached_mcp_list_tools(server: dict) -> list[dict]:
+    key = json.dumps(server, sort_keys=True, default=str)
+    hit = _mcp_list_cache.get(key)
+    now = time.monotonic()
+    if hit and hit[0] > now:
+        return hit[1]
+    tools = await mcp_list_tools(server)
+    _mcp_list_cache[key] = (now + _MCP_LIST_TTL, tools)
+    return tools
+
+
+def _agent_tool_name(name: str) -> str:
+    """外部 MCP 的工具在 Dwell 里叫 mcp__<服务>__<工具>，到 Claude Code 那边还要
+    再套一层 mcp__dwell__。去掉里面这层 mcp__，名字不至于长过上游的上限。"""
+    return name[5:] if name.startswith("mcp__") else name
+
+
+async def _agent_tool_surface(chat_id: str, read_only: bool) -> tuple[list[dict], dict]:
+    """这张通行证能看到的工具（MCP 形状），以及对外名字 → (Dwell 里的名字, 来源)。
+
+    和普通聊天同一套：家里的工具、sigillo、网页工具、这间聊天挂的外部 MCP，
+    开关都按这间聊天当下的设置。只读（心跳）沿用心跳那套筛法。
+    """
+    tools, tool_map = await _chat_tools(chat_id, list_tools=_cached_mcp_list_tools)
+    visible = []
+    routes: dict[str, tuple[str, object]] = {}
+    for tool in tools:
+        name = str((tool.get("function") or {}).get("name") or "")
+        server = tool_map.get(name)
+        if not name or (read_only and not _heartbeat_tool_allowed(tool, server)):
+            continue
+        exposed = _agent_tool_name(name)
+        if exposed in routes:
+            continue
+        routes[exposed] = (name, server)
+        visible.append({**tool, "function": {**tool["function"], "name": exposed}})
+    return home_mcp.mcp_tools(visible), routes
 
 
 @app.middleware("http")
@@ -5410,7 +5479,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 thinking_enabled=show_thinking,
                 session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
                 agent_session_key=f"dwell-chat:{chat_id}",
-                agent_mcp_servers=_agent_home_mcp(provider, chat_id, current_message_id),
+                agent_mcp_servers=_agent_tools_mcp(provider, chat_id, current_message_id),
                 rewrite_guard=True,
             ):
                 if event["type"] == "thinking":
@@ -5480,30 +5549,10 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     arguments = json.loads(raw_arguments)
                     if not isinstance(arguments, dict):
                         raise ValueError("参数必须是对象")
-                    if server == "builtin:search":
-                        result = await web_search(arguments.get("query", ""))
-                        is_error = False
-                    elif server == "builtin:fetch":
-                        result = await web_fetch(arguments.get("url", ""))
-                        is_error = False
-                    elif server == "builtin:home":
-                        result = home_tool(name, arguments)
-                        is_error = False
-                    elif server == "builtin:sigillo":
-                        result = sigillo_tool(chat_id, name, arguments)
-                        is_error = False
-                    elif not server:
-                        raise ValueError("模型请求了未启用的 MCP 工具")
-                    else:
-                        tool_name = name.split("__", 2)[-1]
-                        result = await mcp_call_tool(server, tool_name, arguments)
-                        try:
-                            is_error = bool(json.loads(result).get("is_error", False))
-                        except (TypeError, json.JSONDecodeError):
-                            is_error = False
                 except Exception as exc:
-                    result = json.dumps({"is_error": True, "content": [{"type": "text", "text": str(exc)}]}, ensure_ascii=False)
-                    is_error = True
+                    result, is_error = _tool_error_text(exc), True
+                else:
+                    result, is_error = await _run_chat_tool(chat_id, name, server, arguments)
                 db.tool_call_finish(record["id"], result, is_error)
                 _emit(chat_id, {"type": "tool_result", "tool_call_id": record["id"], "is_error": is_error, "content": result})
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
@@ -5859,20 +5908,21 @@ async def wake_say(request: Request):
     return {"ok": True, "chat_id": chat_id, "id": message["id"], "push": push_result}
 
 
-# ---------------------------------------------------------------- 家里工具的 MCP 端点
+# ---------------------------------------------------------------- 聊天工具的 MCP 端点（给 Claude Agent SDK）
 
 @app.post(home_mcp.ENDPOINT_PATH)
 async def home_mcp_endpoint(request: Request):
-    """Claude Code 通过桥接回调这里，用家里的工具。凭每轮签发的通行证进门。"""
+    """Claude Code 通过桥接回调这里，用这间聊天的工具。凭每轮签发的通行证进门。"""
     grant = home_mcp.read_grant(home_mcp.bearer(request.headers.get("authorization", "")))
     if not grant or not db.chat_get(grant["chat_id"]):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     chat_id = grant["chat_id"]
     message_id = grant["message_id"]
-    # 聊天里关掉了家里的工具，已经发出去的通行证也跟着失效。
-    tools = _home_mcp_tools(grant["read_only"]) if db.chat_home_todos_enabled(chat_id) else []
+    # 每次都按这间聊天当下的开关取：关掉的工具，已经发出去的通行证也调不到。
+    tools, routes = await _agent_tool_surface(chat_id, grant["read_only"])
 
-    async def call(name: str, arguments: dict):
+    async def call(exposed: str, arguments: dict):
+        name, server = routes[exposed]
         record = None
         if message_id:
             record = db.tool_call_add(
@@ -5881,12 +5931,7 @@ async def home_mcp_endpoint(request: Request):
             _emit(chat_id, {"type": "tool_call", "tool": {
                 "id": record["id"], "name": name, "input": arguments,
             }})
-        try:
-            result, is_error = home_tool(name, arguments), False
-        except Exception as exc:
-            result = json.dumps({"is_error": True, "content": [{"type": "text", "text": str(exc)}]},
-                                ensure_ascii=False)
-            is_error = True
+        result, is_error = await _run_chat_tool(chat_id, name, server, arguments)
         if record:
             db.tool_call_finish(record["id"], result, is_error)
             _emit(chat_id, {"type": "tool_result", "tool_call_id": record["id"],

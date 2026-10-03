@@ -1,10 +1,13 @@
-"""把 Dwell 家里的工具（待办、日记、日历…）作为一个 MCP 服务递给 Claude Code。
+"""把 Dwell 聊天里的工具作为一个 MCP 服务递给 Claude Code。
 
 走 Claude Agent SDK 时，模型跑在桥接那台机器上的 Claude Code 里，Dwell 的
 function tools 交不过去。于是反过来：Dwell 自己开一个 MCP 端点，每轮把地址和
 一张临时通行证交给桥接，Claude Code 需要时回头来调。
 
-    Claude Code --MCP(HTTP)--> Dwell /mcp/home --> home_tool()
+    Claude Code --MCP(HTTP)--> Dwell /mcp/home --> 和普通聊天同一个工具执行器
+
+给哪些工具和普通聊天一致：家里的待办、日记、日历，sigillo，网页搜索和读取，
+以及这间聊天挂的外部 MCP（由 Dwell 转一手）。端点路径沿用最早只有家里工具时的名字。
 
 只实现 Streamable HTTP 里用得到的那一小块：POST 一条 JSON-RPC，回一条 JSON。
 不开 SSE 流、不存会话——工具调用都是一问一答，用不上。
