@@ -3418,6 +3418,30 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .mc-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
   .mc-tag { padding: 4px 7px; border-radius: 8px; background: var(--card); color: var(--dim); font-size: 11.5px; }
   .mc-source { margin-top: 9px; color: var(--dim); font-size: 11.5px; }
+  .mc-source-link { padding: 0; color: var(--dim); font-size: 11.5px; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--dim) 45%, transparent); }
+  .mc-source-link:active { opacity: .6; }
+  /* 看原文：叠在记忆面板上面的一层，不跳回聊天 */
+  #memorySourcePicker { position:fixed; inset:0; z-index:120; display:none; align-items:flex-end; justify-content:center; }
+  #memorySourcePicker.on { display:flex; }
+  @media (min-width: 700px) { #memorySourcePicker.on { align-items:center; } }
+  .ms-shade { position:absolute; inset:0; background:rgba(0,0,0,.34); backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px); }
+  .ms-panel {
+    position:relative; width:min(600px, 100%); max-height:min(80vh, 760px); padding:12px 18px calc(18px + env(safe-area-inset-bottom));
+    display:flex; flex-direction:column; gap:10px; border:1px solid var(--line); border-radius:24px 24px 0 0;
+    background:var(--bg); box-shadow:0 -18px 45px rgba(0,0,0,.22);
+  }
+  @media (min-width: 700px) { .ms-panel { border-radius:24px; } }
+  .ms-head { display:grid; grid-template-columns:38px 1fr 38px; align-items:center; text-align:center; }
+  .ms-head button { width:36px; height:36px; color:var(--dim); font-size:23px; }
+  .ms-head strong { font-size:16px; }
+  .ms-card { padding:10px 12px; border-radius:12px; background:var(--panel); font-size:13px; line-height:1.55; }
+  .ms-hint { color:var(--dim); font-size:12px; line-height:1.5; }
+  .ms-list { flex:1; min-height:120px; overflow:auto; display:grid; align-content:start; gap:8px; overscroll-behavior:contain; }
+  .ms-msg { padding:9px 12px; border:1px solid var(--line); border-radius:13px; background:var(--card); opacity:.62; }
+  .ms-msg.cited { opacity:1; border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, var(--card)); }
+  .ms-msg.plain { opacity:1; }
+  .ms-who { display:flex; justify-content:space-between; gap:8px; margin-bottom:3px; color:var(--dim); font-size:11px; }
+  .ms-text { white-space:pre-wrap; word-break:break-word; font-size:13.5px; line-height:1.55; }
   .mc-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 13px; }
   .mc-empty { padding: 38px 20px; border: 1px dashed var(--line); border-radius: 17px; text-align: center; color: var(--dim); line-height: 1.65; }
   .mc-empty strong { display: block; margin-bottom: 5px; color: var(--text); font-size: 16px; }
@@ -4091,6 +4115,14 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       <button class="tts-player-mode on" type="button" data-tts-play-mode="stop">播完暂停</button>
       <button class="tts-player-mode" type="button" data-tts-play-mode="continuous">连续播放</button>
     </div>
+  </div>
+</div>
+
+<div id="memorySourcePicker" role="dialog" aria-modal="true" aria-label="原文">
+  <div class="ms-shade" data-ms-close></div>
+  <div class="ms-panel">
+    <div class="ms-head"><button type="button" data-ms-close aria-label="关闭">×</button><strong>原文</strong><span></span></div>
+    <div id="memorySourceBody" style="display:flex;flex-direction:column;gap:10px;min-height:0;flex:1"></div>
   </div>
 </div>
 
@@ -7519,7 +7551,7 @@ function drawerRelease(shown) {
   }
 }
 /* 上面盖着别的层时，边缘手势不该穿过去摸到抽屉 */
-const DRAWER_BLOCKERS = '.sheetWrap.open, .image-viewer.open, .menuCard.open, #ttsChoicePicker.on, .cbk-full, #lockWrap:not(.gone)';
+const DRAWER_BLOCKERS = '.sheetWrap.open, .image-viewer.open, .menuCard.open, #ttsChoicePicker.on, #memorySourcePicker.on, .cbk-full, #lockWrap:not(.gone)';
 function drawerCovered() { return !!document.querySelector(DRAWER_BLOCKERS); }
 document.addEventListener('touchstart', (e) => {
   if (drawerCovered()) { dg = null; return; }
@@ -11864,7 +11896,46 @@ function memoryDate(ts) {
 function memorySource(item) {
   const start = Number(item.source_start_rowid || 0), end = Number(item.source_end_rowid || 0);
   if (!start && !end) return '来源：已有摘要分段';
-  return start === end ? `来源：原消息 ${start}` : `来源：原消息 ${start}–${end}`;
+  const cited = (item.source_rowids || []).length;
+  if (cited) return `来源：${cited} 条原消息`;
+  // 旧卡只记得是哪一段；消息编号对人没有意义，不再露出来。
+  return start === end ? '来源：1 条原消息' : '来源：整段原文';
+}
+function memorySourceHtml(item, kind) {
+  const text = instructionEsc(memorySource(item));
+  if (!Number(item.source_end_rowid || 0)) return `<div class="mc-source">${text}</div>`;
+  return `<div class="mc-source"><button type="button" class="mc-source-link" data-memory-source="${instructionEsc(item.id)}" data-kind="${kind === 'draft' ? 'draft' : 'card'}">${text} · 看原文</button></div>`;
+}
+const memorySourcePicker = document.getElementById('memorySourcePicker');
+const memorySourceBody = document.getElementById('memorySourceBody');
+function closeMemorySource() { memorySourcePicker.classList.remove('on'); }
+memorySourcePicker.querySelectorAll('[data-ms-close]').forEach(el => el.onclick = closeMemorySource);
+function memorySourceTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  return d.toLocaleDateString('zh-CN', {month: 'numeric', day: 'numeric'}) + ' ' + d.toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'});
+}
+async function openMemorySource(chatId, kind, id, content, full) {
+  memorySourcePicker.classList.add('on');
+  memorySourceBody.innerHTML = '<div class="ms-hint">正在找原文…</div>';
+  try {
+    const url = 'api/chats/' + encodeURIComponent(chatId) + '/memory-source?kind=' + encodeURIComponent(kind) + '&id=' + encodeURIComponent(id) + (full ? '&full=true' : '');
+    const d = await memoryJson(url, {cache: 'no-store'});
+    const msgs = d.messages || [];
+    let hint = '';
+    if (!d.precise) hint = '这张卡是旧的整理方式生成的，只记得大概在这一段，没法标出具体哪几句。';
+    else if (full) hint = '整段原文，高亮的是这张卡依据的那几条。';
+    else hint = '高亮的是这张卡依据的原话，前后各带几条上下文。';
+    if ((d.missing || []).length) hint += ` 有 ${d.missing.length} 条依据的原文已经删除。`;
+    const list = msgs.length ? msgs.map(m => `<div class="ms-msg${d.precise ? (m.cited ? ' cited' : '') : ' plain'}"><div class="ms-who"><span>${m.role === 'user' ? '我' : (m.role === 'assistant' ? 'Cloudy' : '系统')}</span><span>${instructionEsc(memorySourceTime(m.made))}</span></div><div class="ms-text">${instructionEsc(m.content || '')}</div></div>`).join('') : '<div class="ms-hint">原文已经找不到了。</div>';
+    memorySourceBody.innerHTML = `<div class="ms-card">${instructionEsc(content || '')}</div><div class="ms-hint">${instructionEsc(hint)}</div><div class="ms-list">${list}</div>${d.can_expand ? '<button class="mc-btn" type="button" data-ms-expand>展开整段</button>' : ''}`;
+    const expand = memorySourceBody.querySelector('[data-ms-expand]');
+    if (expand) expand.onclick = () => openMemorySource(chatId, kind, id, content, true);
+    const first = memorySourceBody.querySelector('.ms-msg.cited');
+    if (first) first.scrollIntoView({block: 'center'});
+  } catch (e) {
+    memorySourceBody.innerHTML = '<div class="ms-hint">没找到原文：' + instructionEsc(e.message) + '</div>';
+  }
 }
 function memoryOptions(items, selected) {
   return Object.entries(items || {}).map(([key, name]) => `<option value="${instructionEsc(key)}" ${key === selected ? 'selected' : ''}>${instructionEsc(name)}</option>`).join('');
@@ -11896,6 +11967,11 @@ function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
   const retagLine = retagOf
     ? `<div class="mc-retag">原主题：${(retagOf.topics || []).map(topicName).join('、') || '（无）'}</div>`
     : '';
+  // 拆分建议：把原卡写出来，好对照拆得对不对。
+  const splitOf = (kind === 'draft' && item.action === 'split') ? ((currentById || {})[item.target_card_id] || {}) : null;
+  const splitLine = (splitOf && splitOf.content)
+    ? `<div class="mc-retag">拆自原卡：${instructionEsc(splitOf.content)}</div>`
+    : '';
   const topicTags = (item.topics || []).map(topic => `<span class="mc-tag">${instructionEsc((taxonomy.topics || {})[topic] || topic)}</span>`).join('');
   const importance = (taxonomy.importance || {})[item.importance] || item.importance;
   const retention = (taxonomy.retention || {})[item.retention] || item.retention;
@@ -11909,8 +11985,8 @@ function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
   if (kind === 'draft') actions = `<button class="mc-btn primary" data-memory-accept="${instructionEsc(item.id)}">采用</button><button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="draft">先修改</button><button class="mc-btn quiet" data-memory-discard="${instructionEsc(item.id)}">忽略</button>`;
   else if (kind === 'used') actions = '';
   else if (archived) actions = `<button class="mc-btn" data-memory-restore="${instructionEsc(item.id)}">恢复</button><button class="mc-btn quiet danger" data-memory-delete-permanent="${instructionEsc(item.id)}">永久删除</button>`;
-  else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button><button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
-  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${instructionEsc(item.content || '')}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${foreign ? `<span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span>` : ''}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}</div>${retagLine}${kind !== 'used' ? `<div class="mc-source">${instructionEsc(memorySource(item))}</div>` : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
+  else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button>${foreign ? '' : `<button class="mc-btn quiet" data-memory-split="${instructionEsc(item.id)}">拆开</button>`}<button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
+  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${instructionEsc(item.content || '')}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${foreign ? `<span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span>` : ''}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}${splitOf ? '<span class="mc-tag">拆分</span>' : ''}</div>${retagLine}${splitLine}${kind !== 'used' ? memorySourceHtml(item, kind) : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
 }
 function memoryEmpty(title, text, button) {
   return `<div class="mc-empty"><strong>${instructionEsc(title)}</strong>${instructionEsc(text)}${button || ''}</div>`;
@@ -12050,6 +12126,8 @@ function wireMemoryCards(chat, cardState, allItems) {
   document.querySelectorAll('[data-memory-toggle]').forEach(button => button.onclick=async()=>{ const item=allItems.find(value=>value.id===button.dataset.memoryToggle); try{await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(item.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...item,status:button.dataset.status})});item.status=button.dataset.status;const card=button.closest('.mc-card');memoryCardReplace(card,item,cardState.taxonomy,'card');wireMemoryCards(chat,cardState,allItems);}catch(e){alert('没有修改：'+e.message);} });
   document.querySelectorAll('[data-memory-archive]').forEach(button => button.onclick=async()=>{ if(!confirm('把这条记忆移到归档？之后仍可恢复。'))return; const item=allItems.find(value=>value.id===button.dataset.memoryArchive); try{await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(button.dataset.memoryArchive),{method:'DELETE'});removeMemoryCard(button.closest('.mc-card'),'cards');updateMemoryTabCount('archive',1);}catch(e){alert('没有归档：'+e.message);} });
   document.querySelectorAll('[data-memory-restore]').forEach(button => button.onclick=async()=>{ const item=allItems.find(value=>value.id===button.dataset.memoryRestore); try{await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(item.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...item,status:'active'})});removeMemoryCard(button.closest('.mc-card'),'archive');updateMemoryTabCount('cards',1);}catch(e){alert('没有恢复：'+e.message);} });
+  document.querySelectorAll('[data-memory-source]').forEach(button => button.onclick = () => { const item=[...(cardState.drafts||[]),...allItems].find(value=>value.id===button.dataset.memorySource); openMemorySource(button.dataset.kind==='draft'?chat.id:memoryCardChatId(item,chat), button.dataset.kind, button.dataset.memorySource, item&&item.content); });
+  document.querySelectorAll('[data-memory-split]').forEach(button => button.onclick=async()=>{ if(!confirm('让模型把这张卡按「一件事一张」拆开？\n拆出来的会放进「待确认」；你采用其中一条后，原卡才会收进归档（可恢复）。'))return; button.disabled=true; try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/'+encodeURIComponent(button.dataset.memorySplit)+'/split',{method:'POST'});memoryConsoleTab='review';loadLongContext();}catch(e){button.disabled=false;alert('没有开始拆：'+e.message);} });
   document.querySelectorAll('[data-memory-delete-permanent]').forEach(button => button.onclick=async()=>{ if(!confirm('永久删除这张记忆卡？删除后无法恢复，与它关联的带入记录也会一起清除。'))return; const item=allItems.find(value=>value.id===button.dataset.memoryDeletePermanent); button.disabled=true; try{await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(button.dataset.memoryDeletePermanent)+'/permanent',{method:'DELETE'});removeMemoryCard(button.closest('.mc-card'),'archive');}catch(e){button.disabled=false;alert('没有永久删除：'+e.message);} });
 }
 async function loadLongContext(quiet) {
