@@ -79,6 +79,24 @@ def image_blocks(messages: list) -> list[dict]:
 # 同一段会话里再递一遍，只会让每句话前面都堆着同样的几张卡。
 MEMORY_CARD_KEY = "memory_card_id"
 
+# 带这个标记的 system 消息不进临时上下文那一堆，而是接在 prompt 的最末尾，
+# 排在她刚说的那句之后（语音回复的「只说英文」）。它不进 system、不进轮次，
+# 所以不影响续会话。
+PROMPT_TAIL_KEY = "dwell_prompt_tail"
+
+
+def split_tail(messages: list) -> tuple[list, list[str]]:
+    """摘出要接在 prompt 末尾的那几段。"""
+    kept, tail = [], []
+    for message in messages or []:
+        if isinstance(message, dict) and message.get(PROMPT_TAIL_KEY):
+            text = _plain_text(message.get("content"))
+            if text:
+                tail.append(text)
+        else:
+            kept.append(message)
+    return kept, tail
+
 
 def offered_cards(messages: list) -> set[str]:
     """这一轮挑出来的记忆卡 id。"""
@@ -330,7 +348,8 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
                          thinking_enabled: bool = True,
                          state: dict | None = None,
                          rewrite_rules: list[dict] | None = None,
-                         mcp_servers: dict | None = None) -> dict:
+                         mcp_servers: dict | None = None,
+                         require_english: bool = False) -> dict:
     """组装一次桥接请求。
 
     tools 只用来判断这轮要不要多跑几圈：Dwell 的 function tools 无法直接交给
@@ -345,6 +364,7 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
 
     payload 里额外带上 `_turns` / `_system` / `_seen_cards`，给调用方存会话状态用；发请求前摘掉。
     """
+    messages, tail = split_tail(messages)
     system, turns, context = split_history(messages)
     hint = _length_hint(max_tokens)
     if hint:
@@ -357,7 +377,7 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
     if seen:
         _, _, context = split_history(forget_seen_cards(messages, seen))
     # 临时上下文跟着本轮走，不进 system，也不算进轮次指纹。
-    prompt = "\n\n".join(context + [build_prompt(outgoing)])
+    prompt = "\n\n".join(context + [build_prompt(outgoing)] + tail)
     images = image_blocks(messages)
 
     payload = {
@@ -385,6 +405,8 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
         payload["rewrite_rules"] = rules
     if mcp_servers:
         payload["mcp_servers"] = mcp_servers
+    if require_english:
+        payload["require_english"] = True
     # effort 关掉 thinking 时依然有意义（它还管花多少 token），能不能用由桥接判断。
     effort = str(reasoning_effort or "").strip()
     if effort:
@@ -467,7 +489,8 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                              reasoning_effort: str | None = None,
                              thinking_enabled: bool = True,
                              session_key: str = "", rewrite_guard: bool = False,
-                             mcp_servers: dict | None = None):
+                             mcp_servers: dict | None = None,
+                             require_english: bool = False):
     """通过桥接服务跑一轮对话。密钥是可选的：它是桥接服务的门禁，不是模型凭据。
 
     session_key 为空就每轮从头讲：心跳这类不属于这段对话的入口不该续会话，
@@ -479,6 +502,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
         model_id, messages, tools, max_tokens=max_tokens,
         reasoning_effort=reasoning_effort, thinking_enabled=thinking_enabled,
         state=load_state(chat_key), rewrite_rules=rules, mcp_servers=mcp_servers,
+        require_english=require_english,
     )
     if not payload["prompt"] and not payload.get("images"):
         yield {"type": "text", "text": "[配置错误] 这次没有可以发给 Claude Code 的内容"}
@@ -524,7 +548,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                         model_id, messages, tools, max_tokens=max_tokens,
                         reasoning_effort=reasoning_effort,
                         thinking_enabled=thinking_enabled, rewrite_rules=rules,
-                        mcp_servers=mcp_servers,
+                        mcp_servers=mcp_servers, require_english=require_english,
                     )
                     continue
 

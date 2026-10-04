@@ -181,7 +181,12 @@ class BridgeHookTest(unittest.TestCase):
     def test_the_hook_is_wired_to_stop(self):
         self.assertIn("options.hooks = {", BRIDGE)
         self.assertIn("Stop: [{", BRIDGE)
-        self.assertIn('return { decision: "block", reason: blockReason(breach) };', BRIDGE)
+        self.assertIn("reason = blockReason(breach);", BRIDGE)
+        self.assertIn('return { decision: "block", reason };', BRIDGE)
+
+    def test_voice_replies_are_held_to_english(self):
+        self.assertIn("if (requireEnglish && hasCjk(text)) {", BRIDGE)
+        self.assertIn("if (rules.length || requireEnglish) {", BRIDGE)
 
     def test_it_only_blocks_once(self):
         # 再拦下去就没完没了——它可能根本绕不开那句话。
