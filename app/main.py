@@ -1464,6 +1464,69 @@ async def _run_chat_tool(chat_id: str, name: str, server: object,
         return _tool_error_text(exc), True
 
 
+HEARTBEAT_NO_ACTION = "[NO_ACTION]"
+HEARTBEAT_OPEN = "<message>"
+HEARTBEAT_CLOSE = "</message>"
+
+
+def _heartbeat_unanswered(chat_id: str) -> list[dict]:
+    """她最后一次说话之后，Cloudy 主动发出去、她还没回的那几条。
+
+    读不到就当没有：这只是给他的提醒，不该拖垮这次心跳。
+    """
+    try:
+        rows = db.message_list(chat_id, limit=40)
+    except Exception:
+        return []
+    pending = []
+    for item in reversed(rows):
+        if item.get("role") == "user" and item.get("content"):
+            break
+        if item.get("role") == "assistant" and item.get("origin") == "heartbeat" and item.get("content"):
+            pending.append(item)
+    return list(reversed(pending))
+
+
+def _heartbeat_unanswered_note(pending: list[dict]) -> str:
+    """把「已经发过、她还没回」明明白白告诉他。
+
+    光说「你上次联系她距今多久」不够：历史里那几条主动消息看着和普通回复一样，
+    他读不出那是自己追着发的、而她一直没回，于是下一次心跳又把同一件事问一遍。
+    """
+    if not pending:
+        return ""
+    lines = []
+    for item in pending:
+        stamp = datetime.fromtimestamp(int(item.get("made") or 0), db.CN_TZ).strftime("%H:%M")
+        lines.append(f"- [{stamp}] {str(item['content']).strip()[:300]}")
+    return (
+        f"在她最后一次说话之后，你已经主动给她发过 {len(pending)} 条消息，她都还没有回：\n"
+        + "\n".join(lines) + "\n"
+        "她可能在忙、在路上、在睡觉，或者只是暂时不想聊；没回不代表没看到，"
+        "更不代表你需要再说一遍。除非此刻有和上面这些完全不同的新内容，否则保持安静。"
+        "绝不要重复上面的话，也不要换个说法把同一件事再问一遍，更不要追问她为什么不回。\n"
+    )
+
+
+def _heartbeat_reply(text: str) -> str:
+    """从心跳的输出里取出真正要发给她的那几句；不发就返回空串。
+
+    他可以先在标签外面想一想，那些不会发出去。以前只认开头的 [NO_ACTION]，
+    他先写了一段分析、最后才写 [NO_ACTION]，整段分析就被当成消息发了出去。
+    """
+    text = str(text or "").strip()
+    start = text.rfind(HEARTBEAT_OPEN)
+    if start >= 0:
+        inner = text[start + len(HEARTBEAT_OPEN):]
+        end = inner.find(HEARTBEAT_CLOSE)
+        inner = (inner[:end] if end >= 0 else inner).strip()
+        return "" if not inner or HEARTBEAT_NO_ACTION in inner else inner
+    if HEARTBEAT_NO_ACTION in text:
+        return ""
+    # 没用标签、也没说不发：当成整段就是要发的话（早先的格式）。
+    return text
+
+
 def _heartbeat_context(chat_id: str, now: datetime, interval: int,
                        cache_friendly: bool = False) -> list[dict]:
     """Reuse the ordinary chat prefix and keep the changing wake event at the tail."""
@@ -1477,13 +1540,16 @@ def _heartbeat_context(chat_id: str, now: datetime, interval: int,
             f"当前时间：{now.strftime('%Y-%m-%d %H:%M')}；本次心跳间隔：{interval} 分钟。"
             f"用户上次联系你距今 {_heartbeat_elapsed(now_ts - last_user)}；"
             f"你上次联系用户距今 {_heartbeat_elapsed(now_ts - last_assistant)}。\n"
+            + _heartbeat_unanswered_note(_heartbeat_unanswered(chat_id)) +
             "上面的聊天已经结束，历史中的最后一句也不是等待你补答的新消息。"
             "请决定此刻是否像真人发微信那样主动联系她：只有确实自然、有具体内容、"
             "有关心或承接上下文的理由时才发送，不要为了完成任务而寒暄，"
             "不要复述或改写刚才已经说过的话，也不要提及心跳、后台、定时器或这条说明。\n"
-            "可见工具与普通聊天一致，但本轮只允许读取，不得创建、修改或删除任何数据。"
-            "如果不适合联系，只输出 [NO_ACTION]；如果适合，只输出准备直接发给她的"
-            "自然、简短消息正文，不要标题、标签、解释或引号。"
+            "可见工具与普通聊天一致，但本轮只允许读取，不得创建、修改或删除任何数据。\n"
+            "想先理一理再决定可以，那些想法不会发给她。最后：不发，就单独写一行 "
+            f"{HEARTBEAT_NO_ACTION}；要发，就把准备直接发给她的话放在 {HEARTBEAT_OPEN} 和 "
+            f"{HEARTBEAT_CLOSE} 之间——标签里只放她会看到的那几句，自然、简短，"
+            "不要标题、解释或引号。"
         ),
     }
     return (
@@ -1686,12 +1752,13 @@ async def _heartbeat_once(force: bool = False) -> dict:
         db.setting_set("heartbeat_last_check", str(int(time.time())))
         db.setting_set("heartbeat_last_status", "thinking")
         try:
-            text = (await _heartbeat_decide(chat_id, now, interval)).strip()
-            if not text or text.startswith("[NO_ACTION]"):
+            raw = (await _heartbeat_decide(chat_id, now, interval)).strip()
+            if raw.startswith(("[配置错误]", "[供应商错误", "[网络错误]", "[桥接错误]")):
+                raise RuntimeError(raw[:300])
+            text = _heartbeat_reply(raw)
+            if not text:
                 db.setting_set("heartbeat_last_status", "quiet")
                 return {"ok": True, "status": "quiet"}
-            if text.startswith("[配置错误]") or text.startswith("[供应商错误") or text.startswith("[网络错误]"):
-                raise RuntimeError(text[:300])
 
             text = text[:3000]
             if _heartbeat_is_repeat(chat_id, text):
