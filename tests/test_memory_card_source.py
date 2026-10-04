@@ -109,7 +109,7 @@ class MemoryCardSourceTest(unittest.TestCase):
             {**self.CARD, "content": "她最近在学游泳。", "source_rowids": [self.rowids[0]]},
             {**self.CARD, "content": "她妈妈的生日在下周三。", "source_rowids": [self.rowids[2]]},
         ]
-        self.assertEqual(db.memory_card_stage_split(self.chat, card["id"], proposals), 2)
+        self.assertEqual(db.memory_card_stage_split(self.chat, "card", card["id"], proposals), 2)
         drafts = db.memory_card_draft_list(self.chat)
         self.assertEqual({d["action"] for d in drafts}, {"split"})
         self.assertEqual(db.memory_card_get(self.chat, card["id"])["status"], "active")
@@ -122,8 +122,8 @@ class MemoryCardSourceTest(unittest.TestCase):
 
     def test_a_new_split_replaces_the_old_unfinished_one(self):
         card = db.memory_card_draft_accept(self.chat, self._one_draft(), main._memory_card_clean(self.CARD))
-        db.memory_card_stage_split(self.chat, card["id"], [{**self.CARD, "content": "a"}, {**self.CARD, "content": "b"}])
-        db.memory_card_stage_split(self.chat, card["id"], [{**self.CARD, "content": "c"}, {**self.CARD, "content": "d"}])
+        db.memory_card_stage_split(self.chat, "card", card["id"], [{**self.CARD, "content": "a"}, {**self.CARD, "content": "b"}])
+        db.memory_card_stage_split(self.chat, "card", card["id"], [{**self.CARD, "content": "c"}, {**self.CARD, "content": "d"}])
         self.assertEqual(sorted(d["content"] for d in db.memory_card_draft_list(self.chat)), ["c", "d"])
 
     def test_split_task_stages_drafts_and_one_thing_cards_are_left_alone(self):
@@ -135,7 +135,7 @@ class MemoryCardSourceTest(unittest.TestCase):
                 with mock.patch.object(main, "_long_context_model", return_value=model), \
                         mock.patch.object(main, "_memory_json_completion",
                                           mock.AsyncMock(return_value={"cards": cards})):
-                    await main._split_memory_card(self.chat, card["id"])
+                    await main._split_memory_card(self.chat, "card", card["id"])
             asyncio.run(go())
 
         run([self.CARD])
@@ -147,6 +147,44 @@ class MemoryCardSourceTest(unittest.TestCase):
         drafts = db.memory_card_draft_list(self.chat)
         self.assertEqual(len(drafts), 2)
         self.assertEqual(drafts[1]["source_rowids"], [self.rowids[4]])
+
+    def test_a_draft_can_be_split_before_it_is_adopted(self):
+        draft_id = self._one_draft()
+        count = db.memory_card_stage_split(self.chat, "draft", draft_id, [
+            {**self.CARD, "content": "她在学游泳。", "source_rowids": [self.rowids[0]]},
+            {**self.CARD, "content": "她想送妈妈围巾。", "source_rowids": [self.rowids[4]]},
+        ])
+        self.assertEqual(count, 2)
+        drafts = db.memory_card_draft_list(self.chat)
+        # 原来那条被换掉了，拆出来的还是普通的待确认，依据可以落在整段的任何地方。
+        self.assertNotIn(draft_id, [d["id"] for d in drafts])
+        self.assertEqual({d["action"] for d in drafts}, {"create"})
+        self.assertEqual(sorted(d["source_rowids"][0] for d in drafts), [self.rowids[0], self.rowids[4]])
+
+    def test_split_reads_the_whole_segment_even_when_the_card_is_narrow(self):
+        self._stage([{**self.CARD, "evidence": [self.rowids[2]]}])
+        draft = db.memory_card_draft_list(self.chat)[0]
+        self.assertEqual(db.memory_source_span(self.chat, draft), (self.rowids[0], self.rowids[-1]))
+        response = self.client.post(f"/api/chats/{self.chat}/memory-card-drafts/{draft['id']}/split")
+        self.assertEqual(response.status_code, 200)
+
+    def test_retag_suggestions_cannot_be_split(self):
+        card = db.memory_card_draft_accept(self.chat, self._one_draft(), main._memory_card_clean(self.CARD))
+        db.memory_card_stage_retags(self.chat, [{"card_id": card["id"], "topics": ["food"]}])
+        retag = db.memory_card_draft_list(self.chat)[0]
+        response = self.client.post(f"/api/chats/{self.chat}/memory-card-drafts/{retag['id']}/split")
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_draft_can_be_edited_without_adopting_it(self):
+        draft_id = self._one_draft()
+        response = self.client.put(f"/api/chats/{self.chat}/memory-card-drafts/{draft_id}",
+                                   json={"content": "  她妈妈的生日是下周三。  "})
+        self.assertEqual(response.status_code, 200)
+        drafts = db.memory_card_draft_list(self.chat)
+        self.assertEqual(drafts[0]["content"], "她妈妈的生日是下周三。")
+        self.assertEqual(db.memory_card_list(self.chat), [])
+        empty = self.client.put(f"/api/chats/{self.chat}/memory-card-drafts/{draft_id}", json={"content": " "})
+        self.assertEqual(empty.status_code, 400)
 
     def _one_draft(self):
         db.memory_card_stage(self.chat, [{**self.CARD, "source_segment_id": self.segment["id"]}])
