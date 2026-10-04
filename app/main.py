@@ -4643,8 +4643,8 @@ async def memory_source_get(chat_id: str, kind: str = "card", id: str = "", full
     }
 
 
-async def _split_memory_card(chat_id: str, card_id: str) -> None:
-    """让模型把一张塞了几件事的卡拆开；结果落成待确认，由她决定要不要换。"""
+async def _split_memory_card(chat_id: str, kind: str, item_id: str) -> None:
+    """让模型把一张塞了几件事的卡（或一条待确认）拆开；结果落成待确认，由她决定。"""
     task_started = time.perf_counter()
     task_log_id = _start_system_log("memory_task", "memory_card_split", chat_id=chat_id)
     task_status = "success"
@@ -4653,13 +4653,14 @@ async def _split_memory_card(chat_id: str, card_id: str) -> None:
         selection, provider, _explicit = _long_context_model(chat_id)
         if not provider or not provider.get("enabled") or not selection.get("model_id"):
             raise RuntimeError("拆分前，请先选择可用的长期上下文模型")
-        card = db.memory_card_get(chat_id, card_id)
-        if not card:
-            raise RuntimeError("没有找到这张记忆卡片")
-        start, end = int(card["source_start_rowid"] or 0), int(card["source_end_rowid"] or 0)
+        item = _memory_split_target(chat_id, kind, item_id)
+        if not item:
+            raise RuntimeError("没有找到这条记忆")
+        # 对照整段原文拆：卡上存的范围已经按依据收窄过，拆出来的那件事可能在别处。
+        start, end = db.memory_source_span(chat_id, item)
         rows = db.messages_around(chat_id, start, end, 0) if end else []
         allowed = {int(row["rowid"]) for row in rows}
-        source = ("【原卡】\n" + str(card["content"]) + "\n\n"
+        source = ("【原卡】\n" + str(item["content"]) + "\n\n"
                   + ("【这张卡来自的原文】\n" + _memory_transcript(rows) if rows else "（原文已经找不到了，只按原卡拆）"))
         data = await _memory_json_completion(
             provider, selection["model_id"],
@@ -4685,15 +4686,14 @@ async def _split_memory_card(chat_id: str, card_id: str) -> None:
             proposals.append(clean)
         if len(proposals) < 2:
             db.memory_card_state_set(
-                chat_id, "ready", generated=True,
-                note="这张卡看起来只有一件事，没有拆。",
+                chat_id, "review" if db.memory_card_state_get(chat_id)["draft_count"] else "ready",
+                generated=True, note="这张卡看起来只有一件事，没有拆。",
             )
             return
-        count = db.memory_card_stage_split(chat_id, card_id, proposals)
-        db.memory_card_state_set(
-            chat_id, "review", generated=True,
-            note=f"拆成了 {count} 条，放在「待确认」里。采用任意一条后，原卡会收进归档（可恢复）。",
-        )
+        count = db.memory_card_stage_split(chat_id, kind, item_id, proposals)
+        note = (f"拆成了 {count} 条，替换了原来那条待确认。" if kind == "draft" else
+                f"拆成了 {count} 条，放在「待确认」里。采用任意一条后，原卡会收进归档（可恢复）。")
+        db.memory_card_state_set(chat_id, "review", generated=True, note=note)
     except Exception as exc:
         task_status = "error"
         task_detail = exc
@@ -4703,17 +4703,49 @@ async def _split_memory_card(chat_id: str, card_id: str) -> None:
         _memory_card_tasks.pop(chat_id, None)
 
 
-@app.post("/api/chats/{chat_id}/memory-cards/{card_id}/split", dependencies=authed)
-async def memory_card_split(chat_id: str, card_id: str):
-    """后台把一张卡拆成几条待确认；原卡在她采用之前不动。"""
-    if not db.memory_card_get(chat_id, card_id):
-        raise HTTPException(404, "没有找到这张记忆卡片")
+def _memory_split_target(chat_id: str, kind: str, item_id: str) -> dict | None:
+    if kind == "draft":
+        return next((d for d in db.memory_card_draft_list(chat_id) if d["id"] == item_id), None)
+    return db.memory_card_get(chat_id, item_id)
+
+
+def _start_memory_split(chat_id: str, kind: str, item_id: str) -> dict:
+    item = _memory_split_target(chat_id, kind, item_id)
+    if not item:
+        raise HTTPException(404, "没有找到这条记忆")
+    if kind == "draft" and item.get("action") == "update":
+        raise HTTPException(400, "重新分类的建议不能拆")
     task = _memory_card_tasks.get(chat_id)
     if task and not task.done():
         raise HTTPException(409, "记忆正在整理，请等这一趟完成再拆")
     db.memory_card_state_set(chat_id, "queued")
-    _memory_card_tasks[chat_id] = asyncio.create_task(_split_memory_card(chat_id, card_id))
+    _memory_card_tasks[chat_id] = asyncio.create_task(_split_memory_card(chat_id, kind, item_id))
     return {"ok": True, "started": True, "state": db.memory_card_state_get(chat_id)}
+
+
+@app.post("/api/chats/{chat_id}/memory-cards/{card_id}/split", dependencies=authed)
+async def memory_card_split(chat_id: str, card_id: str):
+    """后台把一张卡拆成几条待确认；原卡在她采用之前不动。"""
+    return _start_memory_split(chat_id, "card", card_id)
+
+
+@app.post("/api/chats/{chat_id}/memory-card-drafts/{draft_id}/split", dependencies=authed)
+async def memory_card_draft_split(chat_id: str, draft_id: str):
+    """后台把一条待确认拆成几条，拆完替换它。"""
+    return _start_memory_split(chat_id, "draft", draft_id)
+
+
+@app.put("/api/chats/{chat_id}/memory-card-drafts/{draft_id}", dependencies=authed)
+async def memory_card_draft_put(chat_id: str, draft_id: str, request: Request):
+    """只改待确认的正文，不采用——对着原文改完，还可以再决定要不要。"""
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    payload = await _read_json(request)
+    try:
+        item = db.memory_card_draft_set_content(chat_id, draft_id, payload.get("content"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "item": item}
 
 
 @app.delete("/api/chats/{chat_id}/memory-cards/{card_id}", dependencies=authed)

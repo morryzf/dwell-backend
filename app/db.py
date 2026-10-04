@@ -2215,24 +2215,53 @@ def _insert_draft(cx: sqlite3.Connection, row: dict) -> None:
     )
 
 
-def memory_card_stage_split(chat_id: str, card_id: str, proposals: list[dict]) -> int:
-    """把一张卡拆成几条待确认建议。
+def memory_source_span(chat_id: str, item: dict) -> tuple[int, int]:
+    """一张卡或一条待确认出自的整段原文范围。
 
-    采用其中任意一条时，原卡收进归档（可恢复）；一条都不采用，原卡原封不动。
+    卡上存的范围已经按依据收窄过；拆分要对照前后文，所以有分段时用整段。
+    """
+    segment_id = item.get("source_segment_id")
+    if segment_id:
+        with conn() as cx:
+            segment = cx.execute(
+                "SELECT start_rowid,end_rowid FROM chat_memory_segments WHERE id=? AND chat_id=?",
+                (segment_id, chat_id),
+            ).fetchone()
+        if segment:
+            return int(segment["start_rowid"]), int(segment["end_rowid"])
+    return int(item.get("source_start_rowid") or 0), int(item.get("source_end_rowid") or 0)
+
+
+def memory_card_stage_split(chat_id: str, kind: str, item_id: str, proposals: list[dict]) -> int:
+    """把一张卡（或一条还没采用的待确认）拆成几条待确认。
+
+    拆正式卡：采用其中任意一条时，原卡收进归档（可恢复）；一条都不采用，原卡不动。
     同一张卡已有没处理完的拆分建议时，先清掉旧的再放新的。
+    拆待确认：它本来就还没生效，直接换成拆出来的几条。
     """
     now = int(time.time())
+    table = "memory_card_drafts" if kind == "draft" else "memory_cards"
     with conn() as cx:
-        card = cx.execute(
-            "SELECT * FROM memory_cards WHERE id=? AND chat_id=?", (card_id, chat_id)
+        item = cx.execute(
+            f"SELECT * FROM {table} WHERE id=? AND chat_id=?", (item_id, chat_id)
         ).fetchone()
-        if not card:
-            raise ValueError("没有找到这张记忆卡片")
-        cx.execute(
-            "DELETE FROM memory_card_drafts WHERE chat_id=? AND action='split' AND target_card_id=?",
-            (chat_id, card_id),
-        )
-        start, end = int(card["source_start_rowid"]), int(card["source_end_rowid"])
+    if not item:
+        raise ValueError("没有找到这条记忆")
+    item = dict(item)
+    if kind == "draft" and item["action"] not in ("create", "split"):
+        raise ValueError("重新分类的建议不能拆")
+    start, end = memory_source_span(chat_id, item)
+    # 删旧、放新放在同一个事务里：中途出错不会把原来那条弄丢。
+    with conn() as cx:
+        if kind == "draft":
+            action, target = item["action"], item["target_card_id"]
+            cx.execute("DELETE FROM memory_card_drafts WHERE id=?", (item_id,))
+        else:
+            action, target = "split", item_id
+            cx.execute(
+                "DELETE FROM memory_card_drafts WHERE chat_id=? AND action='split' AND target_card_id=?",
+                (chat_id, item_id),
+            )
         inserted = 0
         for proposal in proposals[:8]:
             content = str(proposal.get("content") or "").strip()[:1200]
@@ -2242,18 +2271,33 @@ def memory_card_stage_split(chat_id: str, card_id: str, proposals: list[dict]) -
                 proposal.get("source_rowids"), start, end
             )
             _insert_draft(cx, {
-                "id": new_id(), "chat_id": chat_id, "action": "split", "target_card_id": card_id,
-                "content": content, "memory_type": str(proposal.get("memory_type") or card["memory_type"])[:40],
+                "id": new_id(), "chat_id": chat_id, "action": action, "target_card_id": target,
+                "content": content, "memory_type": str(proposal.get("memory_type") or item["memory_type"])[:40],
                 "topics_json": json.dumps(proposal.get("topics") or [], ensure_ascii=False),
-                "importance": str(proposal.get("importance") or card["importance"])[:20],
-                "retention": str(proposal.get("retention") or card["retention"])[:20],
+                "importance": str(proposal.get("importance") or item["importance"])[:20],
+                "retention": str(proposal.get("retention") or item["retention"])[:20],
                 "valid_until": proposal.get("valid_until") or None, "surface_scope": "chat_only",
-                "source_segment_id": card["source_segment_id"],
+                "source_segment_id": item["source_segment_id"],
                 "source_start_rowid": source_start, "source_end_rowid": source_end,
                 "source_rowids_json": rowids_json, "made": now,
             })
             inserted += 1
     return inserted
+
+
+def memory_card_draft_set_content(chat_id: str, draft_id: str, content: str) -> dict:
+    """改一条待确认的正文，不采用它。"""
+    content = str(content or "").strip()[:1200]
+    if not content:
+        raise ValueError("记忆内容不能为空")
+    with conn() as cx:
+        cur = cx.execute(
+            "UPDATE memory_card_drafts SET content=? WHERE id=? AND chat_id=?",
+            (content, draft_id, chat_id),
+        )
+    if not cur.rowcount:
+        raise ValueError("没有找到这条待确认记忆")
+    return next(d for d in memory_card_draft_list(chat_id) if d["id"] == draft_id)
 
 
 def memory_card_stage_retags(chat_id: str, proposals: list[dict]) -> int:
