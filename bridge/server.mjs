@@ -191,6 +191,17 @@ function blockReason({ rule, hit }) {
     + "也不要解释，直接给新的那一版。";
 }
 
+// 汉字、假名、谚文。英文回复里偶尔出现的符号、emoji 不算。
+const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/;
+
+function hasCjk(text) {
+  return CJK_RE.test(String(text || ""));
+}
+
+const ENGLISH_ONLY_REASON = "This reply will be read aloud by an English voice, "
+  + "but your last version contained Chinese characters. Say it again entirely in English, "
+  + "with no Chinese at all. Don't mention the redo or explain; just give the new version.";
+
 function usagePayload(usage) {
   if (!usage || typeof usage !== "object") return null;
   return {
@@ -260,7 +271,10 @@ async function runChat(res, request) {
   }
 
   const rules = normalizeRules(request.rewrite_rules);
-  if (rules.length) {
+  // 语音回复只能说英文：中文会被英文音色念得一塌糊涂。提示里已经要求过，
+  // 这里是兜底——模型偶尔还是会被前面满屏的中文带回去。
+  const requireEnglish = request.require_english === true;
+  if (rules.length || requireEnglish) {
     // 打回之后它还要再说一遍，那是多出来的一轮——不放宽就会撞上 maxTurns。
     options.maxTurns += 1;
     options.hooks = {
@@ -269,17 +283,23 @@ async function runChat(res, request) {
           // 已经打回过一次了。再拦下去就没完没了——它可能根本绕不开那句话，
           // 而一句都说不出来比说了句现成话更糟。
           if (input.stop_hook_active) return {};
-          const breach = firstBreach(rules, input.last_assistant_message || "");
-          if (!breach) return {};
+          const text = input.last_assistant_message || "";
+          let notice = "";
+          let reason = "";
+          if (requireEnglish && hasCjk(text)) {
+            notice = "打回重说：语音回复里出现了中文";
+            reason = ENGLISH_ONLY_REASON;
+          } else {
+            const breach = firstBreach(rules, text);
+            if (!breach) return {};
+            notice = `打回重说：撞到了${breach.hit.map((phrase) => `「${phrase}」`).join("")}`;
+            reason = blockReason(breach);
+          }
           // 记一笔，让她知道这一版是重说的；这不是回复的一部分，走思考面板。
-          writeEvent(res, {
-            type: "notice",
-            message: `打回重说：撞到了${
-              breach.hit.map((phrase) => `「${phrase}」`).join("")}`,
-          });
+          writeEvent(res, { type: "notice", message: notice });
           // 已经吐出去的那一版要当场抹掉，否则两版首尾相接，像它精神分裂。
           writeEvent(res, { type: "reset" });
-          return { decision: "block", reason: blockReason(breach) };
+          return { decision: "block", reason };
         }],
       }],
     };

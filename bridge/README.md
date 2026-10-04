@@ -102,10 +102,13 @@ curl -s localhost:8787/health
   "max_turns": 1,
   "session_id": "dwell-chat:xxx",
   "rewrite_rules": [{"phrases": ["我就在这里"], "reason": "别用现成的安慰句。"}],
+  "require_english": true,
   "mcp_servers": {"dwell": {"type": "http", "url": "https://dwell.example.com/mcp/home",
                             "headers": {"Authorization": "Bearer <一次性通行证>"}}}
 }
 ```
+
+`require_english` 用于语音回复：收尾前回复里出现汉字、假名或谚文就打回重说一次（和重写规则共用同一个 Stop 钩子，也只打回一次）。
 
 `mcp_servers` 是这一轮额外交给 Claude Code 的 MCP，和环境变量里配的合在一起（同名以请求为准）。
 Dwell 用它把这间聊天的整套工具（待办、日记、日历、sigillo、网页、外部 MCP）交过来：Claude Code 需要时回调 Dwell 的 `/mcp/home`，

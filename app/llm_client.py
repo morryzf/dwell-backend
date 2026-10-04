@@ -656,7 +656,8 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
                       max_tokens: int | None = None, reasoning_effort: str | None = None,
                       thinking_enabled: bool = True, session_id: str | None = None,
                       agent_session_key: str = "", rewrite_guard: bool = False,
-                      agent_mcp_servers: dict | None = None):
+                      agent_mcp_servers: dict | None = None,
+                      agent_require_english: bool = False):
     """Stream chat through native Anthropic caching or the OpenAI-compatible path.
 
     `session_id` 是供应商侧的缓存分组；`agent_session_key` 是 Claude Code 的会话
@@ -664,6 +665,9 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
 
     `agent_mcp_servers` 只有 Claude Agent SDK 通道用得上：function tools 交不过去，
     工具改由 Claude Code 通过 MCP 回调 Dwell。
+
+    `agent_require_english` 是语音回复：Claude Code 收尾前查一遍，带了中文就打回重说。
+    别的通道没有收尾前那一道关卡，只靠提示。
 
     `rewrite_guard` 只给「Cloudy 在跟她说话」的入口开。生成摘要、出 JSON、写
     观影笔记这些内部调用不该被重写规则打回——那些话不是说给她听的。
@@ -681,6 +685,7 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
             max_tokens=max_tokens, reasoning_effort=reasoning_effort,
             thinking_enabled=thinking_enabled, session_key=agent_session_key,
             rewrite_guard=rewrite_guard, mcp_servers=agent_mcp_servers,
+            require_english=agent_require_english,
         ):
             yield event
         return

@@ -1,10 +1,13 @@
 import asyncio
+import json
 import os
 from pathlib import Path
 import unittest
 import uuid
 
-from app import db
+import re
+
+from app import agent_sdk_client, db
 from app import main
 
 
@@ -73,8 +76,13 @@ class VoiceReplyFlowTest(unittest.TestCase):
         self.assertEqual(len(rows), 1, "语音回复被拆成了多条")
         self.assertEqual(rows[0]["id"], placeholder["id"])
         self.assertTrue(rows[0]["voice"])
+        # 要求排在最后，紧跟她刚说的那句——不在 system 里，也不在历史前面。
         system_text = "\n".join(m["content"] for m in self.sent[0] if m["role"] == "system")
-        self.assertIn("只用英文说", system_text)
+        self.assertNotIn(main.VOICE_REPLY_PROMPT, system_text)
+        last = self.sent[0][-1]
+        self.assertEqual(last["role"], "user")
+        self.assertEqual(last["content"][0]["text"], "想你了")
+        self.assertEqual(last["content"][-1]["text"], main.VOICE_REPLY_PROMPT)
         events = main._event_log.get(self.chat["id"], [])
         self.assertTrue(any(
             e.get("subtype") == "voice_reply" and e.get("message_id") == placeholder["id"]
@@ -86,8 +94,8 @@ class VoiceReplyFlowTest(unittest.TestCase):
         rows = self._assistant_rows()
         self.assertEqual(len(rows), 2, "普通回复的分条行为不该被语音功能改变")
         self.assertFalse(any(r["voice"] for r in rows))
-        system_text = "\n".join(m["content"] for m in self.sent[0] if m["role"] == "system")
-        self.assertNotIn("只用英文说", system_text)
+        flat = json.dumps(self.sent[0], ensure_ascii=False)
+        self.assertNotIn("Speak only in English", flat)
 
     def test_voice_mode_is_per_chat(self):
         other = db.chat_add("another")
@@ -99,6 +107,47 @@ class VoiceReplyFlowTest(unittest.TestCase):
         user = [m for m in db.message_ui_list(self.chat["id"])["msgs"] if m["kind"] == "me"]
         self.assertTrue(user)
         self.assertFalse(any(m["voice"] for m in user))
+
+
+class VoiceTailTest(unittest.TestCase):
+    def test_prompt_is_english(self):
+        self.assertIn("Speak only in English", main.VOICE_REPLY_PROMPT)
+        self.assertIsNone(re.search(r"[\u4e00-\u9fff]", main.VOICE_REPLY_PROMPT))
+
+    def test_cache_friendly_tail_goes_after_her_words_and_context(self):
+        messages = main._cache_friendly_chat_messages(
+            [{"role": "system", "content": "你是 Cloudy"}],
+            [{"role": "system", "content": "【用户设备时间】21:00"}],
+            [{"role": "user", "content": "早"}, {"role": "assistant", "content": "早呀"},
+             {"role": "user", "content": "今天好累"}],
+        )
+        out = main._voice_reply_tail(messages, agent_sdk=False)
+        texts = [part["text"] for part in out[-1]["content"]]
+        self.assertIn("设备时间", texts[0])
+        self.assertEqual(texts[1], "今天好累")
+        self.assertEqual(texts[-1], main.VOICE_REPLY_PROMPT)
+        # 历史里更早的那几句一个字都不动，缓存前缀不受影响。
+        self.assertEqual(out[:-1], messages[:-1])
+
+    def test_agent_sdk_tail_lands_at_the_very_end_of_the_prompt(self):
+        messages = [
+            {"role": "system", "content": "你是 Cloudy"},
+            {"role": "user", "content": "早"},
+            {"role": "assistant", "content": "早呀"},
+            {"role": "user", "content": "今天好累"},
+            {"role": "system", "content": "【用户设备时间】21:00"},
+        ]
+        out = main._voice_reply_tail(messages, agent_sdk=True)
+        payload = agent_sdk_client.build_bridge_payload("sonnet", out, require_english=True)
+        self.assertTrue(payload["prompt"].endswith(main.VOICE_REPLY_PROMPT))
+        self.assertLess(payload["prompt"].index("今天好累"), payload["prompt"].index("Speak only"))
+        self.assertNotIn("Speak only", payload["system"])
+        self.assertTrue(payload["require_english"])
+        # 轮次和不开语音时一模一样：续会话照常对得上。
+        plain = agent_sdk_client.build_bridge_payload("sonnet", messages)
+        self.assertEqual(payload["_turns"], plain["_turns"])
+        self.assertEqual(payload["_system"], plain["_system"])
+        self.assertNotIn("require_english", plain)
 
 
 class VoiceBubbleFrontendTest(unittest.TestCase):

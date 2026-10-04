@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import auth, db, file_text, home_mcp, provider_secrets, push_service, sigillo, study
 from app.pet_assets import ensure_pet_assets
-from app.agent_sdk_client import MEMORY_CARD_KEY
+from app.agent_sdk_client import MEMORY_CARD_KEY, PROMPT_TAIL_KEY
 from app.llm_client import prompt_cache_enabled, stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
 from app.web_tools import WebToolError, web_fetch, web_search
@@ -220,14 +220,19 @@ HOME_TOOLS = [
     }},
 ]
 
+# 用英文写：要的是英文，指令本身也是英文，模型贴得更紧。它排在这一轮的最后
+# （见 _voice_reply_tail），模型开口前最后看到的就是它，不会被前面一长串中文冲淡。
 VOICE_REPLY_PROMPT = (
-    "【这一条是语音回复】你的回复会被合成成语音，作为一条语音消息发给她。"
-    "只用英文说，不管她用什么语言跟你讲。"
-    "像当面说话那样自然、口语化，多用短句；不要 markdown、列表、标题、表情符号，"
-    "也不要星号动作或括号里的舞台说明——这些念出来都很怪。"
-    "一般不超过 80 个英文单词，除非她明显想听你多说。"
-    "不要提起你在用语音，直接说。"
+    "[Voice reply] This reply will be turned into speech and sent to her as a voice message. "
+    "Speak only in English, no matter what language she wrote in or what language "
+    "the conversation above is in. Not a single Chinese character.\n"
+    "Talk the way you would out loud: natural, casual, short sentences. "
+    "No markdown, lists, headings or emoji, and no *actions* or bracketed stage directions; "
+    "they sound strange when read aloud.\n"
+    "Usually keep it under 80 words, unless she clearly wants to hear more.\n"
+    "Don't mention that this is a voice message. Just talk."
 )
+
 
 # sigillo 回执单。一场亲密结束、aftercare 收尾的时候开单（不是进行中，也不是随口聊到的时候）。
 SIGILLO_TOOLS = [
@@ -5091,6 +5096,28 @@ def _transient_context_blocks(transient: list[dict]) -> list[dict]:
     }]
 
 
+def _voice_reply_tail(messages: list[dict], agent_sdk: bool) -> list[dict]:
+    """把语音回复的要求排到这一轮的最后，紧跟在她刚说的那句之后。
+
+    以前它和设备时间这些临时上下文排在一起，在她那句话之前；遇到要从头讲的时候
+    （换模型、记忆卡变了），后面还跟着一长串中文聊天记录，英文的要求就被冲淡了。
+
+    只动这一轮的请求，不碰存下来的历史；缓存前缀也不受影响——这句话本来就是新的。
+    Claude Code 那条路不能改她那句话的原文（会话指纹按原文对齐），所以单独标记，
+    由 agent_sdk_client 接在 prompt 末尾。
+    """
+    if agent_sdk:
+        return messages + [{"role": "system", "content": VOICE_REPLY_PROMPT, PROMPT_TAIL_KEY: True}]
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].get("role") != "user":
+            continue
+        existing = messages[index].get("content", "")
+        content = list(existing) if isinstance(existing, list) else [{"type": "text", "text": str(existing)}]
+        content.append({"type": "text", "text": VOICE_REPLY_PROMPT})
+        return messages[:index] + [{**messages[index], "content": content}] + messages[index + 1:]
+    return messages + [{"role": "system", "content": VOICE_REPLY_PROMPT}]
+
+
 def _cache_friendly_chat_messages(stable: list[dict], transient: list[dict],
                                   history: list[dict]) -> list[dict] | None:
     """Put one-turn context after stable history without changing stored messages."""
@@ -5139,11 +5166,9 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     )
     # 语音回复：标记在消息上，重新生成沿用同一条消息，所以标记会跟着走。
     voice_reply = db.message_is_voice(msg_id)
-    voice_message = []
     if voice_reply:
         # 整段合成一条语音，拆成多个气泡就没法念成一条了。
         split_replies = False
-        voice_message = [{"role": "system", "content": VOICE_REPLY_PROMPT}]
         _emit(chat_id, {"type": "system", "subtype": "voice_reply", "message_id": msg_id})
     agent_sdk = bool(
         provider and str(provider.get("provider_type") or "") == "claude_agent_sdk"
@@ -5228,7 +5253,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     stable_messages = instructions + format_preference + memory_message
     transient_messages = (
         private_message + memory_card_message + sigillo_message + device_message + focus_message
-        + day_brief_message + voice_message
+        + day_brief_message
     )
     messages = None
     if cache_friendly:
@@ -5247,7 +5272,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         messages = (
             device_message + focus_message + day_brief_message + instructions
             + format_preference + private_message
-            + memory_message + memory_card_message + sigillo_message + voice_message
+            + memory_message + memory_card_message + sigillo_message
             + history_messages
         )
     # 观影页的画面只在本次模型请求中出现，不把截帧或隐形提示写进聊天记录。
@@ -5326,6 +5351,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             content.append({"type": "text", "text": block})
             messages[index] = {**messages[index], "content": content}
             break
+    if voice_reply:
+        messages = _voice_reply_tail(messages, agent_sdk)
 
     buf = []
     thinking_buf: list[str] = []
@@ -5480,6 +5507,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 session_id=f"dwell-chat:{chat_id}" if cache_friendly else None,
                 agent_session_key=f"dwell-chat:{chat_id}",
                 agent_mcp_servers=_agent_tools_mcp(provider, chat_id, current_message_id),
+                agent_require_english=voice_reply,
                 rewrite_guard=True,
             ):
                 if event["type"] == "thinking":

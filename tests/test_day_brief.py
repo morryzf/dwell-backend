@@ -116,7 +116,7 @@ class DayBriefTest(unittest.TestCase):
         with open(source, encoding="utf-8") as handle:
             text = handle.read()
         self.assertIn("day_brief_message = _day_brief_message(db.cn_now())", text)
-        self.assertIn("+ day_brief_message + voice_message", text)
+        self.assertIn("+ day_brief_message\n    )", text)
         self.assertIn("device_message + focus_message + day_brief_message", text)
 
     def test_never_breaks_the_send(self):
