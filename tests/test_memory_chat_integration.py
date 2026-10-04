@@ -78,8 +78,9 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn("<cards>", self.source)
 
     def test_summary_refresh_only_generates_segments_and_summary(self):
-        self.assertIn("async def _memory_segment_summary", self.source)
-        self.assertIn("segment = await _memory_segment_summary", self.source)
+        # 分段只是一个范围，出卡直接读原文，不再先写一段叙述。
+        self.assertNotIn("_memory_segment_summary", self.source)
+        self.assertIn('db.chat_memory_add_segment(chat_id, start, end, "")', self.source)
         refresh = self.source.split("async def _refresh_long_context", 1)[1].split(
             "def _queue_long_context_refresh", 1
         )[0]

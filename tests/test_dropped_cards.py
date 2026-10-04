@@ -36,7 +36,7 @@ class DroppedCardTest(unittest.TestCase):
                                    mock.AsyncMock(return_value={"cards": cards})):
                 await main._stage_memory_card_suggestions(
                     self.chat, {"id": "p", "enabled": 1}, "model",
-                    [self.segment], drops,
+                    self.segment, drops,
                 )
         asyncio.run(run())
 
@@ -44,7 +44,7 @@ class DroppedCardTest(unittest.TestCase):
         return [item["id"] for item in db.memory_card_unprocessed_segments(self.chat)]
 
     GOOD = {
-        "source": "S1", "content": "她现在住在上海。", "memory_type": "stable_fact",
+        "content": "她现在住在上海。", "memory_type": "stable_fact",
         "topics": ["place"], "importance": "normal", "retention": "long_term",
         "valid_until": None,
     }
@@ -88,10 +88,20 @@ class DroppedCardTest(unittest.TestCase):
         self.assertEqual(self._pending(), [])
         self.assertIn("1 张卡没留下", db.memory_card_state_get(self.chat)["note"])
 
-    def test_a_card_that_does_not_say_where_it_came_from_is_counted(self):
-        self._stage([{**self.GOOD, "source": "S9"}])
+    def test_evidence_narrows_the_source_to_the_cited_messages(self):
+        self._stage([{**self.GOOD, "evidence": [1]}])
 
-        self.assertIn("卡片没说它来自哪一段", db.memory_card_state_get(self.chat)["note"])
+        draft = db.memory_card_draft_list(self.chat)[0]
+        self.assertEqual(draft["source_rowids"], [1])
+        self.assertEqual((draft["source_start_rowid"], draft["source_end_rowid"]), (1, 1))
+
+    def test_made_up_evidence_is_ignored_and_the_card_keeps_the_segment(self):
+        # 编号对不上原文就不信，但卡本身留着，来源退回整段。
+        self._stage([{**self.GOOD, "evidence": [99, "x"]}])
+
+        draft = db.memory_card_draft_list(self.chat)[0]
+        self.assertEqual(draft["source_rowids"], [])
+        self.assertEqual((draft["source_start_rowid"], draft["source_end_rowid"]), (1, 2))
 
     def test_the_note_counts_the_whole_run_not_just_the_last_batch(self):
         # 一趟分好几批送，面板上那句话要说的是整趟丢了多少。
@@ -109,7 +119,7 @@ class DroppedCardTest(unittest.TestCase):
             with mock.patch.object(main, "_memory_json_completion",
                                    mock.AsyncMock(side_effect=ValueError("坏格式"))):
                 await main._stage_memory_card_suggestions(
-                    self.chat, {"id": "p", "enabled": 1}, "model", [self.segment],
+                    self.chat, {"id": "p", "enabled": 1}, "model", self.segment,
                 )
         asyncio.run(run())
 
