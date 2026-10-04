@@ -59,6 +59,11 @@ class SharedPromptCacheSourceTest(unittest.TestCase):
         )
 
 
+def _no_messages_today():
+    """窗口长度还会看「今天说了几句」（#186）；这里只测缓存头怎么定，今天按 0 句算。"""
+    return patch.object(main.db, "message_count_since", return_value=0)
+
+
 class SharedPromptCacheBehaviorTest(unittest.TestCase):
     def test_transient_context_stays_after_the_stable_assistant_anchor(self):
         stable = [{"role": "system", "content": "identity"}]
@@ -127,6 +132,7 @@ class SharedPromptCacheBehaviorTest(unittest.TestCase):
             patch.object(main.db, "message_list", return_value=initial_rows) as message_list,
             patch.object(main.db, "setting_get", return_value="0"),
             patch.object(main.db, "setting_set") as setting_set,
+            _no_messages_today(),
         ):
             selected = main._chat_history_rows("chat-1", cache_friendly=True)
 
@@ -146,6 +152,7 @@ class SharedPromptCacheBehaviorTest(unittest.TestCase):
             patch.object(main.db, "message_list", return_value=grown_rows),
             patch.object(main.db, "setting_get", return_value="11"),
             patch.object(main.db, "setting_set") as setting_set,
+            _no_messages_today(),
         ):
             grown = main._chat_history_rows("chat-1", cache_friendly=True)
 
@@ -162,6 +169,7 @@ class SharedPromptCacheBehaviorTest(unittest.TestCase):
             patch.object(main.db, "message_list", return_value=rows),
             patch.object(main.db, "setting_get", return_value="1"),
             patch.object(main.db, "setting_set") as setting_set,
+            _no_messages_today(),
         ):
             selected = main._chat_history_rows("chat-1", cache_friendly=True)
 
@@ -189,6 +197,7 @@ class SharedPromptCacheBehaviorTest(unittest.TestCase):
             patch.object(main.db, "message_list", return_value=rows),
             patch.object(main.db, "setting_get", return_value="11"),
             patch.object(main.db, "setting_set") as setting_set,
+            _no_messages_today(),
         ):
             selected = main._chat_history_rows("chat-1", cache_friendly=True)
 
