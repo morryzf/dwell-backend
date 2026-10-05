@@ -71,7 +71,7 @@ class ProviderSettingsStaticTest(unittest.TestCase):
         )[1].split('}', 1)[0]
         # 和「Cloudy」「Other」同一套字，图标在左。
         self.assertIn('font-family: inherit;', drawer_rule)
-        self.assertIn('font-size: 15px;', drawer_rule)
+        self.assertIn('font-size: 14px;', drawer_rule)
         self.assertIn('justify-content: flex-start;', drawer_rule)
 
 
