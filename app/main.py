@@ -4419,6 +4419,40 @@ def _memory_card_review_state(chat_id: str) -> dict:
     return state
 
 
+MEMORY_DRAFTS_SEEN_PREFIX = "memory_drafts_seen:"
+
+
+def _memory_unseen_drafts(chat_id: str) -> int:
+    """新出的待确认卡里，她打开记忆面板之后才长出来的有几张。"""
+    try:
+        seen = int(db.setting_get(MEMORY_DRAFTS_SEEN_PREFIX + chat_id, "0") or 0)
+    except (TypeError, ValueError):
+        seen = 0
+    return sum(1 for draft in db.memory_card_draft_list(chat_id) if int(draft.get("made") or 0) > seen)
+
+
+@app.get("/api/memory/badge", dependencies=authed)
+async def memory_badge_get():
+    """右上角三个点上的提示点，以及菜单里按需记忆开关的状态——都按当前聊天。"""
+    chat_id = _get_or_create_current_chat()
+    return {
+        "ok": True, "chat_id": chat_id,
+        "unseen": _memory_unseen_drafts(chat_id),
+        "injection_enabled": db.memory_card_injection_enabled(chat_id),
+    }
+
+
+@app.post("/api/memory/badge/seen", dependencies=authed)
+async def memory_badge_seen(request: Request):
+    """打开过记忆面板，就算看过了——采没采用都一样，提示点消失。"""
+    payload = await _read_json(request)
+    chat_id = str(payload.get("chat_id") or "") or _get_or_create_current_chat()
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    db.setting_set(MEMORY_DRAFTS_SEEN_PREFIX + chat_id, str(int(time.time())))
+    return {"ok": True, "chat_id": chat_id, "unseen": 0}
+
+
 @app.get("/api/chats/{chat_id}/memory-cards", dependencies=authed)
 async def memory_cards_get(chat_id: str, include_archived: bool = False):
     if not db.chat_get(chat_id):

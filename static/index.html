@@ -2176,6 +2176,20 @@ html[data-theme="dark"] .menuCard {
   .menuCard .mi:active { background: var(--panel); }
   .menuCard .mi .ic { width: 19px; height: 19px; }
   .menuCard .mi.danger { color: var(--red); }
+  /* 有新的待确认记忆卡：三个点和菜单里的「记忆」上都亮一个小点，颜色跟主题走 */
+  #dotsBtn { position: relative; }
+  #dotsBtn::after, .mem-dot {
+    content: ""; display: none; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 0 2px var(--bg);
+  }
+  /* 按钮比图标大一圈，按中心定位，点贴在三个点的右上方 */
+  #dotsBtn.mem-new::after { display: block; position: absolute; width: 7px; height: 7px; top: calc(50% - 10px); left: calc(50% + 6px); }
+  .mem-dot { position: relative; top: -7px; margin-left: 3px; }
+  #dotsMenu.mem-new .mem-dot { display: inline-block; }
+  .menuCard .mi .mi-label { flex: 1; }
+  .menuCard .mi .sw { width: 40px; height: 24px; margin-left: 12px; }
+  .menuCard .mi .sw::after { width: 20px; height: 20px; }
+  .menuCard .mi .sw.on::after { transform: translateX(16px); }
 
 
   .crow {
@@ -3035,7 +3049,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   #drawer .nav .drawer-tool-grid .drawer-tool {
     min-width: 0;
     min-height: 48px;
-    justify-content: flex-start;
+    justify-content: space-between;
     padding: 10px 12px;
     gap: 10px;
     border: 0 !important;
@@ -3044,7 +3058,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     color: var(--text);
     text-align: left;
     font-family: "Ephesis", cursive;
-    font-size: 20px;
+    font-size: 22px;
     line-height: 1;
     box-shadow: none !important;
     -webkit-backdrop-filter: none;
@@ -4227,7 +4241,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
 
 <div class="menuCard" id="dotsMenu">
   <button class="mi" data-act="find"><span class="ic" data-i="search"></span>搜索</button>
-  <button class="mi" data-act="longContext"><span class="ic" data-i="bookOpen"></span>记忆</button>
+  <button class="mi" data-act="longContext"><span class="ic" data-i="bookOpen"></span><span class="mi-label">记忆<i class="mem-dot" aria-hidden="true"></i></span><span class="sw" id="memInjectSw" role="switch" aria-checked="false" aria-label="按需记忆" title="按需记忆"></span></button>
   <button class="mi" data-act="ctx"><span class="ic" data-i="gauge"></span>容量</button>
   <button class="mi danger" data-act="archive"><span class="ic" data-i="box"></span>收纳</button>
 </div>
@@ -10581,6 +10595,57 @@ document.getElementById('dotsBtn').onclick = (e) => {
 document.addEventListener('click', (e) => {
   if (!dotsMenu.contains(e.target)) dotsMenu.classList.remove('open');
 });
+// —— 记忆的提示点与按需记忆开关 ——
+let memoryBadgeChat = '';
+function setMemoryBadge(data) {
+  memoryBadgeChat = data.chat_id || memoryBadgeChat;
+  const fresh = Number(data.unseen || 0) > 0;
+  document.getElementById('dotsBtn').classList.toggle('mem-new', fresh);
+  dotsMenu.classList.toggle('mem-new', fresh);
+  if (typeof data.injection_enabled === 'boolean') {
+    const sw = document.getElementById('memInjectSw');
+    sw.classList.toggle('on', data.injection_enabled);
+    sw.setAttribute('aria-checked', String(data.injection_enabled));
+  }
+}
+async function refreshMemoryBadge() {
+  try {
+    const r = await fetch('api/memory/badge', {cache: 'no-store'});
+    if (r.ok) setMemoryBadge(await r.json());
+  } catch (_) { /* 提示点读不到就算了 */ }
+}
+async function markMemorySeen(chatId) {
+  setMemoryBadge({unseen: 0});
+  try {
+    await fetch('api/memory/badge/seen', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({chat_id: chatId || memoryBadgeChat})});
+  } catch (_) {}
+}
+refreshMemoryBadge();
+setInterval(() => { if (document.visibilityState === 'visible') refreshMemoryBadge(); }, 90000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshMemoryBadge(); });
+document.getElementById('dotsBtn').addEventListener('click', refreshMemoryBadge);
+// 开关在「记忆」那一行里：点开关只切换按需记忆，不打开记忆面板。
+document.getElementById('memInjectSw').addEventListener('click', async event => {
+  event.stopPropagation();
+  const sw = event.currentTarget;
+  if (sw.classList.contains('wait')) return;
+  const next = !sw.classList.contains('on');
+  sw.classList.add('wait');
+  setMemoryBadge({injection_enabled: next});   // 先动，手感即时；失败再退回去
+  try {
+    if (!memoryBadgeChat) await refreshMemoryBadge();
+    const r = await fetch('api/chats/' + encodeURIComponent(memoryBadgeChat) + '/memory-cards/injection', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled: next})});
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.detail || '没有切换');
+    setMemoryBadge({injection_enabled: d.enabled});
+    note(d.enabled ? '（按需记忆已开启）' : '（按需记忆已暂停）');
+  } catch (e) {
+    setMemoryBadge({injection_enabled: !next});
+    alert('没有切换：' + e.message);
+  } finally {
+    sw.classList.remove('wait');
+  }
+});
 dotsMenu.querySelectorAll('.mi').forEach(b => b.onclick = async () => {
   dotsMenu.classList.remove('open');
   const act = b.dataset.act;
@@ -12250,6 +12315,7 @@ async function loadLongContext(quiet) {
   try {
     const chat=await currentChatForMemory(); if(!chat){body.innerHTML=memoryEmpty('还没有打开聊天','先打开一间聊天，再回来管理它的记忆。');return;}
     memoryCurrentChatId=chat.id;   // 卡片可能来自别的窗口，靠它认出哪些是外来的
+    markMemorySeen(chat.id);       // 打开过就算看过，采没采用都一样
     const [summaryResponse,modelResponse,cardsResponse,embeddingResponse,sigilloResponse]=await Promise.all([fetch('api/chats/'+encodeURIComponent(chat.id)+'/long-context',{cache:'no-store'}),fetch('api/long-context-model',{cache:'no-store'}),fetch('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards?include_archived=true',{cache:'no-store'}),fetch('api/embedding-model',{cache:'no-store'}),fetch('api/chats/'+encodeURIComponent(chat.id)+'/sigillo',{cache:'no-store'})]);
     const summary=await summaryResponse.json(), model=await modelResponse.json(), cards=await cardsResponse.json(), embeddingModel=await embeddingResponse.json();
     // 回执单是附加功能，读不到就当没开，不该拖垮整个控制台。
