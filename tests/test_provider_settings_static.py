@@ -69,7 +69,9 @@ class ProviderSettingsStaticTest(unittest.TestCase):
         drawer_rule = self.ui.split(
             '#drawer .nav .drawer-tool-grid .drawer-tool {', 1
         )[1].split('}', 1)[0]
-        self.assertIn('font-size: 20px;', drawer_rule)
+        self.assertIn('font-size: 22px;', drawer_rule)
+        # 先文字再图标，图标靠右排成一列。
+        self.assertIn('justify-content: space-between;', drawer_rule)
 
 
 if __name__ == "__main__":
