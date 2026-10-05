@@ -115,7 +115,7 @@ let usageInflight = null;
 
 // 读 /usage 背后的那份数据：起一个不发消息的 Claude Code 会话，问完就关。
 // 不占聊天的并发槽位——它只读一下账号状态，几秒钟的事，不该排在一轮长回复后面。
-async function fetchPlanUsage() {
+async function fetchPlanUsage(env) {
   let finish;
   const idle = new Promise((resolve) => { finish = resolve; });
   async function* noPrompt() { await idle; }
@@ -124,7 +124,7 @@ async function fetchPlanUsage() {
   const q = query({
     prompt: noPrompt(),
     options: {
-      model: DEFAULT_MODEL, env: CHILD_ENV, abortController: abort,
+      model: DEFAULT_MODEL, env, abortController: abort,
       settingSources: [], tools: [], maxTurns: 1,
     },
   });
@@ -146,18 +146,50 @@ async function fetchPlanUsage() {
   }
 }
 
+function readUsage({ usage, account }) {
+  return {
+    available: Boolean(usage?.rate_limits_available && usage?.rate_limits),
+    subscription_type: usage?.subscription_type || account?.subscriptionType || null,
+    rate_limits: usage?.rate_limits || null,
+    account: account ? { email: account.email || "", organization: account.organization || "" } : null,
+    token_source: account?.tokenSource || "",
+  };
+}
+
+// setup-token 生成的 CLAUDE_CODE_OAUTH_TOKEN 只能聊天，没有读取账号用量的权限；
+// 而只要它在环境里，Claude Code 就优先用它，不看 /login 存下的登录。
+// 所以带着它拿不到数字时，去掉它、用 /login 的登录再问一次。聊天照旧用它。
+function withoutEnvToken() {
+  const env = { ...CHILD_ENV };
+  delete env.CLAUDE_CODE_OAUTH_TOKEN;
+  return env;
+}
+
 async function planUsage(force) {
   if (!force && usageCache && Date.now() - usageCache.at < USAGE_CACHE_MS) return usageCache.body;
   if (!usageInflight) {
     usageInflight = (async () => {
       const body = { ok: true, fetched_at: Math.floor(Date.now() / 1000) };
+      const tried = [];
       try {
-        const { usage, account } = await fetchPlanUsage();
-        body.available = Boolean(usage?.rate_limits_available && usage?.rate_limits);
-        body.subscription_type = usage?.subscription_type || account?.subscriptionType || null;
-        body.rate_limits = usage?.rate_limits || null;
-        body.account = account ? { email: account.email || "", organization: account.organization || "" } : null;
-        if (!body.available) body.error = "官方用量接口没有给出额度（这个登录方式可能没有读取用量的权限）";
+        let result = readUsage(await fetchPlanUsage(CHILD_ENV));
+        tried.push(result.token_source || "默认登录");
+        if (!result.available && CHILD_ENV.CLAUDE_CODE_OAUTH_TOKEN) {
+          try {
+            const second = readUsage(await fetchPlanUsage(withoutEnvToken()));
+            tried.push(second.token_source || "/login 的登录");
+            if (second.available) result = second;
+          } catch (error) {
+            tried.push(`/login 的登录（${String(error?.message || error).slice(0, 120)}）`);
+          }
+        }
+        Object.assign(body, result);
+        if (!body.available) {
+          body.error = "官方用量接口没有给出额度：试过的登录方式（" + tried.join("、") + "）都没有读取用量的权限。"
+            + (CHILD_ENV.CLAUDE_CODE_OAUTH_TOKEN
+              ? "桥接环境里的 CLAUDE_CODE_OAUTH_TOKEN 是 setup-token 生成的，只能聊天；要看额度，得用运行桥接的那个系统用户在 claude 里 /login 一次。"
+              : "");
+        }
       } catch (error) {
         body.available = false;
         body.error = String(error?.message || error);
