@@ -3899,24 +3899,38 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .usage-note { margin: 13px 5px 0; color: var(--dim); font-size: 11px; line-height: 1.65; }
   #usageRefresh { transition: transform 150ms var(--ease-out), opacity 150ms ease; }
   #usageRefresh:disabled { opacity: .35; }
-  /* 文件夹：标签像夹子上的耳朵，选中的那只和下面的页连成一张纸 */
-  .usage-folder { display: flex; gap: 4px; padding: 6px 0 0 10px; position: relative; z-index: 1; }
+  /* 文件夹：标签像夹子上的耳朵——左边竖直、右边斜着往下展开，
+     选中的那只和下面的页连成一张纸。耳朵从页的左边缘起，页的左上角是直角。 */
+  .usage-folder { display: flex; padding: 6px 0 0; position: relative; z-index: 1; }
   .usage-folder button {
-    position: relative; min-height: 40px; padding: 0 18px; margin-bottom: -1px;
-    border: 1px solid var(--line); border-bottom: 0; border-radius: 14px 14px 0 0;
-    background: color-mix(in srgb, var(--panel) 80%, var(--bg)); color: var(--dim);
+    position: relative; isolation: isolate; min-height: 40px;
+    padding: 0 34px 0 18px; margin: 0 -10px -1px 0;
+    border: 0; background: none; color: var(--dim);
     font-size: 13px; font-weight: 650;
     transform: translateY(3px);
-    transition: transform 150ms var(--ease-out), color 150ms ease, background-color 150ms ease;
+    transition: transform 150ms var(--ease-out), color 150ms ease;
   }
-  .usage-folder button[aria-selected="true"] { background: var(--card); color: var(--text); transform: none; }
-  .usage-folder button[aria-selected="true"]::after {   /* 盖住页边那条线，耳朵和页接起来 */
-    content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--card);
+  .usage-folder button::before, .usage-folder button::after {
+    content: ""; position: absolute; top: 0; bottom: 0; z-index: -1;
+    border: 1px solid var(--line); border-bottom: 0;
+    background: color-mix(in srgb, var(--panel) 80%, var(--bg));
+    transition: background-color 150ms ease;
   }
+  /* 左半边：竖直的边，左上圆角 */
+  /* 收到斜块的平顶底下，直角藏在里面，不从右上的圆角边上冒出来 */
+  .usage-folder button::before { left: 0; right: 36px; border-right: 0; border-radius: 14px 0 0 0; }
+  /* 右半边：斜切，底边不动、顶边往左收，右侧就成了斜向下的一条线 */
+  .usage-folder button::after {
+    right: 0; width: 40px; border-left: 0; border-radius: 0 12px 0 0;
+    transform: skewX(24deg); transform-origin: bottom left;
+  }
+  .usage-folder button[aria-selected="true"] { z-index: 2; color: var(--text); transform: none; }
+  .usage-folder button[aria-selected="true"]::before,
+  .usage-folder button[aria-selected="true"]::after { bottom: -2px; background: var(--card); }
   .usage-folder button:active { transform: translateY(3px) scale(.97); }
   .usage-folder button[aria-selected="true"]:active { transform: scale(.97); }
   .usage-folder-page {
-    padding: 6px 14px 16px; border: 1px solid var(--line); border-radius: 20px;
+    padding: 6px 14px 16px; border: 1px solid var(--line); border-radius: 0 20px 20px 20px;
     background: var(--card); box-shadow: 0 14px 36px rgba(62,44,53,.06);
   }
   .usage-folder-page .usage-balance, .usage-folder-page .usage-summary > div,
