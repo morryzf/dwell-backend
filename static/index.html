@@ -4115,6 +4115,21 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       linear-gradient(180deg, var(--rim-hi) 0, transparent 12px, transparent calc(100% - 12px), var(--rim-lo) 100%),
       linear-gradient(var(--rim-base), var(--rim-base));
   }
+  /* 气泡和输入框最外面那圈的高光再透一半；输入框里那排圆按钮不跟着变。 */
+  #log .gu, #log .bubble, .msg-preview-me, .msg-preview-cloudy, .composer {
+    --rim-hi: rgba(255,255,255,.45);
+    --rim-lo: rgba(255,255,255,.40);
+  }
+  html[data-theme="dark"] :is(#log .gu, #log .bubble, .msg-preview-me, .msg-preview-cloudy, .composer) {
+    --rim-hi: rgba(255,240,247,.30);
+    --rim-lo: rgba(255,240,247,.26);
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) :is(#log .gu, #log .bubble, .msg-preview-me, .msg-preview-cloudy, .composer) {
+      --rim-hi: rgba(255,240,247,.30);
+      --rim-lo: rgba(255,240,247,.26);
+    }
+  }
   /* 本身没有边框的按钮，这圈边就画在它自己的边上 */
   .ctlrow > :is(#plusBtn, #instructionsBtn, #mcpChatBtn, #reasoningBtn, #voiceBtn, #modelPill) { --glass-border: 0px; }
   #log .bubble::before { inset: calc(-1 * var(--msg-me-border-width, 1px)); }
