@@ -2462,6 +2462,22 @@ async def find_everywhere(q: str, limit: int = 80):
     return {"ok": True, "hits": db.find_everywhere(q, limit)}
 
 
+@app.get("/api/find/days", dependencies=authed)
+async def find_days(month: str):
+    """搜索里的日历：这个月哪几天有聊天。"""
+    if not re.fullmatch(r"\d{4}-\d{2}", month or ""):
+        raise HTTPException(400, "月份要写成 2026-10 这样")
+    return {"ok": True, "days": db.chat_days(month)}
+
+
+@app.get("/api/find/day", dependencies=authed)
+async def find_day(date: str):
+    """搜索里的日历：点开某一天，看那天聊过哪几间对话。"""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date or ""):
+        raise HTTPException(400, "日期要写成 2026-10-05 这样")
+    return {"ok": True, "chats": db.chat_day(date)}
+
+
 # 你的本子
 
 @app.get("/api/her-diary", dependencies=authed)

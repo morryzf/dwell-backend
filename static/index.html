@@ -1139,6 +1139,26 @@ html[data-theme="dark"] .composer {
   .fd-hit .fh { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); margin-bottom: 4px; }
   .fd-hit .fk { background: var(--panel); border-radius: 999px; padding: 1px 9px; }
   .fd-hit .fs { font-size: 14.5px; line-height: 1.7; word-break: break-word; }
+  /* 搜索里的日历：按日子翻聊天。有聊天的日子底下一颗小点，今天一圈细线，选中的那天填满。 */
+  .fd-cal-btn { flex: none; display: grid; place-items: center; width: 30px; height: 30px; margin: -6px -8px -6px 0; border-radius: 9px; color: var(--dim); }
+  .fd-cal-btn .ic { width: 17px; height: 17px; }
+  .fd-cal-btn.on { color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
+  .fd-cal { padding: 14px 2px 6px; }
+  .fd-cal-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 10px; }
+  .fd-cal-head .ym { font-family: var(--serif); font-size: 16px; }
+  .fd-cal-head button { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; color: var(--dim); }
+  .fd-cal-head button:active { background: var(--panel); }
+  .fd-cal-head button:disabled { opacity: .3; }
+  .fd-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 4px; text-align: center; }
+  .fd-cal-grid .wd { font-size: 11.5px; color: var(--dim); padding-bottom: 4px; }
+  .fd-cal-grid .d { position: relative; justify-self: center; width: 38px; height: 38px; border-radius: 12px; font-size: 14px; color: var(--dim); }
+  .fd-cal-grid .d.has { color: var(--text); }
+  .fd-cal-grid .d.has::after { content: ''; position: absolute; left: 50%; bottom: 5px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent); }
+  .fd-cal-grid .d.today { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+  .fd-cal-grid .d.sel { background: var(--accent); color: #fff; }
+  .fd-cal-grid .d.sel::after { background: #fff; }
+  .fd-cal-grid .d:not(.has) { pointer-events: none; opacity: .45; }
+  .fd-cal-grid .d:active { transform: scale(.94); }
   .fd-hit .fs mark { background: rgba(217, 119, 87, .28); color: inherit; border-radius: 3px; padding: 0 2px; }
 
   .cal-head { position: relative; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 2px 0 14px; }
@@ -8361,11 +8381,24 @@ function openFind() {
   inp.placeholder = '找一句话、一个人、一天…';
   inp.maxLength = 60;
   bar.appendChild(inp);
+  const calBtn = document.createElement('button');
+  calBtn.type = 'button';
+  calBtn.className = 'fd-cal-btn';
+  calBtn.title = calBtn.ariaLabel = '按日子翻聊天';
+  calBtn.appendChild(icEl('calendar', 17));
+  bar.appendChild(calBtn);
   findBody.appendChild(bar);
   const out = document.createElement('div');
   findBody.appendChild(out);
-  out.innerHTML = '<div class="fd-hint">翻的是聊天、心事簿、收藏的话、悄悄话、夜记和日历。<br>想不起来哪天的事，就打一个词进去。</div>';
+  const hint = () => { out.innerHTML = '<div class="fd-hint">翻的是聊天、心事簿、收藏的话、悄悄话、夜记和日历。<br>想不起来哪天的事，就打一个词进去，或者点右边的日历按日子翻。</div>'; };
+  hint();
+  calBtn.onclick = () => {
+    calBtn.classList.toggle('on');
+    if (calBtn.classList.contains('on')) { inp.value = ''; clearTimeout(findTimer); renderFindCal(out); }
+    else hint();
+  };
   const run = async () => {
+    calBtn.classList.remove('on');
     const q = inp.value.trim();
     if (q.length < 1) { out.innerHTML = '<div class="fd-hint">写点什么，我去翻</div>'; return; }
     out.innerHTML = '<div class="fd-hint">翻着呢…</div>';
@@ -8414,6 +8447,108 @@ function openFind() {
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { clearTimeout(findTimer); run(); } });
   sheets.find.classList.add('open');
   setTimeout(() => inp.focus(), 250);
+}
+
+/* 搜索里的日历：一个月一页，有聊天的日子点得动；点开一天，底下列出那天聊过的对话，
+   再点一间就跳到那天在这间里的第一句（和搜索结果走同一条路）。 */
+let findCalYM = null, findCalSel = null;
+async function renderFindCal(out) {
+  if (!findCalYM) {
+    const t = todayStr();
+    findCalYM = t.slice(0, 7);
+    findCalSel = t;
+  }
+  const [y, m] = findCalYM.split('-').map(Number);
+  const wrap = document.createElement('div');
+  wrap.className = 'fd-cal';
+  const head = document.createElement('div');
+  head.className = 'fd-cal-head';
+  const pv = document.createElement('button'); pv.type = 'button'; pv.ariaLabel = '上个月'; pv.appendChild(icEl('chevL', 15));
+  const nx = document.createElement('button'); nx.type = 'button'; nx.ariaLabel = '下个月'; nx.appendChild(icEl('chevR', 15));
+  const ym = document.createElement('span'); ym.className = 'ym'; ym.textContent = y + ' 年 ' + m + ' 月';
+  nx.disabled = findCalYM >= todayStr().slice(0, 7);
+  const shift = (k) => {
+    const d = new Date(y, m - 1 + k, 1);
+    findCalYM = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    renderFindCal(out);
+  };
+  pv.onclick = () => shift(-1);
+  nx.onclick = () => shift(1);
+  head.append(pv, ym, nx);
+  const grid = document.createElement('div');
+  grid.className = 'fd-cal-grid';
+  '一二三四五六日'.split('').forEach(w => { const e = document.createElement('div'); e.className = 'wd'; e.textContent = w; grid.appendChild(e); });
+  const list = document.createElement('div');
+  wrap.append(head, grid);
+  out.innerHTML = '';
+  out.append(wrap, list);
+  let days = {};
+  try {
+    const d = await (await fetch('api/find/days?month=' + findCalYM, { cache: 'no-store' })).json();
+    days = d.days || {};
+  } catch {}
+  if (!out.contains(wrap)) return;      // 等的时候已经翻走了
+  // 选中的那天这个月里没聊天（比如今天还没开口，或刚翻到别的月），就落到这个月最近聊过的一天。
+  if (!(findCalSel && findCalSel.startsWith(findCalYM) && days[findCalSel])) {
+    findCalSel = Object.keys(days).sort().pop() || null;
+  }
+  const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+  for (let i = 0; i < lead; i++) grid.appendChild(document.createElement('span'));
+  const total = new Date(y, m, 0).getDate();
+  const today = todayStr();
+  for (let n = 1; n <= total; n++) {
+    const key = findCalYM + '-' + String(n).padStart(2, '0');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'd' + (days[key] ? ' has' : '') + (key === today ? ' today' : '') + (key === findCalSel ? ' sel' : '');
+    b.textContent = n;
+    if (days[key]) b.title = days[key] + ' 句';
+    b.onclick = () => {
+      findCalSel = key;
+      grid.querySelectorAll('.d.sel').forEach(e => e.classList.remove('sel'));
+      b.classList.add('sel');
+      renderFindDay(list, key);
+    };
+    grid.appendChild(b);
+  }
+  if (findCalSel && findCalSel.startsWith(findCalYM)) renderFindDay(list, findCalSel);
+  else list.innerHTML = '<div class="fd-hint">点一个带小点的日子，看那天聊了什么</div>';
+}
+
+async function renderFindDay(list, day) {
+  list.innerHTML = '<div class="fd-hint">翻着呢…</div>';
+  let chats = [];
+  try {
+    const d = await (await fetch('api/find/day?date=' + day, { cache: 'no-store' })).json();
+    chats = d.chats || [];
+  } catch {
+    list.innerHTML = '<div class="fd-hint">翻不动了，再试一次</div>';
+    return;
+  }
+  if (findCalSel !== day) return;
+  const [, mm, dd] = day.split('-').map(Number);
+  list.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'fd-hint';
+  head.textContent = chats.length ? mm + ' 月 ' + dd + ' 日 · 聊了 ' + chats.length + ' 间' : mm + ' 月 ' + dd + ' 日没有聊天';
+  list.appendChild(head);
+  chats.forEach(c => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'fd-hit';
+    el.title = '打开那天的这间聊天';
+    const fh = document.createElement('div');
+    fh.className = 'fh';
+    const k = document.createElement('span');
+    k.className = 'fk'; k.textContent = c.chat_name;
+    fh.append(k, (c.from === c.to ? c.from : c.from + '–' + c.to) + ' · ' + c.count + ' 句');
+    const fs = document.createElement('div');
+    fs.className = 'fs';
+    fs.textContent = c.snippet || '（那天只有 Cloudy 说了话）';
+    el.append(fh, fs);
+    el.onclick = () => openSearchChatHit(c);
+    list.appendChild(el);
+  });
 }
 
 async function openSearchChatHit(hit) {
@@ -10662,9 +10797,13 @@ document.getElementById('dotsBtn').onclick = (e) => {
   e.stopPropagation();
   dotsMenu.classList.toggle('open');
 };
-document.addEventListener('click', (e) => {
-  if (!dotsMenu.contains(e.target)) dotsMenu.classList.remove('open');
-});
+// 点菜单外面任何地方都收起。用捕获阶段的 pointerdown：气泡、输入框自己会拦掉 click
+// （长按、拦冒泡），等到 click 冒到 document 就晚了，菜单一直挂着。
+document.addEventListener('pointerdown', (e) => {
+  if (!dotsMenu.classList.contains('open')) return;
+  if (dotsMenu.contains(e.target) || e.target.closest('#dotsBtn')) return;
+  dotsMenu.classList.remove('open');
+}, true);
 // —— 记忆的提示点与按需记忆开关 ——
 let memoryBadgeChat = '';
 function setMemoryBadge(data) {
