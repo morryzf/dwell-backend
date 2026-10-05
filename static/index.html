@@ -3899,6 +3899,40 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .usage-note { margin: 13px 5px 0; color: var(--dim); font-size: 11px; line-height: 1.65; }
   #usageRefresh { transition: transform 150ms var(--ease-out), opacity 150ms ease; }
   #usageRefresh:disabled { opacity: .35; }
+  /* 文件夹：标签像夹子上的耳朵，选中的那只和下面的页连成一张纸 */
+  .usage-folder { display: flex; gap: 4px; padding: 6px 0 0 10px; position: relative; z-index: 1; }
+  .usage-folder button {
+    position: relative; min-height: 40px; padding: 0 18px; margin-bottom: -1px;
+    border: 1px solid var(--line); border-bottom: 0; border-radius: 14px 14px 0 0;
+    background: color-mix(in srgb, var(--panel) 80%, var(--bg)); color: var(--dim);
+    font-size: 13px; font-weight: 650;
+    transform: translateY(3px);
+    transition: transform 150ms var(--ease-out), color 150ms ease, background-color 150ms ease;
+  }
+  .usage-folder button[aria-selected="true"] { background: var(--card); color: var(--text); transform: none; }
+  .usage-folder button[aria-selected="true"]::after {   /* 盖住页边那条线，耳朵和页接起来 */
+    content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--card);
+  }
+  .usage-folder button:active { transform: translateY(3px) scale(.97); }
+  .usage-folder button[aria-selected="true"]:active { transform: scale(.97); }
+  .usage-folder-page {
+    padding: 6px 14px 16px; border: 1px solid var(--line); border-radius: 20px;
+    background: var(--card); box-shadow: 0 14px 36px rgba(62,44,53,.06);
+  }
+  .usage-folder-page .usage-balance, .usage-folder-page .usage-summary > div,
+  .usage-folder-page .usage-cache-card, .usage-folder-page .usage-chart-card { background: var(--panel); }
+  .sub-windows { display: grid; gap: 12px; }
+  .sub-group-title { margin: 10px 4px -2px; color: var(--dim); font-size: 13px; }
+  .sub-card { display: grid; gap: 10px; padding: 16px 17px 15px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
+  .sub-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .sub-card-head strong { font-size: 15.5px; font-weight: 650; }
+  .sub-card-head span { color: var(--dim); font-size: 13px; white-space: nowrap; }
+  .sub-bar { height: 8px; overflow: hidden; border-radius: 99px; background: color-mix(in srgb, var(--text) 9%, transparent); }
+  .sub-bar i { display: block; height: 100%; min-width: 8px; border-radius: inherit; background: var(--accent); transition: width 300ms var(--ease-out); }
+  .sub-bar.hot i { background: color-mix(in srgb, var(--accent) 70%, #c0392b); }
+  .sub-card small { color: var(--dim); font-size: 12px; }
+  .sub-empty { padding: 26px 8px; color: var(--dim); font-size: 13px; text-align: center; line-height: 1.7; }
+  @media (prefers-reduced-motion: reduce) { .usage-folder button, .sub-bar i { transition: none; } }
   @media (max-width: 370px) {
     .usage-body { padding-left: 15px !important; padding-right: 15px !important; }
     .usage-summary > div { padding-left: 9px; padding-right: 9px; }
@@ -4523,8 +4557,22 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       <button class="hbtn" id="usageRefresh" aria-label="刷新用量" title="刷新"><span class="ic" data-i="refresh"></span></button>
     </div>
     <div class="body usage-body" id="usageBody">
+      <div class="usage-folder" role="tablist" aria-label="选择额度">
+        <button type="button" role="tab" id="usageTabSub" data-usage-tab="sub" aria-selected="true" aria-controls="usagePaneSub">订阅额度</button>
+        <button type="button" role="tab" id="usageTabOr" data-usage-tab="or" aria-selected="false" aria-controls="usagePaneOr">OpenRouter</button>
+      </div>
+      <div class="usage-folder-page">
+      <section class="usage-pane" id="usagePaneSub" role="tabpanel" aria-labelledby="usageTabSub">
+        <section class="usage-intro">
+          <div><span class="usage-eyebrow">CLAUDE</span><strong id="subPlan">订阅账号</strong></div>
+        </section>
+        <div id="subStatus" class="usage-status" role="status" aria-live="polite"></div>
+        <div id="subWindows" class="sub-windows"></div>
+        <p class="usage-note" id="subNote"></p>
+      </section>
+      <section class="usage-pane" id="usagePaneOr" role="tabpanel" aria-labelledby="usageTabOr" hidden>
       <section class="usage-intro">
-        <div><span class="usage-eyebrow">OPENROUTER</span><strong id="usageProvider">当前聊天</strong></div>
+        <div><span class="usage-eyebrow">OPENROUTER</span><strong id="usageProvider">OpenRouter 账号</strong></div>
         <div class="usage-currency" role="group" aria-label="显示货币">
           <button type="button" data-usage-currency="USD" aria-pressed="true">USD</button>
           <button type="button" data-usage-currency="CNY" aria-pressed="false">CNY</button>
@@ -4560,6 +4608,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
         <div class="usage-chart" id="usageChart" role="group" aria-label="用量趋势图"></div>
       </section>
       <p class="usage-note" id="usageNote">按 UTC 统计 · 金额为 OpenRouter 当前密钥在 Dwell 中的用量</p>
+      </section>
+      </div>
     </div>
   </div>
 </div>
@@ -10407,7 +10457,7 @@ Object.entries(sheets).forEach(([k, wrap]) => {
 });
 
 document.getElementById('avatarBtn').onclick = () => { closeDrawer(); sheets.settings.classList.add('open'); };
-document.getElementById('navUsage').onclick = () => { closeDrawer(); sheets.usage.classList.add('open'); loadOpenRouterUsage(); pushState(); };
+document.getElementById('navUsage').onclick = () => { closeDrawer(); sheets.usage.classList.add('open'); openUsageTab('sub'); pushState(); };
 
 let systemLogCategory = '';
 let systemLogStatus = '';
@@ -12693,12 +12743,108 @@ async function loadOpenRouterUsage() {
   } catch (error) {
     status.textContent = error.message || '暂时拿不到 OpenRouter 用量';
     status.className = 'usage-status on bad';
+    if (!openRouterUsageData) document.getElementById('usageProvider').textContent = '还没有设置';
   } finally {
     refresh.disabled = false;
   }
 }
 
-document.getElementById('usageRefresh').onclick = loadOpenRouterUsage;
+// —— 订阅额度 ——
+let usageTab = 'sub';
+let subscriptionUsageData = null;
+
+// 和 Claude 自己的用量页一样写英文，只是把「还有多久」换成「几点」。
+function subscriptionResetText(ts) {
+  if (!ts) return '';
+  const at = new Date(ts * 1000), now = new Date();
+  const time = at.toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit', hour12: false});
+  const sameDay = at.toDateString() === now.toDateString();
+  const withinWeek = at - now < 6 * 86400000;
+  let when = time;
+  if (!sameDay) when = withinWeek
+    ? at.toLocaleDateString('en-US', {weekday: 'short'}) + ' ' + time
+    : at.toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) + ' ' + time;
+  return (at < now ? 'Reset at ' : 'Resets at ') + when;
+}
+function subscriptionCard(w) {
+  const used = Number(w.used);
+  const hasUsed = Number.isFinite(used);
+  const pct = hasUsed ? Math.max(0, Math.min(100, used)) : 0;
+  let foot = subscriptionResetText(w.resets_at);
+  if (w.group === 'extra' && w.monthly_limit != null) {
+    const money = v => (w.currency === 'USD' || !w.currency ? '$' : '') + Number(v || 0).toFixed(2) + (w.currency && w.currency !== 'USD' ? ' ' + w.currency : '');
+    foot = money(w.used_credits) + ' of ' + money(w.monthly_limit) + ' this month';
+  }
+  return `<article class="sub-card"><div class="sub-card-head"><strong>${instructionEsc(w.label)}</strong><span>${hasUsed ? (Number.isInteger(used) ? used : used.toFixed(1)) + '% used' : '—'}</span></div><div class="sub-bar${pct >= 90 ? ' hot' : ''}" role="progressbar" aria-label="${instructionEsc(w.label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></div>${foot ? `<small>${instructionEsc(foot)}</small>` : ''}</article>`;
+}
+function renderSubscriptionUsage() {
+  const data = subscriptionUsageData;
+  const box = document.getElementById('subWindows');
+  const status = document.getElementById('subStatus');
+  const plan = data.plan ? data.plan.charAt(0).toUpperCase() + data.plan.slice(1) : '订阅账号';
+  document.getElementById('subPlan').textContent = data.email ? plan + ' · ' + data.email : plan;
+  const windows = data.windows || [];
+  if (!windows.length) {
+    box.innerHTML = `<div class="sub-empty">还没有拿到额度数字。<br>${instructionEsc(data.error || '')}</div>`;
+  } else {
+    const groups = [['session', ''], ['weekly', 'Weekly limits'], ['extra', '']];
+    box.innerHTML = groups.map(([key, title]) => {
+      const items = windows.filter(w => w.group === key);
+      if (!items.length) return '';
+      return (title ? `<div class="sub-group-title">${title}</div>` : '') + items.map(subscriptionCard).join('');
+    }).join('');
+  }
+  const notes = [];
+  if (data.source === 'observed') {
+    const seen = Math.max(...windows.map(w => Number(w.observed_at) || 0));
+    status.textContent = '官方用量接口这次没有给出数字，下面是最近一次聊天时 Claude Code 报来的额度'
+      + (seen ? '（记于 ' + new Date(seen * 1000).toLocaleString('zh-CN', {hour12: false}) + '）' : '') + '。';
+    status.className = 'usage-status on';
+  } else {
+    status.textContent = '';
+    status.className = 'usage-status';
+  }
+  if (data.fetched_at) notes.push('更新于 ' + new Date(data.fetched_at * 1000).toLocaleString('zh-CN', {hour12: false}));
+  notes.push('数字来自 Claude 账号本身，claude.ai、Claude Code 和这里的用量算在一起');
+  document.getElementById('subNote').textContent = notes.join(' · ');
+}
+async function loadSubscriptionUsage(refresh) {
+  const status = document.getElementById('subStatus');
+  const button = document.getElementById('usageRefresh');
+  button.disabled = true;
+  status.textContent = subscriptionUsageData ? '正在刷新…' : '正在读取订阅额度…';
+  status.className = 'usage-status on';
+  try {
+    const response = await fetch('/api/subscription/usage' + (refresh ? '?refresh=true' : ''), {cache: 'no-store'});
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || '暂时拿不到订阅额度');
+    subscriptionUsageData = data;
+    renderSubscriptionUsage();
+  } catch (error) {
+    status.textContent = error.message || '暂时拿不到订阅额度';
+    status.className = 'usage-status on bad';
+    if (!subscriptionUsageData) document.getElementById('subWindows').innerHTML = '';
+  } finally {
+    button.disabled = false;
+  }
+}
+function openUsageTab(tab) {
+  usageTab = tab === 'or' ? 'or' : 'sub';
+  document.querySelectorAll('[data-usage-tab]').forEach(button => {
+    button.setAttribute('aria-selected', String(button.dataset.usageTab === usageTab));
+  });
+  document.getElementById('usagePaneSub').hidden = usageTab !== 'sub';
+  document.getElementById('usagePaneOr').hidden = usageTab !== 'or';
+  if (usageTab === 'sub') loadSubscriptionUsage(false);
+  else loadOpenRouterUsage();
+}
+document.querySelectorAll('[data-usage-tab]').forEach(button => {
+  button.onclick = () => { if (button.dataset.usageTab !== usageTab) openUsageTab(button.dataset.usageTab); };
+});
+document.getElementById('usageRefresh').onclick = () => {
+  if (usageTab === 'sub') loadSubscriptionUsage(true);
+  else loadOpenRouterUsage();
+};
 document.querySelectorAll('[data-usage-currency]').forEach(button => {
   button.onclick = () => {
     if (button.disabled) return;

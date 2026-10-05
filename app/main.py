@@ -26,7 +26,7 @@ import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from . import auth, db, file_text, home_mcp, provider_secrets, push_service, sigillo, study
+from . import auth, db, file_text, home_mcp, provider_secrets, push_service, sigillo, study, subscription_usage
 from app.pet_assets import ensure_pet_assets
 from app.agent_sdk_client import MEMORY_CARD_KEY, PROMPT_TAIL_KEY
 from app.llm_client import prompt_cache_enabled, stream_chat
@@ -2946,15 +2946,41 @@ async def _usd_cny_exchange_rate() -> dict:
         }
 
 
+def _usage_provider(provider_type: str) -> dict | None:
+    """用量页要看的那个供应商：当前聊天正好用着它就用这个，否则取第一个开着的。
+
+    以前只看当前聊天：聊天切到 Claude Code，OpenRouter 的用量就看不了了。
+    """
+    chat_id = _get_or_create_current_chat()
+    current = db.provider_get(db.chat_model_get(chat_id).get("provider_id") or "")
+    if current and current.get("enabled") and current.get("provider_type") == provider_type:
+        return current
+    for provider in db.provider_list():
+        if provider.get("enabled") and provider.get("provider_type") == provider_type:
+            return db.provider_get(provider["id"])
+    return None
+
+
+@app.get("/api/subscription/usage", dependencies=authed)
+async def subscription_usage_get(refresh: bool = False):
+    """Claude 订阅的额度：5 小时窗口、每周窗口各用了多少、几点重置。"""
+    provider = _usage_provider("claude_agent_sdk")
+    if not provider:
+        raise HTTPException(409, "还没有设置 Claude Agent SDK 供应商")
+    try:
+        data = await subscription_usage.fetch(provider, refresh=refresh)
+    except httpx.RequestError as exc:
+        raise HTTPException(502, f"连不上桥接服务：{exc}") from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    return {"ok": True, "provider": {"id": provider["id"], "name": provider["name"]}, **data}
+
+
 @app.get("/api/openrouter/usage", dependencies=authed)
 async def openrouter_usage_get():
-    chat_id = _get_or_create_current_chat()
-    selection = db.chat_model_get(chat_id)
-    provider = db.provider_get(selection.get("provider_id") or "")
-    if not provider or not provider.get("enabled"):
-        raise HTTPException(409, "当前聊天没有可用的模型供应商")
-    if provider.get("provider_type") != "openrouter":
-        raise HTTPException(409, "当前聊天使用的不是 OpenRouter")
+    provider = _usage_provider("openrouter")
+    if not provider:
+        raise HTTPException(409, "还没有设置 OpenRouter 供应商")
     token, key_hash = _openrouter_credentials(provider)
 
     # 用户确认这个供应商的 Key 从未更换；旧消息只导入一次。以后换 Key 时，

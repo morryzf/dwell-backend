@@ -49,11 +49,20 @@ class OpenRouterUsageStaticTest(unittest.TestCase):
         self.assertIn("chart.setAttribute('aria-label'", HTML)
         self.assertIn("按 UTC 统计", HTML)
 
+    def test_usage_page_is_a_folder_with_subscription_first(self):
+        self.assertIn('data-usage-tab="sub" aria-selected="true"', HTML)
+        self.assertIn('data-usage-tab="or" aria-selected="false"', HTML)
+        self.assertIn('id="usagePaneOr" role="tabpanel" aria-labelledby="usageTabOr" hidden', HTML)
+        self.assertIn("fetch('/api/subscription/usage'", HTML)
+        # 和 Claude 自己的用量页一样写英文，只是写「几点」而不是「还有多久」。
+        self.assertIn("'Resets at '", HTML)
+        self.assertNotIn("Resets in", HTML)
+
     def test_usage_navigation_opens_page_and_reloads_data(self):
         pattern = re.compile(
             r"document\.getElementById\('navUsage'\)\.onclick = \(\) => \{"
             r" closeDrawer\(\); sheets\.usage\.classList\.add\('open'\);"
-            r" loadOpenRouterUsage\(\); pushState\(\); \};"
+            r" openUsageTab\('sub'\); pushState\(\); \};"
         )
         self.assertRegex(HTML, pattern)
         self.assertIn("usage: 'navUsage'", HTML)

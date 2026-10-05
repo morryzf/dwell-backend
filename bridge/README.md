@@ -129,6 +129,24 @@ data: [DONE]
 `usage` 只在 `result` 消息上取——Agent SDK 每步 assistant 消息上的
 `output_tokens` 是占位值，不是真实数字。
 
+### `GET /v1/usage`
+
+订阅额度：5 小时窗口、每周窗口（以及账号有的分模型窗口、额外用量）各用了多少、什么时候重置。
+桥接起一个不发消息的 Claude Code 会话，读 `/usage` 背后那份数据，问完就关；结果缓存一分钟，
+`?refresh=1` 强制重问。不占聊天的并发槽位。
+
+官方用量接口要能读取账号资料的登录（在这台机器上 `claude` 里 `/login` 过）。拿不到时
+`available` 为 false，`observed` 里是最近几次聊天时 Claude Code 报来的额度（`rate_limit_event`），
+Dwell 会拿它顶上并注明记录时间。
+
+```json
+{"ok": true, "available": true, "subscription_type": "max",
+ "rate_limits": {"five_hour": {"utilization": 5, "resets_at": "2026-10-05T13:30:00Z"},
+                 "seven_day": {"utilization": 44, "resets_at": "2026-10-06T14:59:00Z"}},
+ "observed": {"five_hour": {"utilization": 0.05, "resets_at": 1791207000, "observed_at": 1791190000}}}
+```
+
+
 `session` 事件带回 Claude Code 的会话 id。Dwell 把它存在 settings 表的
 `agent_sdk_session:<聊天键>` 下，下一轮作为 `resume` 传回来。桥接自己不存任何状态。
 
@@ -231,8 +249,8 @@ export MCP_SERVERS_JSON='{"ombre":{"type":"http","url":"https://……/mcp","hea
 配好之后 Dwell 侧这条聊天带上工具时会把 `max_turns` 放宽到 8，让 Claude Code
 有余量跑完工具再收尾。
 
-> 注意：这跟 Dwell 原本的工具回路不是同一条。走这个供应商类型时，Dwell 内置的
-> 搜索 / 抓取 / 房间工具不会生效，只有这里配进来的 MCP 工具会。
+> Dwell 自己的工具（待办、日记、日历、sigillo、网页、聊天挂的外部 MCP）不用在这里配：
+> Dwell 每轮会通过请求里的 `mcp_servers` 把它们交过来，见上面 `/v1/chat/stream` 的说明。
 
 ## 已知取舍
 

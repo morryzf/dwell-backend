@@ -90,6 +90,86 @@ function requestMcpServers(raw) {
   return servers;
 }
 
+// —— 订阅用量 ——
+//
+// 聊天时 Claude Code 会顺手报一下额度用到哪了（rate_limit_event）。记下每个
+// 窗口最近一次的数字：官方用量接口没回应时，用量页至少还有这个可看。
+const observedLimits = {};
+
+function rememberRateLimit(info) {
+  if (!info || typeof info !== "object") return;
+  const key = String(info.rateLimitType || "unknown");
+  observedLimits[key] = {
+    status: info.status || "",
+    utilization: typeof info.utilization === "number" ? info.utilization : null,
+    resets_at: typeof info.resetsAt === "number" ? info.resetsAt : null,
+    observed_at: Math.floor(Date.now() / 1000),
+  };
+}
+
+// 用量页一打开就要一次，刷新按钮也会连点；结果留一分钟，同一时刻只问一次。
+const USAGE_CACHE_MS = 60 * 1000;
+const USAGE_TIMEOUT_MS = 45 * 1000;
+let usageCache = null;
+let usageInflight = null;
+
+// 读 /usage 背后的那份数据：起一个不发消息的 Claude Code 会话，问完就关。
+// 不占聊天的并发槽位——它只读一下账号状态，几秒钟的事，不该排在一轮长回复后面。
+async function fetchPlanUsage() {
+  let finish;
+  const idle = new Promise((resolve) => { finish = resolve; });
+  async function* noPrompt() { await idle; }
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), USAGE_TIMEOUT_MS);
+  const q = query({
+    prompt: noPrompt(),
+    options: {
+      model: DEFAULT_MODEL, env: CHILD_ENV, abortController: abort,
+      settingSources: [], tools: [], maxTurns: 1,
+    },
+  });
+  // 消息流要有人读着，控制请求的回应才送得回来。
+  (async () => { try { for await (const _ of q) { /* 不发消息，也就没有要处理的 */ } } catch { /* 关掉时会抛 */ } })();
+  try {
+    if (typeof q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET !== "function") {
+      throw new Error("桥接里的 Agent SDK 版本太旧，读不了订阅用量；在 bridge 目录里 npm install 一下");
+    }
+    const [usage, account] = await Promise.all([
+      q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
+      q.accountInfo().catch(() => null),
+    ]);
+    return { usage, account };
+  } finally {
+    clearTimeout(timer);
+    finish();
+    try { q.close(); } catch { /* 已经结束 */ }
+  }
+}
+
+async function planUsage(force) {
+  if (!force && usageCache && Date.now() - usageCache.at < USAGE_CACHE_MS) return usageCache.body;
+  if (!usageInflight) {
+    usageInflight = (async () => {
+      const body = { ok: true, fetched_at: Math.floor(Date.now() / 1000) };
+      try {
+        const { usage, account } = await fetchPlanUsage();
+        body.available = Boolean(usage?.rate_limits_available && usage?.rate_limits);
+        body.subscription_type = usage?.subscription_type || account?.subscriptionType || null;
+        body.rate_limits = usage?.rate_limits || null;
+        body.account = account ? { email: account.email || "", organization: account.organization || "" } : null;
+        if (!body.available) body.error = "官方用量接口没有给出额度（这个登录方式可能没有读取用量的权限）";
+      } catch (error) {
+        body.available = false;
+        body.error = String(error?.message || error);
+      }
+      body.observed = { ...observedLimits };
+      usageCache = { at: Date.now(), body };
+      return body;
+    })().finally(() => { usageInflight = null; });
+  }
+  return usageInflight;
+}
+
 let running = 0;
 const waiting = [];
 
@@ -363,6 +443,11 @@ async function streamTurn(res, prompt, options, includeThinking) {
       continue;
     }
 
+    if (message.type === "rate_limit_event") {
+      rememberRateLimit(message.rate_limit_info);
+      continue;
+    }
+
     // 会话被压缩过：早先递进去的记忆卡可能已经被总结掉了，上层据此重新记账。
     if (message.type === "system" && message.subtype === "compact_boundary") {
       writeEvent(res, { type: "compacted" });
@@ -411,6 +496,16 @@ const server = createServer(async (req, res) => {
       running,
       queued: waiting.length,
     });
+    return;
+  }
+
+  if (req.method === "GET" && req.url.split("?")[0] === "/v1/usage") {
+    if (!authorized(req)) {
+      sendJson(res, 401, { ok: false, error: "unauthorized" });
+      return;
+    }
+    const force = /[?&]refresh=1\b/.test(req.url);
+    sendJson(res, 200, await planUsage(force));
     return;
   }
 
