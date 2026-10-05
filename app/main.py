@@ -6294,23 +6294,41 @@ async def manifest():
 
 # ---------------------------------------------------------------- 前端
 
+# 网页每次打开都先问一声有没有新版（没变就回 304，几乎不费流量）。
+# 不写的话，浏览器会按文件的修改时间自己估一个缓存时长——文件放了几天，
+# 主屏幕上的 Dwell 就可能好几个小时都用旧页面，部署了也看不到。
+PAGE_HEADERS = {"Cache-Control": "no-cache"}
+
+
+def _page(path: Path, request: Request | None = None) -> Response:
+    """给一张页面。和手机上那份一样就只回 304，不再整份重传。"""
+    stat = path.stat()
+    etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    headers = {**PAGE_HEADERS, "ETag": etag}
+    if request is not None:
+        asked = request.headers.get("if-none-match", "")
+        if etag in {tag.strip() for tag in asked.split(",")}:
+            return Response(status_code=304, headers=headers)
+    return FileResponse(path, headers=headers)
+
+
 @app.get("/watch")
-async def watch_page():
+async def watch_page(request: Request):
     """本地电影夜页面；登录状态仍由同源 cookie 和 /api/* 统一保护。"""
-    return FileResponse(STATIC_DIR / "watch.html")
+    return _page(STATIC_DIR / "watch.html", request)
 
 @app.get("/")
-async def index():
+async def index(request: Request):
     f = STATIC_DIR / "index.html"
     if not f.exists():
         return JSONResponse(
             {"ok": True, "note": "后端活着。前端还没放进 static/index.html。"}
         )
-    return FileResponse(f)
+    return _page(f, request)
 
 
 @app.get("/{path:path}")
-async def static_or_index(path: str):
+async def static_or_index(path: str, request: Request):
     """静态文件直接给；找不到的路径回 index.html，交给前端自己处理。"""
     if path.startswith("api/"):
         raise HTTPException(404, "没有这个接口")
@@ -6318,10 +6336,12 @@ async def static_or_index(path: str):
     candidate = (STATIC_DIR / path).resolve()
     # 防目录穿越：请求 ../../etc/passwd 这种直接挡掉
     if STATIC_DIR.resolve() in candidate.parents and candidate.is_file():
+        if candidate.suffix == ".html" or candidate.name == "sw.js":
+            return _page(candidate, request)
         return FileResponse(candidate)
 
     f = STATIC_DIR / "index.html"
     if f.exists():
-        return FileResponse(f)
+        return _page(f, request)
     raise HTTPException(404, "没有这个页面")
 
