@@ -2179,16 +2179,16 @@ html[data-theme="dark"] .menuCard {
   /* 有新的待确认记忆卡：三个点和菜单里的「记忆」上都亮一个小点，颜色跟主题走 */
   #dotsBtn { position: relative; }
   #dotsBtn::after, .mem-dot {
-    content: ""; display: none; width: 8px; height: 8px; border-radius: 50%;
-    background: var(--accent); box-shadow: 0 0 0 2px var(--bg);
+    content: ""; display: none; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent);
   }
   /* 按钮比图标大一圈，按中心定位，点贴在三个点的右上方 */
-  #dotsBtn.mem-new::after { display: block; position: absolute; width: 7px; height: 7px; top: calc(50% - 10px); left: calc(50% + 6px); }
-  .mem-dot { position: relative; top: -7px; margin-left: 3px; }
+  #dotsBtn.mem-new::after { display: block; position: absolute; top: calc(50% - 8px); left: calc(50% + 7px); }
+  .mem-dot { position: relative; top: -8px; margin-left: 2px; }
   #dotsMenu.mem-new .mem-dot { display: inline-block; }
   .menuCard .mi .mi-label { flex: 1; }
   .menuCard .mi .sw { width: 40px; height: 24px; margin-left: 12px; }
-  .menuCard .mi .sw::after { width: 20px; height: 20px; }
+  .menuCard .mi .sw::after { top: 2px; left: 2px; width: 20px; height: 20px; }   /* 小一号的开关，四边都空 2px，圆钮才居中 */
   .menuCard .mi .sw.on::after { transform: translateX(16px); }
 
 
@@ -2924,7 +2924,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .model-think .ic { width: 15px; height: 15px; }
   .model-think[aria-pressed="true"] .ic { color: var(--accent); }
   .model-think .sw { width: 40px; height: 24px; }
-  .model-think .sw::after { width: 20px; height: 20px; }
+  .model-think .sw::after { top: 2px; left: 2px; width: 20px; height: 20px; }
   .model-think .sw.on::after { transform: translateX(16px); }
   .model-swipe-hint { float: right; padding-top: 1px; font-size: 11px; letter-spacing: 0; opacity: .8; }
 
@@ -4284,14 +4284,14 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     </div>
     <div class="nav">
       <div class="drawer-tool-grid" aria-label="功能">
-        <button class="item drawer-tool" id="navTodo"><span class="drawer-tool-label">Tasks</span><span class="ic" data-i="checkSquare"></span></button>
-        <button class="item drawer-tool" id="navCal"><span class="drawer-tool-label">Calendar</span><span class="ic" data-i="calendar"></span></button>
-        <button class="item drawer-tool" id="navFocus"><span class="drawer-tool-label">Focus</span><span class="ic" data-i="clock"></span></button>
-        <button class="item drawer-tool" id="navWall"><span class="drawer-tool-label">Journal</span><span class="ic" data-i="pen"></span></button>
-        <button class="item drawer-tool" id="navNook"><span class="drawer-tool-label">Library</span><span class="ic" data-i="bookOpen"></span></button>
-        <button class="item drawer-tool" id="navRepo"><span class="drawer-tool-label">Archive</span><span class="ic" data-i="box"></span></button>
-        <button class="item drawer-tool" id="navHeartbeat"><span class="drawer-tool-label">Heartbeat</span><span class="ic" data-i="activity"></span></button>
-        <button class="item drawer-tool" id="navUsage"><span class="drawer-tool-label">Usage</span><span class="ic" data-i="trend"></span></button>
+        <button class="item drawer-tool" id="navTodo"><span class="drawer-tool-label">Tasks</span></button>
+        <button class="item drawer-tool" id="navCal"><span class="drawer-tool-label">Calendar</span></button>
+        <button class="item drawer-tool" id="navFocus"><span class="drawer-tool-label">Focus</span></button>
+        <button class="item drawer-tool" id="navWall"><span class="drawer-tool-label">Journal</span></button>
+        <button class="item drawer-tool" id="navNook"><span class="drawer-tool-label">Library</span></button>
+        <button class="item drawer-tool" id="navRepo"><span class="drawer-tool-label">Archive</span></button>
+        <button class="item drawer-tool" id="navHeartbeat"><span class="drawer-tool-label">Heartbeat</span></button>
+        <button class="item drawer-tool" id="navUsage"><span class="drawer-tool-label">Usage</span></button>
       </div>
       <div class="drawer-section-head">
         <span id="drawerChatHeading">Recents</span>
