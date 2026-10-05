@@ -10797,9 +10797,13 @@ document.getElementById('dotsBtn').onclick = (e) => {
   e.stopPropagation();
   dotsMenu.classList.toggle('open');
 };
-document.addEventListener('click', (e) => {
-  if (!dotsMenu.contains(e.target)) dotsMenu.classList.remove('open');
-});
+// 点菜单外面任何地方都收起。用捕获阶段的 pointerdown：气泡、输入框自己会拦掉 click
+// （长按、拦冒泡），等到 click 冒到 document 就晚了，菜单一直挂着。
+document.addEventListener('pointerdown', (e) => {
+  if (!dotsMenu.classList.contains('open')) return;
+  if (dotsMenu.contains(e.target) || e.target.closest('#dotsBtn')) return;
+  dotsMenu.classList.remove('open');
+}, true);
 // —— 记忆的提示点与按需记忆开关 ——
 let memoryBadgeChat = '';
 function setMemoryBadge(data) {
