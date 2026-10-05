@@ -1670,6 +1670,47 @@ def message_cache_history_count(chat_id: str, start_rowid: int) -> int:
     return int(row["total"] if row else 0)
 
 
+def chat_days(month: str) -> dict[str, int]:
+    """某个月（YYYY-MM，北京时间）里每天聊了多少句。没聊的日子不出现。"""
+    with conn() as cx:
+        rows = cx.execute(
+            """SELECT date(made + 28800, 'unixepoch') AS day, COUNT(*) AS n FROM messages
+               WHERE role IN ('user','assistant') AND strftime('%Y-%m', made + 28800, 'unixepoch')=?
+               GROUP BY day""", (month,)
+        ).fetchall()
+    return {row["day"]: row["n"] for row in rows}
+
+
+def chat_day(day: str) -> list[dict]:
+    """某一天（YYYY-MM-DD，北京时间）聊过的对话，按那天第一句的时间排。
+
+    每间对话给出那天的第一句（点进去就跳到这里）、几点到几点、一共几句。
+    """
+    with conn() as cx:
+        rows = cx.execute(
+            """SELECT m.id,m.chat_id,m.role,m.content,m.made,c.name FROM messages m JOIN chats c ON c.id=m.chat_id
+               WHERE m.role IN ('user','assistant') AND date(m.made + 28800, 'unixepoch')=?
+               ORDER BY m.made ASC, m.rowid ASC""", (day,)
+        ).fetchall()
+    chats: dict[str, dict] = {}
+    for row in rows:
+        item = chats.get(row["chat_id"])
+        if item is None:
+            item = chats[row["chat_id"]] = {
+                "chat_id": row["chat_id"], "chat_name": row["name"] or "新对话",
+                "message_id": row["id"], "first": row["made"], "last": row["made"],
+                "count": 0, "snippet": "",
+            }
+        item["last"] = row["made"]
+        item["count"] += 1
+        if not item["snippet"] and row["role"] == "user":
+            item["snippet"] = " ".join((row["content"] or "").split())[:120]
+    for item in chats.values():
+        item["from"] = datetime.fromtimestamp(item["first"], CN_TZ).strftime("%H:%M")
+        item["to"] = datetime.fromtimestamp(item["last"], CN_TZ).strftime("%H:%M")
+    return list(chats.values())
+
+
 def find_everywhere(query: str, limit: int = 80) -> list[dict]:
     """按最近更新时间翻聊天与 Dwell 里可见的文字。数据库很小，LIKE 足够稳。"""
     query = query.strip()[:60]
