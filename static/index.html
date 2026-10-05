@@ -3901,14 +3901,16 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   #usageRefresh:disabled { opacity: .35; }
   /* 文件夹：标签像夹子上的耳朵——左边竖直、右边斜着往下展开，
      选中的那只和下面的页连成一张纸。耳朵从页的左边缘起，页的左上角是直角。 */
-  .usage-folder { display: flex; padding: 6px 0 0; position: relative; z-index: 1; }
+  /* 没选中的耳朵坐在页边线上面，边线从它底下完整穿过去；只有选中的那只
+     往下盖住边线、和页连起来。以前没选中的也往下压了几像素，和选中的那只
+     叠着的地方就漏出一小截边线。 */
+  .usage-folder { display: flex; align-items: flex-end; padding: 6px 0 0; position: relative; z-index: 1; }
   .usage-folder button {
-    position: relative; isolation: isolate; min-height: 40px;
-    padding: 0 34px 0 18px; margin: 0 -10px -1px 0;
+    position: relative; isolation: isolate; min-height: 36px;
+    padding: 0 34px 0 18px; margin: 0 -10px 0 0;
     border: 0; background: none; color: var(--dim);
     font-size: 13px; font-weight: 650;
-    transform: translateY(3px);
-    transition: transform 150ms var(--ease-out), color 150ms ease;
+    transition: transform 150ms var(--ease-out), color 150ms ease, min-height 150ms var(--ease-out);
   }
   .usage-folder button::before, .usage-folder button::after {
     content: ""; position: absolute; top: 0; bottom: 0; z-index: -1;
@@ -3924,11 +3926,10 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     right: 0; width: 40px; border-left: 0; border-radius: 0 12px 0 0;
     transform: skewX(24deg); transform-origin: bottom left;
   }
-  .usage-folder button[aria-selected="true"] { z-index: 2; color: var(--text); transform: none; }
+  .usage-folder button[aria-selected="true"] { z-index: 2; min-height: 40px; color: var(--text); }
   .usage-folder button[aria-selected="true"]::before,
-  .usage-folder button[aria-selected="true"]::after { bottom: -2px; background: var(--card); }
-  .usage-folder button:active { transform: translateY(3px) scale(.97); }
-  .usage-folder button[aria-selected="true"]:active { transform: scale(.97); }
+  .usage-folder button[aria-selected="true"]::after { bottom: -1px; background: var(--card); }
+  .usage-folder button:active { transform: scale(.97); }
   .usage-folder-page {
     padding: 6px 14px 16px; border: 1px solid var(--line); border-radius: 0 20px 20px 20px;
     background: var(--card); box-shadow: 0 14px 36px rgba(62,44,53,.06);
@@ -4298,7 +4299,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="shade" data-close="settings"></div>
   <div class="sheet">
     <div class="head">
-      <button class="hbtn" data-close="settings"><span class="ic" data-i="x"></span></button>
+      <button class="hbtn" data-close="settings"><span class="ic" data-i="chevL"></span></button>
       <div class="ht">设置</div>
       <div class="hspace"></div>
     </div>
@@ -4355,7 +4356,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="sheet">
     <div class="grabber"></div>
     <div class="head">
-      <button class="hbtn" data-close="focus"><span class="ic" data-i="x"></span></button>
+      <button class="hbtn" data-close="focus"><span class="ic" data-i="chevL"></span></button>
       <div class="ht">专注</div><div class="hspace"></div>
     </div>
     <div class="body" id="focusBody">
@@ -4385,7 +4386,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="shade" data-close="heartbeat"></div>
   <div class="sheet">
     <div class="head">
-      <button class="hbtn" data-close="heartbeat"><span class="ic" data-i="x"></span></button>
+      <button class="hbtn" data-close="heartbeat"><span class="ic" data-i="chevL"></span></button>
       <div class="ht">心跳</div>
       <div class="hspace"></div>
     </div>
@@ -4566,13 +4567,13 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="shade" data-close="usage"></div>
   <div class="sheet">
     <div class="head">
-      <button class="hbtn" data-close="usage" aria-label="关闭用量"><span class="ic" data-i="x"></span></button>
+      <button class="hbtn" data-close="usage" aria-label="返回"><span class="ic" data-i="chevL"></span></button>
       <div class="ht">用量</div>
       <button class="hbtn" id="usageRefresh" aria-label="刷新用量" title="刷新"><span class="ic" data-i="refresh"></span></button>
     </div>
     <div class="body usage-body" id="usageBody">
       <div class="usage-folder" role="tablist" aria-label="选择额度">
-        <button type="button" role="tab" id="usageTabSub" data-usage-tab="sub" aria-selected="true" aria-controls="usagePaneSub">订阅额度</button>
+        <button type="button" role="tab" id="usageTabSub" data-usage-tab="sub" aria-selected="true" aria-controls="usagePaneSub">Subscription</button>
         <button type="button" role="tab" id="usageTabOr" data-usage-tab="or" aria-selected="false" aria-controls="usagePaneOr">OpenRouter</button>
       </div>
       <div class="usage-folder-page">
@@ -4586,7 +4587,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       </section>
       <section class="usage-pane" id="usagePaneOr" role="tabpanel" aria-labelledby="usageTabOr" hidden>
       <section class="usage-intro">
-        <div><span class="usage-eyebrow">OPENROUTER</span><strong id="usageProvider">OpenRouter 账号</strong></div>
+        <div><span class="usage-eyebrow">OPENROUTER</span></div>
         <div class="usage-currency" role="group" aria-label="显示货币">
           <button type="button" data-usage-currency="USD" aria-pressed="true">USD</button>
           <button type="button" data-usage-currency="CNY" aria-pressed="false">CNY</button>
@@ -4634,7 +4635,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="sheet">
     <div class="grabber"></div>
     <div class="head">
-      <button class="hbtn" data-close="cal"><span class="ic" data-i="x"></span></button>
+      <button class="hbtn" data-close="cal"><span class="ic" data-i="chevL"></span></button>
       <div class="ht"></div>
       <div class="hspace"></div>
     </div>
@@ -4662,7 +4663,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="sheet">
     <div class="grabber"></div>
     <div class="head">
-      <button class="hbtn" data-close="wall"><span class="ic" data-i="x"></span></button>
+      <button class="hbtn" data-close="wall"><span class="ic" data-i="chevL"></span></button>
       <div class="ht"></div>
       <div class="hspace"></div>
     </div>
@@ -4712,7 +4713,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="sheet">
     <div class="grabber"></div>
     <div class="head">
-      <button class="hbtn" id="nookBack"><span class="ic" data-i="x"></span></button>
+      <button class="hbtn" id="nookBack"><span class="ic" data-i="chevL"></span></button>
       <div class="ht"></div>
       <button class="hbtn" id="nookToc" style="display:none">目录</button>
     </div>
@@ -4738,7 +4739,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="sheet">
     <div class="grabber"></div>
     <div class="head">
-      <button class="hbtn" data-close="repo"><span class="ic" data-i="x"></span></button>
+      <button class="hbtn" data-close="repo"><span class="ic" data-i="chevL"></span></button>
       <div class="ht"></div>
     </div>
     <div class="body" id="repoBody"></div>
@@ -4750,7 +4751,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="sheet">
     <div class="grabber"></div>
     <div class="head">
-      <button class="hbtn" data-close="todo"><span class="ic" data-i="x"></span></button>
+      <button class="hbtn" data-close="todo"><span class="ic" data-i="chevL"></span></button>
       <div class="ht"></div>
       <div class="hspace"></div>
     </div>
@@ -9528,7 +9529,7 @@ function nkRoomMode(on) {
 }
 function nkSetBack(inside) {
   const icon = nkBackBtn.querySelector('.ic'); if (!icon) return;
-  icon.dataset.i = inside ? 'chevL' : 'x';
+  icon.dataset.i = 'chevL';   // 侧栏打开的页一律用返回箭头关
   nkBackBtn.title = inside ? '返回书房' : '关闭书房';
   nkBackBtn.setAttribute('aria-label', nkBackBtn.title);
   fillIcons(nkBackBtn);
@@ -12644,8 +12645,6 @@ function renderOpenRouterUsage() {
     button.setAttribute('aria-pressed', String(button.dataset.usageRange === openRouterUsageRange));
   });
 
-  document.getElementById('usageProvider').textContent =
-    data.provider?.name || data.current_key?.label || 'OpenRouter';
   const balance = data.balance || {};
   document.getElementById('usageBalanceValue').textContent =
     balance.available ? openRouterUsageAmount(balance.remaining) : '暂不可用';
@@ -12757,7 +12756,6 @@ async function loadOpenRouterUsage() {
   } catch (error) {
     status.textContent = error.message || '暂时拿不到 OpenRouter 用量';
     status.className = 'usage-status on bad';
-    if (!openRouterUsageData) document.getElementById('usageProvider').textContent = '还没有设置';
   } finally {
     refresh.disabled = false;
   }
