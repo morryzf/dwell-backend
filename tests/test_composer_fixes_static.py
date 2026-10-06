@@ -46,7 +46,7 @@ class ComposerPaddingFollowsItsHeightTest(unittest.TestCase):
         observer = HTML.index("new ResizeObserver(() => {\n  if (sheetIsOpen() || kbShift || kbGap > 20) return;")
         section = HTML[observer:observer + 400]
         self.assertIn("const wasAtBottom = atBottom();", section)
-        self.assertIn("log.style.paddingBottom = (footerEl.offsetHeight + 48) + 'px';", section)
+        self.assertIn("setLogTail(footerEl.offsetHeight + 48);", section)
         # 本来就在底部的人才跟着走，不然会把正在往回翻的人拽下来。
         self.assertIn("if (wasAtBottom) log.scrollTop = log.scrollHeight;", section)
 

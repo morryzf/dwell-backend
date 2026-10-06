@@ -1707,7 +1707,7 @@ async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
     if not provider or not provider.get("enabled") or not selection.get("model_id"):
         raise RuntimeError("主动接收消息的聊天还没有可用模型")
 
-    cache_friendly = prompt_cache_enabled(provider, selection["model_id"])
+    cache_friendly = _prefix_stable(provider, selection["model_id"])
     messages = _heartbeat_context(
         chat_id, now, interval, cache_friendly=cache_friendly
     )
@@ -2862,6 +2862,27 @@ def _chat_cache_supported(provider: dict | None, model_id: str) -> bool:
         # OpenAI 兼容的中转：Claude 模型才给缓存，标记交给中转往下转。
         return "claude" in model
     return False
+
+
+# OpenAI 的模型（gpt-…、o1/o3/o4…）不用加标记，开头一模一样的部分会自动缓存。
+_AUTO_PREFIX_CACHE_MODEL = re.compile(r"^(?:\[[^\]]*\]\s*)?(?:gpt-|chatgpt-|o\d)", re.I)
+
+
+def _auto_prefix_cache(provider: dict | None, model_id: str) -> bool:
+    """这个模型会不会自己按「开头相同」缓存。会的话，消息也按缓存的排法排：
+    稳定的人设、摘要、聊天记录在前，设备时间这种每轮都变的放到最后——
+    不然最前面那行时间一变，整段都对不上，一个字也缓存不上。不加任何缓存标记。"""
+    if not provider or str(provider.get("provider_type") or "") == "claude_agent_sdk":
+        return False
+    leaf = str(model_id or "").strip().split("/")[-1]
+    return bool(_AUTO_PREFIX_CACHE_MODEL.match(leaf))
+
+
+def _prefix_stable(provider: dict | None, model_id: str) -> bool:
+    """这一轮要不要按缓存的排法排：Claude 开了缓存，或者模型本来就自动缓存。"""
+    return bool(provider and (
+        prompt_cache_enabled(provider, model_id) or _auto_prefix_cache(provider, model_id)
+    ))
 
 
 def _chat_prompt_cache_ttl(selection: dict, provider: dict | None) -> str:
@@ -5571,9 +5592,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         provider=str((provider or {}).get("name") or ""),
         model_id=str(selection.get("model_id") or ""),
     )
-    cache_friendly = bool(
-        provider and prompt_cache_enabled(provider, selection.get("model_id") or "")
-    )
+    cache_friendly = _prefix_stable(provider, selection.get("model_id") or "")
     history = _chat_history_rows(chat_id, cache_friendly)
     split_replies, instructions, format_preference, memory_message = (
         _chat_stable_message_parts(chat_id)

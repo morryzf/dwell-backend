@@ -235,9 +235,13 @@ html[data-theme="dark"] .glass,
   #log {
     flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
     /* Header is deliberately translucent, but the first message must never begin beneath it. */
-    padding: calc(116px + env(safe-area-inset-top)) 18px 160px;
+    padding: calc(116px + env(safe-area-inset-top)) 18px 0;
     display: flex; flex-direction: column; gap: 6px;
   }
+  /* 底下给输入框（和键盘）让出来的那段空白，用一个真的末尾元素撑，不用 padding-bottom：
+     iPhone 的 Safari 不把 flex 滚动容器的底部 padding 算进可滚动范围，消息一少就滚不动，
+     最后一条被输入框压着，点输入框也顶不上去。高度由 setLogTail() 按输入卡和键盘算。 */
+  #log::after { content: ''; display: block; flex: none; height: var(--log-tail, 160px); }
   .row.me + .row:not(.me) { margin-top: 16px; }
   .row:not(.me) + .row.me { margin-top: 16px; }
   /* 顶上那颗「看更早的」——老账都在，按一下捞 400 行 */
@@ -5147,6 +5151,9 @@ new ResizeObserver(() => {
 }).observe(log);
 /* 容器变矮后滚动位置可能超出底线：电脑上浏览器当场纠正，iPhone 上却悬着不管，
    要等手一碰才猛地跳回来。自己改了高度的地方都顺手按一下。 */
+function setLogTail(px) {
+  log.style.setProperty('--log-tail', Math.max(0, Math.round(px)) + 'px');
+}
 function clampLogScroll() {
   const max = log.scrollHeight - log.clientHeight;
   if (log.scrollTop > max) log.scrollTop = max;
@@ -7471,7 +7478,7 @@ function resetChatKeyboardAdjustment() {
   kbShift = 0; kbGap = 0;
   footerEl.style.paddingBottom = '';
   footerEl.style.transform = '';
-  log.style.paddingBottom = (footerEl.offsetHeight + 48) + 'px';
+  setLogTail(footerEl.offsetHeight + 48);
   clampLogScroll();
 }
 // 输入卡的高度会变：模型名换行、附件条出现、字体加载完都会撑高它。留白只在
@@ -7480,7 +7487,7 @@ function resetChatKeyboardAdjustment() {
 new ResizeObserver(() => {
   if (sheetIsOpen() || kbShift || kbGap > 20) return;
   const wasAtBottom = atBottom();
-  log.style.paddingBottom = (footerEl.offsetHeight + 48) + 'px';
+  setLogTail(footerEl.offsetHeight + 48);
   if (wasAtBottom) log.scrollTop = log.scrollHeight;
   else clampLogScroll();
 }).observe(footerEl);
@@ -7512,7 +7519,7 @@ function fitKeyboard() {
     kbShift = 0;
     footerEl.style.transform = '';
   }
-  log.style.paddingBottom = (footerEl.offsetHeight + (on ? -kbShift + 16 : 48)) + 'px';
+  setLogTail(footerEl.offsetHeight + (on ? -kbShift + 16 : 48));
   clampLogScroll();
   if (on && window.scrollY !== 0) window.scrollTo(0, 0);
 }
@@ -7655,7 +7662,7 @@ box.addEventListener('touchend', (e) => {
   kbShift = -lift;
   footerEl.style.transform = 'translateY(' + kbShift + 'px)';
   // 消息和输入卡同一刻上去：留白先按估的键盘高度给足，原本在底部就贴着底
-  log.style.paddingBottom = (footerEl.offsetHeight + lift + 16) + 'px';
+  setLogTail(footerEl.offsetHeight + lift + 16);
   if (stick) log.scrollTop = log.scrollHeight;
   // 键盘没出来（外接键盘之类）就放回原处
   clearTimeout(kbPreShiftTimer);
@@ -7669,7 +7676,7 @@ box.addEventListener('focus', trackKeyboard);
 box.addEventListener('blur', () => setTimeout(trackKeyboard, 50));
 new ResizeObserver(() => {
   const wasBottom = atBottom();
-  log.style.paddingBottom = (footerEl.offsetHeight + (kbGap > 20 ? kbGap + 16 : 48)) + 'px';
+  setLogTail(footerEl.offsetHeight + (kbGap > 20 ? kbGap + 16 : 48));
   if (wasBottom) scroll(true);
 }).observe(footerEl);
 

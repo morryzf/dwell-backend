@@ -38,7 +38,8 @@ class SharedPromptCacheSourceTest(unittest.TestCase):
             self.source.index("async def _heartbeat_once")
         ]
         self.assertIn('session_id=f"dwell-chat:{chat_id}" if cache_friendly else None', heartbeat)
-        self.assertIn("prompt_cache_enabled(provider, selection[\"model_id\"])", heartbeat)
+        # 心跳和聊天同一套判断：Claude 开了缓存，或模型本来就自动缓存（GPT）
+        self.assertIn("_prefix_stable(provider, selection[\"model_id\"])", heartbeat)
 
     def test_proactive_watch_keeps_dynamic_context_after_the_anchor(self):
         reply = self.source[
