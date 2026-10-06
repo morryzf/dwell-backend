@@ -2858,6 +2858,9 @@ def _chat_cache_supported(provider: dict | None, model_id: str) -> bool:
     if provider_type == "openrouter":
         host = (urlparse(str(provider.get("base_url") or "")).hostname or "").lower()
         return host == "openrouter.ai" and model.startswith("anthropic/")
+    if provider_type == "generic":
+        # OpenAI 兼容的中转：Claude 模型才给缓存，标记交给中转往下转。
+        return "claude" in model
     return False
 
 

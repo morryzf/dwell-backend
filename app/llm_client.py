@@ -181,7 +181,9 @@ def prompt_cache_ttl(provider: dict | None, model_id: str,
     if not provider or not session_id:
         return ""
     provider_type = str(provider.get("provider_type") or "")
-    if provider_type not in {"openrouter", "claude_compatible"}:
+    # generic = OpenAI 兼容的中转：只在模型名里带 claude 时才加缓存标记，
+    # 标记的写法和 OpenRouter 一样，放在消息内容块上，由中转转给 Claude。
+    if provider_type not in {"openrouter", "claude_compatible", "generic"}:
         return ""
     if str(provider.get("prompt_cache_ttl") or "off") not in {"5m", "1h"}:
         return ""
@@ -569,6 +571,14 @@ async def _stream_openai(client, provider: dict, api_key: str, model_id: str,
         async with client.stream("POST", url, headers=headers, json=payload) as resp:
             if resp.status_code != 200:
                 body = (await resp.aread()).decode("utf-8", errors="ignore")
+                # 有的 OpenAI 兼容中转不认 cache_control，整轮 400。别让这一句发不出去：
+                # 去掉缓存标记再发一次，这一轮只是没缓存。
+                if (resp.status_code == 400 and attempt == 0
+                        and str(provider.get("provider_type") or "") == "generic"
+                        and prompt_cache_ttl(provider, model_id, session_id)):
+                    provider = {**provider, "prompt_cache_ttl": "off"}
+                    fallback_reason = "relay_rejected_cache_control"
+                    continue
                 affordable = _affordable_tokens(resp.status_code, body)
                 # 没写上限时 OpenRouter 按模型最大输出（Opus 是 65536）预扣余额，
                 # 余额差一点就整轮失败。它会说「只够 N 个」——那就按 N 再要一次。
