@@ -79,3 +79,22 @@ class RelayPromptCacheTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GptPillNameTest(unittest.TestCase):
+    """输入框底下的模型胶囊：GPT 照 ChatGPT 里那样念，gpt-5.6-sol → 5.6 Sol。"""
+
+    def test_gpt_names_are_shortened(self):
+        import re
+        import shutil
+        import subprocess
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("没有 node")
+        fn = re.search(r"function gptDisplayName\(id\) \{.*?\n\}", UI, re.S).group(0)
+        script = fn + "\nconsole.log(JSON.stringify(['gpt-5.6-sol','[J3按量]gpt-5.6-sol','gpt-4o','gpt-5-mini-2025-08-07','claude-opus-4-6'].map(gptDisplayName)));"
+        out = subprocess.run([node, "-e", script], capture_output=True, text=True, check=True).stdout
+        self.assertEqual(json.loads(out), ["5.6 Sol", "5.6 Sol", "4o", "5 Mini", ""])
+
+    def test_gpt_models_get_no_cache_picker(self):
+        self.assertFalse(prompt_cache_enabled(RELAY, "gpt-5.6-sol"))

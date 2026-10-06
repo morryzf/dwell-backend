@@ -13191,7 +13191,19 @@ function displayName(id) {
     const fam = m[1][0].toUpperCase() + m[1].slice(1);
     return fam + ' ' + m[2] + (m[3] && m[3].length <= 2 ? '.' + m[3] : '');
   }
+  const gpt = gptDisplayName(s);
+  if (gpt) return gpt;
   return s || '…';
+}
+/* GPT 的名字照 ChatGPT 里那样念：gpt-5.6-sol → 5.6 Sol，gpt-4o → 4o。
+   中转加的 [J3按量] 这类前缀、openai/ 供应商前缀、末尾的日期都不要。 */
+function gptDisplayName(id) {
+  const leaf = (String(id || '').trim().split('/').pop() || '').replace(/^\[[^\]]*\]\s*/, '');
+  const m = leaf.match(/^gpt-(\d+(?:\.\d+)?[a-z]?)(?:-(.+))?$/i);
+  if (!m) return '';
+  const tail = String(m[2] || '').replace(/-?(?:\d{4}-\d{2}-\d{2}|\d{8})$/, '');
+  const words = tail.split('-').filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1));
+  return [m[1].toLowerCase()].concat(words).join(' ');
 }
 function setModelPill(id) {
   curModel = id || '';
