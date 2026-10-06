@@ -25,7 +25,7 @@ SESSION_SETTING_PREFIX = "agent_sdk_session:"
 
 # Agent SDK 接收的是「一句 prompt」，不是 OpenAI 那种 role 数组，所以多轮历史
 # 要自己铺平。角色名用中文，和 Dwell 里模型看到的其余上下文保持同一种语言。
-SPEAKER_USER = "用户"
+SPEAKER_USER = "Morry"
 SPEAKER_ASSISTANT = "助手"
 SPEAKER_TOOL = "工具结果"
 

@@ -115,7 +115,7 @@ class DayBriefTest(unittest.TestCase):
         source = main.__file__
         with open(source, encoding="utf-8") as handle:
             text = handle.read()
-        self.assertIn("day_brief_message = _day_brief_message(db.cn_now())", text)
+        self.assertIn("day_brief_message = _day_brief_message(db.cn_now(), db.chat_assistant(chat_id))", text)
         self.assertIn("+ day_brief_message\n    )", text)
         self.assertIn("device_message + focus_message + day_brief_message", text)
 

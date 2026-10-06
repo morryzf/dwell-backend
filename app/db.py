@@ -106,6 +106,7 @@ CREATE INDEX IF NOT EXISTS ix_night_date ON night(date DESC, hm ASC);
 
 -- 待办：两栏。side='mine' 是我的，'hers' 是你的。
 -- by 是谁记的，fixed 是固定项——前端会发这两个字段。
+-- assistant 只对 'mine' 有意义：每个助手各有自己那一栏；'hers' 两边共用。
 CREATE TABLE IF NOT EXISTS todos (
     id    TEXT PRIMARY KEY,
     side  TEXT NOT NULL CHECK (side IN ('mine','hers')),
@@ -524,6 +525,12 @@ def init_db():
             cx.execute("ALTER TABLE chats ADD COLUMN show_thinking INTEGER NOT NULL DEFAULT 1")
         if "prompt_cache_ttl" not in cols:
             cx.execute("ALTER TABLE chats ADD COLUMN prompt_cache_ttl TEXT NOT NULL DEFAULT ''")
+        # 每间聊天归一个助手。旧聊天全是 Cloudy 的。
+        if "assistant" not in cols:
+            cx.execute("ALTER TABLE chats ADD COLUMN assistant TEXT NOT NULL DEFAULT 'cloudy'")
+        todo_cols = {r["name"] for r in cx.execute("PRAGMA table_info(todos)").fetchall()}
+        if "assistant" not in todo_cols:
+            cx.execute("ALTER TABLE todos ADD COLUMN assistant TEXT NOT NULL DEFAULT 'cloudy'")
         card_state_cols = {
             r["name"] for r in cx.execute("PRAGMA table_info(memory_card_state)").fetchall()
         }
@@ -914,21 +921,28 @@ def first_message_rowid_since(chat_id: str, since_ts: int) -> int:
     return int((row and row["first"]) or 0)
 
 
-def todos_all(now: datetime | None = None) -> dict:
-    """两栏一起给。排序交给前端——它知道"现在几点"，服务器不该猜。"""
+def todos_all(now: datetime | None = None, assistant: str = "cloudy") -> dict:
+    """两栏一起给。排序交给前端——它知道"现在几点"，服务器不该猜。
+
+    「你的」那栏两个助手共用；「我的」只给这个助手自己那一栏。
+    """
     todos_reset_fixed_for_new_day(now)
     with conn() as cx:
-        rows = cx.execute("SELECT * FROM todos").fetchall()
+        rows = cx.execute(
+            "SELECT * FROM todos WHERE side='hers' OR assistant=?",
+            (clean_assistant(assistant),),
+        ).fetchall()
     out = {"mine": [], "hers": []}
     for r in rows:
         d = dict(r)
+        d.pop("assistant", None)
         d["done"] = bool(d["done"])
         out[d.pop("side")].append(d)
     return out
 
 
 def todo_add(side: str, text: str, at: str = "",
-             by: str = "", fixed: bool = False) -> dict:
+             by: str = "", fixed: bool = False, assistant: str = "cloudy") -> dict:
     row = {
         "id": new_id(),
         "side": side,
@@ -941,26 +955,35 @@ def todo_add(side: str, text: str, at: str = "",
     }
     with conn() as cx:
         cx.execute(
-            """INSERT INTO todos (id,side,text,done,at,by,fixed,made)
-               VALUES (:id,:side,:text,:done,:at,:by,:fixed,:made)""",
-            row,
+            """INSERT INTO todos (id,side,text,done,at,by,fixed,made,assistant)
+               VALUES (:id,:side,:text,:done,:at,:by,:fixed,:made,:assistant)""",
+            {**row, "assistant": clean_assistant(assistant)},
         )
     return row
 
 
-def todo_toggle(side: str, item_id: str) -> bool:
+def _todo_scope(side: str, assistant: str) -> tuple[str, tuple]:
+    """「我的」那栏只能动这个助手自己的条目。"""
+    if side == "mine":
+        return " AND assistant=?", (clean_assistant(assistant),)
+    return "", ()
+
+
+def todo_toggle(side: str, item_id: str, assistant: str = "cloudy") -> bool:
+    extra, args = _todo_scope(side, assistant)
     with conn() as cx:
         cur = cx.execute(
-            "UPDATE todos SET done = 1 - done WHERE id=? AND side=?",
-            (item_id, side),
+            "UPDATE todos SET done = 1 - done WHERE id=? AND side=?" + extra,
+            (item_id, side, *args),
         )
     return cur.rowcount > 0
 
 
-def todo_del(side: str, item_id: str) -> bool:
+def todo_del(side: str, item_id: str, assistant: str = "cloudy") -> bool:
+    extra, args = _todo_scope(side, assistant)
     with conn() as cx:
         cur = cx.execute(
-            "DELETE FROM todos WHERE id=? AND side=?", (item_id, side)
+            "DELETE FROM todos WHERE id=? AND side=?" + extra, (item_id, side, *args)
         )
     return cur.rowcount > 0
 
@@ -1117,9 +1140,50 @@ def whisper_unseen(n: int = 5, mark_seen: bool = False) -> list:
     return [dict(row) for row in rows]
 
 
+# ---------------------------------------------------------------- 助手
+
+# 家里住着两个助手。每间聊天归其中一个；Cloudy 是原来那位，旧数据都算他的。
+ASSISTANTS = ("cloudy", "chatgpt")
+ASSISTANT_NAMES = {"cloudy": "Cloudy", "chatgpt": "ChatGPT"}
+DEFAULT_ASSISTANT = "cloudy"
+CURRENT_ASSISTANT_KEY = "current_assistant"
+
+
+def clean_assistant(value: object) -> str:
+    value = str(value or "").strip().lower()
+    return value if value in ASSISTANTS else DEFAULT_ASSISTANT
+
+
+def assistant_name(assistant: object) -> str:
+    return ASSISTANT_NAMES[clean_assistant(assistant)]
+
+
+def assistant_key(base: str, assistant: object) -> str:
+    """按助手分开的设置键。Cloudy 沿用原来的键名，旧设置原样有效。"""
+    assistant = clean_assistant(assistant)
+    return base if assistant == DEFAULT_ASSISTANT else f"{base}:{assistant}"
+
+
+def current_assistant() -> str:
+    return clean_assistant(setting_get(CURRENT_ASSISTANT_KEY, DEFAULT_ASSISTANT))
+
+
+def current_assistant_set(assistant: object) -> str:
+    assistant = clean_assistant(assistant)
+    setting_set(CURRENT_ASSISTANT_KEY, assistant)
+    return assistant
+
+
+def chat_assistant(chat_id: str) -> str:
+    with conn() as cx:
+        row = cx.execute("SELECT assistant FROM chats WHERE id=?", (chat_id,)).fetchone()
+    return clean_assistant(row["assistant"] if row else "")
+
+
 # ---------------------------------------------------------------- 聊天窗口
 
-def chat_add(name: str = "") -> dict:
+def chat_add(name: str = "", assistant: str | None = None) -> dict:
+    assistant = clean_assistant(assistant or current_assistant())
     row = {
         "id": new_id(),
         "name": name.strip()[:60] or "新对话",
@@ -1127,25 +1191,25 @@ def chat_add(name: str = "") -> dict:
     }
     with conn() as cx:
         cx.execute(
-            "INSERT INTO chats (id,name,made) VALUES (:id,:name,:made)", row
+            "INSERT INTO chats (id,name,made,assistant) VALUES (:id,:name,:made,:assistant)",
+            {**row, "assistant": assistant},
         )
-        # 如果是第一个 chat，自动设为主动消息接收窗口
-        cnt = cx.execute("SELECT COUNT(*) FROM chats").fetchone()[0]
+        # 如果是这个助手的第一个 chat，自动设为它的主动消息接收窗口
+        cnt = cx.execute(
+            "SELECT COUNT(*) FROM chats WHERE assistant=?", (assistant,)
+        ).fetchone()[0]
         if cnt == 1:
-            cx.execute(
-                "INSERT INTO settings (key,value) VALUES ('wake_target_chat_id',?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (row["id"],),
-            )
-            cx.execute(
-                "INSERT INTO settings (key,value) VALUES ('current_chat_id',?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (row["id"],),
-            )
+            for base in ("wake_target_chat_id", "current_chat_id"):
+                cx.execute(
+                    "INSERT INTO settings (key,value) VALUES (?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (assistant_key(base, assistant), row["id"]),
+                )
     return row
 
 
-def chat_list(scope: str = "", current_id: str = "") -> list:
+def chat_list(scope: str = "", current_id: str = "", assistant: str | None = None) -> list:
+    assistant = clean_assistant(assistant or current_assistant())
     with conn() as cx:
         rows = cx.execute(
             """SELECT c.id, c.name, c.made, COALESCE(c.archived,0) AS archived,
@@ -1155,8 +1219,10 @@ def chat_list(scope: str = "", current_id: str = "") -> list:
                        ORDER BY mm.made DESC, mm.rowid DESC LIMIT 1) AS preview
                FROM chats c
                LEFT JOIN messages m ON m.chat_id=c.id
+               WHERE c.assistant=?
                GROUP BY c.id
-               ORDER BY last DESC, c.made DESC"""
+               ORDER BY last DESC, c.made DESC""",
+            (assistant,),
         ).fetchall()
     items = []
     for r in rows:
@@ -1202,9 +1268,13 @@ def chat_archive(chat_id: str, archived: bool = True) -> bool:
 
 
 def chat_switch(chat_id: str) -> bool:
-    if not chat_get(chat_id):
+    """切到这间聊天；它属于哪个助手，就顺便切到那个助手。"""
+    chat = chat_get(chat_id)
+    if not chat:
         return False
-    setting_set("current_chat_id", chat_id)
+    assistant = clean_assistant(chat.get("assistant"))
+    setting_set(assistant_key("current_chat_id", assistant), chat_id)
+    current_assistant_set(assistant)
     return True
 
 
@@ -1327,11 +1397,12 @@ def chat_branch_from_message(source_chat_id: str, message_id: str) -> dict | Non
                   "made": int(time.time()), "provider_id": source["provider_id"],
                   "model_id": source["model_id"], "reasoning_effort": source["reasoning_effort"],
                   "show_thinking": source["show_thinking"],
-                  "prompt_cache_ttl": source["prompt_cache_ttl"]}
+                  "prompt_cache_ttl": source["prompt_cache_ttl"],
+                  "assistant": clean_assistant(source["assistant"])}
         cx.execute("""INSERT INTO chats
-                      (id,name,made,archived,provider_id,model_id,reasoning_effort,show_thinking,prompt_cache_ttl)
+                      (id,name,made,archived,provider_id,model_id,reasoning_effort,show_thinking,prompt_cache_ttl,assistant)
                       VALUES
-                      (:id,:name,:made,0,:provider_id,:model_id,:reasoning_effort,:show_thinking,:prompt_cache_ttl)""", branch)
+                      (:id,:name,:made,0,:provider_id,:model_id,:reasoning_effort,:show_thinking,:prompt_cache_ttl,:assistant)""", branch)
         rows = cx.execute("SELECT rowid,* FROM messages WHERE chat_id=? AND rowid<=? ORDER BY rowid ASC",
                           (source_chat_id, pivot["rowid"])).fetchall()
         id_map: dict[str, str] = {}
@@ -1423,16 +1494,19 @@ def chat_split_replies_set(chat_id: str, enabled: bool) -> bool:
 def chat_del(chat_id: str) -> bool:
     """删 chat 会级联删掉它下面所有 messages。
     如果删的是当前 wake_target，自动切到最近创建的那个。"""
+    assistant = chat_assistant(chat_id)
     with conn() as cx:
         cur = cx.execute("DELETE FROM chats WHERE id=?", (chat_id,))
         if cur.rowcount == 0:
             return False
         fallback = cx.execute(
-            "SELECT id FROM chats ORDER BY made DESC LIMIT 1"
+            "SELECT id FROM chats WHERE assistant=? ORDER BY made DESC LIMIT 1",
+            (assistant,),
         ).fetchone()
         fallback_id = fallback["id"] if fallback else ""
-        # 删除当前聊天或主动消息目标时，都要指向最新剩余聊天。
-        for key in ("wake_target_chat_id", "current_chat_id"):
+        # 删除当前聊天或主动消息目标时，都要指向同一个助手最新剩余的聊天。
+        for base in ("wake_target_chat_id", "current_chat_id"):
+            key = assistant_key(base, assistant)
             saved = cx.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
             if saved and saved["value"] == chat_id:
                 cx.execute(
@@ -1670,27 +1744,31 @@ def message_cache_history_count(chat_id: str, start_rowid: int) -> int:
     return int(row["total"] if row else 0)
 
 
-def chat_days(month: str) -> dict[str, int]:
-    """某个月（YYYY-MM，北京时间）里每天聊了多少句。没聊的日子不出现。"""
+def chat_days(month: str, assistant: str | None = None) -> dict[str, int]:
+    """某个月（YYYY-MM，北京时间）里每天和这个助手聊了多少句。没聊的日子不出现。"""
+    assistant = clean_assistant(assistant or current_assistant())
     with conn() as cx:
         rows = cx.execute(
-            """SELECT date(made + 28800, 'unixepoch') AS day, COUNT(*) AS n FROM messages
-               WHERE role IN ('user','assistant') AND strftime('%Y-%m', made + 28800, 'unixepoch')=?
-               GROUP BY day""", (month,)
+            """SELECT date(m.made + 28800, 'unixepoch') AS day, COUNT(*) AS n
+               FROM messages m JOIN chats c ON c.id=m.chat_id
+               WHERE m.role IN ('user','assistant') AND c.assistant=?
+                 AND strftime('%Y-%m', m.made + 28800, 'unixepoch')=?
+               GROUP BY day""", (assistant, month)
         ).fetchall()
     return {row["day"]: row["n"] for row in rows}
 
 
-def chat_day(day: str) -> list[dict]:
+def chat_day(day: str, assistant: str | None = None) -> list[dict]:
     """某一天（YYYY-MM-DD，北京时间）聊过的对话，按那天第一句的时间排。
 
     每间对话给出那天的第一句（点进去就跳到这里）、几点到几点、一共几句。
     """
+    assistant = clean_assistant(assistant or current_assistant())
     with conn() as cx:
         rows = cx.execute(
             """SELECT m.id,m.chat_id,m.role,m.content,m.made,c.name FROM messages m JOIN chats c ON c.id=m.chat_id
-               WHERE m.role IN ('user','assistant') AND date(m.made + 28800, 'unixepoch')=?
-               ORDER BY m.made ASC, m.rowid ASC""", (day,)
+               WHERE m.role IN ('user','assistant') AND c.assistant=? AND date(m.made + 28800, 'unixepoch')=?
+               ORDER BY m.made ASC, m.rowid ASC""", (assistant, day)
         ).fetchall()
     chats: dict[str, dict] = {}
     for row in rows:
@@ -1711,8 +1789,13 @@ def chat_day(day: str) -> list[dict]:
     return list(chats.values())
 
 
-def find_everywhere(query: str, limit: int = 80) -> list[dict]:
-    """按最近更新时间翻聊天与 Dwell 里可见的文字。数据库很小，LIKE 足够稳。"""
+def find_everywhere(query: str, limit: int = 80, assistant: str | None = None) -> list[dict]:
+    """按最近更新时间翻聊天与 Dwell 里可见的文字。数据库很小，LIKE 足够稳。
+
+    只翻当前助手的聊天。ChatGPT 那边没有 Journal，日记、收藏、悄悄话、夜记不出现；
+    日历两边共用，都能翻到。
+    """
+    assistant = clean_assistant(assistant or current_assistant())
     query = query.strip()[:60]
     if not query:
         return []
@@ -1736,7 +1819,7 @@ def find_everywhere(query: str, limit: int = 80) -> list[dict]:
     with conn() as cx:
         messages = cx.execute(
             """SELECT m.id AS message_id,m.chat_id,m.content,m.made,c.name FROM messages m JOIN chats c ON c.id=m.chat_id
-               WHERE m.content LIKE ? ORDER BY m.made DESC LIMIT ?""", (like, limit)
+               WHERE m.content LIKE ? AND c.assistant=? ORDER BY m.made DESC LIMIT ?""", (like, assistant, limit)
         ).fetchall()
         diary = cx.execute(
             """SELECT date,title,body,keywords,made FROM diary
@@ -1748,6 +1831,8 @@ def find_everywhere(query: str, limit: int = 80) -> list[dict]:
         whispers = cx.execute("SELECT who,text,at FROM whispers WHERE text LIKE ? ORDER BY at DESC LIMIT ?", (like, limit)).fetchall()
         nights = cx.execute("SELECT date,hm,text,made FROM night WHERE text LIKE ? ORDER BY date DESC,hm DESC LIMIT ?", (like, limit)).fetchall()
         events = cx.execute("SELECT date,time,text,made FROM cal_events WHERE text LIKE ? ORDER BY date DESC,time DESC LIMIT ?", (like, limit)).fetchall()
+    if assistant != DEFAULT_ASSISTANT:
+        diary = personal = quotes = whispers = nights = []
 
     for row in messages:
         hits.append({"kind": "聊天 · " + (row["name"] or "新对话"), "date": stamp(row["made"]), "snippet": snippet(row["content"]), "at": row["made"], "chat_id": row["chat_id"], "chat_name": row["name"] or "新对话", "message_id": row["message_id"]})
@@ -2160,7 +2245,7 @@ def memory_card_list(chat_id: str, include_archived: bool = False) -> list[dict]
     会让人以为记忆丢了。每张卡带上 chat_name，界面才说得清它是哪个窗口记下的；
     chat_id 本来就在，前端据此把编辑和归档发给卡片真正的归属聊天。
     """
-    ids = memory_shared_chat_ids() if memory_shared_enabled(chat_id) else [chat_id]
+    ids = memory_shared_chat_ids(chat_assistant(chat_id)) if memory_shared_enabled(chat_id) else [chat_id]
     if chat_id not in ids:
         ids = [*ids, chat_id]
     marks = ",".join("?" for _ in ids)
@@ -2503,7 +2588,7 @@ def memory_card_embeddings(chat_id: str) -> list[dict]:
     时（手工加的卡）退回 made。
     """
     # 互通开着的聊天共用一个卡池；关掉的只看自己的，也不把自己的借出去。
-    ids = memory_shared_chat_ids() if memory_shared_enabled(chat_id) else [chat_id]
+    ids = memory_shared_chat_ids(chat_assistant(chat_id)) if memory_shared_enabled(chat_id) else [chat_id]
     if chat_id not in ids:
         ids = [*ids, chat_id]
     marks = ",".join("?" for _ in ids)
@@ -2688,7 +2773,7 @@ def rewrite_rule_delete(rule_id: str) -> bool:
 
 
 def memory_shared_enabled(chat_id: str) -> bool:
-    """这个聊天跟别的聊天共不共享记忆。默认共享——Cloudy 只有一个。"""
+    """这个聊天跟同一个助手的别的聊天共不共享记忆。默认共享——每个助手只有一个。"""
     return setting_get(f"memory_shared:{chat_id}", "1") != "0"
 
 
@@ -2698,24 +2783,28 @@ def memory_shared_set(chat_id: str, enabled: bool) -> None:
     memory_pool_touch()
 
 
-def memory_shared_chat_ids() -> list[str]:
-    """所有开着互通的聊天。没设过的算开着。"""
+def memory_shared_chat_ids(assistant: str) -> list[str]:
+    """这个助手名下所有开着互通的聊天。没设过的算开着。
+
+    互通只在同一个助手的窗口之间：两个助手的卡池、摘要互相看不到。
+    """
     with conn() as cx:
         rows = cx.execute(
             "SELECT c.id FROM chats c "
             "LEFT JOIN settings s ON s.key = 'memory_shared:' || c.id "
-            "WHERE COALESCE(s.value, '1') <> '0'"
+            "WHERE COALESCE(s.value, '1') <> '0' AND c.assistant=?",
+            (clean_assistant(assistant),),
         ).fetchall()
     return [row["id"] for row in rows]
 
 
-def shared_memory_overview() -> dict:
+def shared_memory_overview(assistant: str) -> dict:
     """互通的聊天共用的摘要：取这些聊天里最新的那一份。
 
     每个互通聊天都从同一个公共卡池长出自己那版摘要，内容大同小异。取最新的，
     新窗口一开就有，不用等它自己攒够消息再生成一遍。
     """
-    ids = memory_shared_chat_ids()
+    ids = memory_shared_chat_ids(assistant)
     if not ids:
         return {}
     marks = ",".join("?" for _ in ids)

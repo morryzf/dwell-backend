@@ -117,7 +117,7 @@ class VoiceTailTest(unittest.TestCase):
     def test_cache_friendly_tail_goes_after_her_words_and_context(self):
         messages = main._cache_friendly_chat_messages(
             [{"role": "system", "content": "你是 Cloudy"}],
-            [{"role": "system", "content": "【用户设备时间】21:00"}],
+            [{"role": "system", "content": "【Morry设备时间】21:00"}],
             [{"role": "user", "content": "早"}, {"role": "assistant", "content": "早呀"},
              {"role": "user", "content": "今天好累"}],
         )
@@ -135,7 +135,7 @@ class VoiceTailTest(unittest.TestCase):
             {"role": "user", "content": "早"},
             {"role": "assistant", "content": "早呀"},
             {"role": "user", "content": "今天好累"},
-            {"role": "system", "content": "【用户设备时间】21:00"},
+            {"role": "system", "content": "【Morry设备时间】21:00"},
         ]
         out = main._voice_reply_tail(messages, agent_sdk=True)
         payload = agent_sdk_client.build_bridge_payload("sonnet", out, require_english=True)

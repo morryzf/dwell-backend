@@ -24,8 +24,9 @@ class ChatDrawerStaticTest(unittest.TestCase):
         self.assertLess(assistants, navigation)
         self.assertLess(navigation, recents)
         self.assertLess(recents, history)
-        self.assertIn('id="recGu" aria-pressed="true"', self.html)
-        self.assertIn('id="recGong" aria-pressed="false"', self.html)
+        self.assertIn('id="recGu" data-assistant="cloudy" aria-pressed="true"', self.html)
+        self.assertIn('id="recChatgpt" data-assistant="chatgpt" aria-pressed="false"', self.html)
+        self.assertNotIn('id="gongSheet"', self.html)
         self.assertNotIn('<div class="sect">Assistants</div>', self.html)
         self.assertNotIn('class="assistant-avatar"', self.html)
 

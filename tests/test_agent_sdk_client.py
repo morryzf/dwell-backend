@@ -39,7 +39,7 @@ class SplitHistoryTest(unittest.TestCase):
         ])
 
         self.assertEqual(system, "你是 Cloudy\n\n说中文")
-        self.assertEqual(turns, [("用户", "在吗")])
+        self.assertEqual(turns, [("Morry", "在吗")])
         self.assertEqual(context, [])
 
     def test_system_after_the_history_is_this_turn_s_context(self):
@@ -48,12 +48,12 @@ class SplitHistoryTest(unittest.TestCase):
         system, turns, context = split_history([
             {"role": "system", "content": "你是 Cloudy"},
             {"role": "user", "content": "在吗"},
-            {"role": "system", "content": "【用户设备时间】17:36"},
+            {"role": "system", "content": "【Morry设备时间】17:36"},
         ])
 
         self.assertEqual(system, "你是 Cloudy")
-        self.assertEqual(turns, [("用户", "在吗")])
-        self.assertEqual(context, ["【用户设备时间】17:36"])
+        self.assertEqual(turns, [("Morry", "在吗")])
+        self.assertEqual(context, ["【Morry设备时间】17:36"])
 
     def test_keeps_tool_results_as_context_and_drops_empty_turns(self):
         _, turns, _ = split_history([
@@ -64,7 +64,7 @@ class SplitHistoryTest(unittest.TestCase):
         ])
 
         self.assertEqual(turns, [
-            ("用户", "查一下"),
+            ("Morry", "查一下"),
             ("工具结果", "结果是 3"),
             ("助手", "是 3"),
         ])
@@ -83,21 +83,21 @@ class SplitHistoryTest(unittest.TestCase):
 
 class BuildPromptTest(unittest.TestCase):
     def test_single_user_turn_is_sent_verbatim(self):
-        self.assertEqual(build_prompt([("用户", "在吗")]), "在吗")
+        self.assertEqual(build_prompt([("Morry", "在吗")]), "在吗")
 
     def test_history_is_wrapped_and_the_latest_turn_stays_outside(self):
         prompt = build_prompt([
-            ("用户", "在吗"),
+            ("Morry", "在吗"),
             ("助手", "在"),
-            ("用户", "那再说一句"),
+            ("Morry", "那再说一句"),
         ])
 
         self.assertEqual(prompt, (
-            "<对话记录>\n用户：在吗\n\n助手：在\n</对话记录>\n\n那再说一句"
+            "<对话记录>\nMorry：在吗\n\n助手：在\n</对话记录>\n\n那再说一句"
         ))
 
     def test_asks_to_continue_when_the_last_turn_is_not_the_user(self):
-        prompt = build_prompt([("用户", "在吗"), ("助手", "在")])
+        prompt = build_prompt([("Morry", "在吗"), ("助手", "在")])
 
         self.assertTrue(prompt.endswith("请接着上面的对话继续回应。"))
         self.assertIn("助手：在", prompt)
@@ -235,7 +235,7 @@ class BridgeEventsTest(unittest.TestCase):
 
 class PlanTurnTest(unittest.TestCase):
     def setUp(self):
-        self.turns = [("用户", "在吗"), ("助手", "在")]
+        self.turns = [("Morry", "在吗"), ("助手", "在")]
         self.system = "你是 Cloudy"
         anchor, size = _anchor(self.turns)
         self.state = {
@@ -250,13 +250,13 @@ class PlanTurnTest(unittest.TestCase):
         return self.turns + extra
 
     def test_resumes_and_only_sends_the_new_user_turn(self):
-        turns = self._next([("助手", "在"), ("用户", "再说一句")])
+        turns = self._next([("助手", "在"), ("Morry", "再说一句")])
 
         sid, outgoing = plan_turn(self.state, "sonnet", self.system, turns)
 
         self.assertEqual(sid, "sess-1")
         # 它自己那条回复它已经记着了，不该再抄回去。
-        self.assertEqual(outgoing, [("用户", "再说一句")])
+        self.assertEqual(outgoing, [("Morry", "再说一句")])
 
     def test_no_state_starts_from_scratch(self):
         sid, outgoing = plan_turn(None, "sonnet", self.system, self.turns)
@@ -265,7 +265,7 @@ class PlanTurnTest(unittest.TestCase):
         self.assertEqual(outgoing, self.turns)
 
     def test_changed_model_starts_from_scratch(self):
-        turns = self._next([("助手", "在"), ("用户", "再说一句")])
+        turns = self._next([("助手", "在"), ("Morry", "再说一句")])
 
         sid, outgoing = plan_turn(self.state, "claude-opus-4-6", self.system, turns)
 
@@ -274,7 +274,7 @@ class PlanTurnTest(unittest.TestCase):
 
     def test_changed_system_starts_from_scratch(self):
         # system 里有记忆卡，续上的会话看不到新的，所以必须重讲。
-        turns = self._next([("助手", "在"), ("用户", "再说一句")])
+        turns = self._next([("助手", "在"), ("Morry", "再说一句")])
 
         sid, outgoing = plan_turn(self.state, "sonnet", "你是 Cloudy，她刚体检", turns)
 
@@ -282,7 +282,7 @@ class PlanTurnTest(unittest.TestCase):
         self.assertEqual(outgoing, turns)
 
     def test_edited_history_starts_from_scratch(self):
-        turns = [("用户", "在吗吗吗"), ("助手", "在"), ("用户", "再说一句")]
+        turns = [("Morry", "在吗吗吗"), ("助手", "在"), ("Morry", "再说一句")]
 
         sid, outgoing = plan_turn(self.state, "sonnet", self.system, turns)
 
@@ -290,10 +290,10 @@ class PlanTurnTest(unittest.TestCase):
         self.assertEqual(outgoing, turns)
 
     def test_deleted_history_starts_from_scratch(self):
-        sid, outgoing = plan_turn(self.state, "sonnet", self.system, [("用户", "在吗")])
+        sid, outgoing = plan_turn(self.state, "sonnet", self.system, [("Morry", "在吗")])
 
         self.assertEqual(sid, "")
-        self.assertEqual(outgoing, [("用户", "在吗")])
+        self.assertEqual(outgoing, [("Morry", "在吗")])
 
     def test_a_sliding_window_still_resumes(self):
         """原文窗口聊满之后每轮都会挤掉最旧的几条，开头一直在变。
@@ -301,7 +301,7 @@ class PlanTurnTest(unittest.TestCase):
         早先的版本把指纹锚在开头，于是窗口一满就再也对不上——真实聊天里
         resume 从来没生效过，每轮都在重讲整段。
         """
-        older = [("用户", f"旧的第{i}句") for i in range(5)]
+        older = [("Morry", f"旧的第{i}句") for i in range(5)]
         window_before = older + self.turns
         anchor, size = _anchor(window_before)
         state = {
@@ -310,12 +310,12 @@ class PlanTurnTest(unittest.TestCase):
             "anchor": anchor, "anchor_len": size,
         }
         # 下一轮：又说了两句，最旧的两条被挤出窗口
-        window_after = window_before[2:] + [("助手", "在"), ("用户", "再说一句")]
+        window_after = window_before[2:] + [("助手", "在"), ("Morry", "再说一句")]
 
         sid, outgoing = plan_turn(state, "sonnet", self.system, window_after)
 
         self.assertEqual(sid, "sess-1")
-        self.assertEqual(outgoing, [("用户", "再说一句")])
+        self.assertEqual(outgoing, [("Morry", "再说一句")])
 
     def test_state_written_by_an_older_version_just_starts_over(self):
         stale = {"sid": "sess-1", "model": "sonnet",
@@ -401,7 +401,7 @@ class BridgePayloadResumeTest(unittest.TestCase):
             {"role": "assistant", "content": "在"},
             {"role": "user", "content": "再说一句"},
         ]
-        anchor, size = _anchor([("用户", "在吗")])
+        anchor, size = _anchor([("Morry", "在吗")])
         state = {
             "sid": "sess-1",
             "model": "sonnet",
@@ -495,7 +495,7 @@ def _resumable(seen_cards=None):
         {"role": "user", "content": "在吗"},
         {"role": "assistant", "content": "在"},
     ]
-    anchor, size = _anchor([("用户", "在吗")])
+    anchor, size = _anchor([("Morry", "在吗")])
     state = {
         "sid": "sess-1",
         "model": "sonnet",
@@ -531,7 +531,7 @@ class MemoryCardDedupeTest(unittest.TestCase):
         history, state = _resumable(seen_cards=["c1", "c2"])
         messages = history + [
             {"role": "user", "content": "今天吃什么"},
-            {"role": "system", "content": "【用户设备时间】周二"},
+            {"role": "system", "content": "【Morry设备时间】周二"},
             _card_message(("c1", "喜欢吃辣"), ("c2", "最近在减脂")),
         ]
 
@@ -540,7 +540,7 @@ class MemoryCardDedupeTest(unittest.TestCase):
         self.assertNotIn("记忆卡", payload["prompt"])
         self.assertNotIn("<cards>", payload["prompt"])
         # 别的临时上下文照常走
-        self.assertIn("【用户设备时间】周二", payload["prompt"])
+        self.assertIn("【Morry设备时间】周二", payload["prompt"])
 
     def test_a_fresh_session_gets_every_card_regardless_of_old_bookkeeping(self):
         history, state = _resumable(seen_cards=["c1", "c2"])

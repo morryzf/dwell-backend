@@ -12,4 +12,18 @@ def test_preview_mode_tabs_do_not_change_app_theme():
 
 def test_only_active_theme_edits_update_live_chat():
     guard = "if (messageStyleTab === effectiveMessageStyleMode()) applyMessageStyles();"
-    assert INDEX.count(guard) >= 2
+    # 「复制给…」按钮删掉之后，只剩调节样式这一处会改到聊天里的气泡。
+    assert INDEX.count(guard) >= 1
+
+
+def test_each_assistant_has_its_own_bubble_style_and_no_copy_button():
+    assert "const MESSAGE_STYLE_ROLES = ['me', 'cloudy', 'chatgpt'];" in INDEX
+    assert "messageStyleCopy" not in INDEX
+    assert "msg-style-copy" not in INDEX
+    # 聊天里助手气泡那组变量写的是当前那位助手的值
+    assert "messageStyleState[assistantId === 'chatgpt' ? 'chatgpt' : 'cloudy'][mode]" in INDEX
+
+
+def test_chat_background_is_kept_per_assistant():
+    assert "return (who || assistantId) === 'chatgpt' ? base + ':chatgpt' : base;" in INDEX
+    assert "localStorage.getItem('dwellChatBackground' + suffix)" in INDEX
