@@ -4404,7 +4404,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
         <button class="grow" id="apiRow"><span class="ic" data-i="bolt"></span>模型供应商<span class="chev">›</span></button>
         <button class="grow" id="mcpRow"><span class="ic" data-i="tool"></span>MCP 工具<span class="chev">›</span></button>
         <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
-        <button class="grow" id="rewriteRulesRow"><span class="ic" data-i="layers"></span>重写规则<span class="chev">›</span></button>
+        <button class="grow" id="rewriteRulesRow"><span class="ic" data-i="refresh"></span>重写规则<span class="chev">›</span></button>
         <button class="grow" id="systemLogRow"><span class="ic" data-i="fileText"></span>系统日志<span class="chev">›</span></button>
         <button class="grow" id="kelivoImportRow"><span class="ic" data-i="plus"></span>导入 Kelivo 聊天记录<span class="chev">›</span></button>
       </div>
@@ -7544,14 +7544,37 @@ if (window.visualViewport) {
 let sheetFieldTimer = null;
 function clearSheetKeyboardOffset(wrap) {
   const sheet = wrap && wrap.querySelector('.sheet');
-  if (!sheet || !sheet.dataset.keyboardShift) return;
+  if (!sheet) return;
+  const body = sheet.querySelector('.body');
+  if (body && body.dataset.keyboardPad) { delete body.dataset.keyboardPad; body.style.paddingBottom = ''; }
+  if (!sheet.dataset.keyboardShift) return;
   delete sheet.dataset.keyboardShift;
   sheet.style.transform = '';
+}
+/* 设置里推进来的整页（模型供应商、MCP、指令……）本来就占满一屏，不能像底部弹层
+   那样整张往上推：一推，顶上的「名称」就跑出屏幕了。整页原地不动，只在正文底下
+   垫出键盘那么高，让正文自己滚，再由 revealSheetField 把正在输入的那一格滚进来。 */
+function fitFullPageSheetToKeyboard(sheet, vv, keyboardOn) {
+  const body = sheet.querySelector('.body');
+  if (sheet.dataset.keyboardShift) { delete sheet.dataset.keyboardShift; sheet.style.transform = ''; }
+  if (!body) return;
+  if (!keyboardOn) {
+    if (body.dataset.keyboardPad) { delete body.dataset.keyboardPad; body.style.paddingBottom = ''; }
+    return;
+  }
+  // iOS 会把整页偷偷往上滚一段，先按回去，整页的顶才留在屏幕里。
+  if (window.scrollY !== 0) window.scrollTo(0, 0);
+  const hidden = Math.max(0, Math.round(sheet.getBoundingClientRect().bottom - (vv.offsetTop + vv.height)));
+  const pad = hidden ? hidden + 24 : 0;
+  if (Number(body.dataset.keyboardPad || 0) === pad) return;
+  if (pad) { body.dataset.keyboardPad = String(pad); body.style.paddingBottom = pad + 'px'; }
+  else { delete body.dataset.keyboardPad; body.style.paddingBottom = ''; }
 }
 function fitOpenSheetsToKeyboard() {
   const vv = window.visualViewport;
   const keyboardOn = vv && (vv.offsetTop > 1 || window.innerHeight - vv.height > 20);
   for (const sheet of document.querySelectorAll('.sheetWrap.open:not(.page) .sheet')) {
+    if (sheet.closest('.sheetWrap.sub')) { fitFullPageSheetToKeyboard(sheet, vv, keyboardOn); continue; }
     if (!keyboardOn) { clearSheetKeyboardOffset(sheet.closest('.sheetWrap')); continue; }
     const previous = Number(sheet.dataset.keyboardShift || 0);
     const rect = sheet.getBoundingClientRect();
