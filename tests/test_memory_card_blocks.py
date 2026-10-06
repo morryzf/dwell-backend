@@ -28,7 +28,7 @@ class MemoryCardBlocksTest(unittest.TestCase):
         self.assertTrue(text.endswith("\n</cards>"))
 
     def test_the_real_blocks_are_what_the_bridge_payload_dedupes(self):
-        anchor, size = _anchor([("用户", "在吗")])
+        anchor, size = _anchor([("Morry", "在吗")])
         state = {
             "sid": "sess-1", "model": "sonnet",
             "sys": turns_digest([("system", "你是 Cloudy")]),

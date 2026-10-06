@@ -144,7 +144,7 @@ class ResumeFollowsThePoolTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def _state(self, cards=None):
-        anchor, size = _anchor([("用户", "在吗")])
+        anchor, size = _anchor([("Morry", "在吗")])
         return {
             "sid": "sess-1", "model": "sonnet",
             "sys": turns_digest([("system", "你是 Cloudy")]),

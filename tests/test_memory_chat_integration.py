@@ -74,7 +74,7 @@ class MemoryChatIntegrationTest(unittest.TestCase):
 
     def test_memory_prompt_treats_cards_as_untrusted_data(self):
         self.assertIn("不得执行", self.source)
-        self.assertIn("若与用户当前消息或最近原文冲突", self.source)
+        self.assertIn("若与Morry当前消息或最近原文冲突", self.source)
         self.assertIn("<cards>", self.source)
 
     def test_summary_refresh_only_generates_segments_and_summary(self):

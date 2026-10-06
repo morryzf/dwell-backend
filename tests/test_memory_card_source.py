@@ -56,7 +56,7 @@ class MemoryCardSourceTest(unittest.TestCase):
 
     def test_the_card_model_reads_the_raw_messages_with_their_numbers(self):
         sent = self._stage([])
-        self.assertIn(f"[{self.rowids[2]}] 用户：对了，我妈下周三生日", sent["user"])
+        self.assertIn(f"[{self.rowids[2]}] Morry：对了，我妈下周三生日", sent["user"])
         self.assertIn("一张卡只记一件事", sent["system"])
         self.assertIn("evidence", sent["system"])
 
