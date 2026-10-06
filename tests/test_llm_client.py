@@ -111,7 +111,7 @@ class PromptCachePayloadTest(unittest.TestCase):
 
     def test_cache_guards_leave_other_requests_provider_neutral(self):
         cases = [
-            ({**self.provider, "provider_type": "generic"}, "anthropic/claude-sonnet-4", "chat"),
+            ({**self.provider, "provider_type": "generic"}, "gpt-4o", "chat"),
             ({**self.provider, "base_url": "https://relay.example/v1"}, "anthropic/claude-sonnet-4", "chat"),
             (self.provider, "google/gemini-2.5-pro", "chat"),
             (self.provider, "anthropic/claude-sonnet-4", None),

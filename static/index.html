@@ -13796,8 +13796,10 @@ function promptCacheAvailable() {
   const model = String(curModel || '').toLowerCase();
   let openrouterHost = '';
   try { openrouterHost = new URL(provider && provider.base_url || '').hostname.toLowerCase(); } catch (error) {}
+  // OpenAI 兼容的中转（类型 generic）也算：Claude 模型的缓存标记交给中转往下转。
+  const relayOrNative = ['claude_compatible', 'generic'];
   return !!(provider && model.includes('claude') && (
-    provider.provider_type === 'claude_compatible'
+    relayOrNative.includes(provider.provider_type)
     || (provider.provider_type === 'openrouter'
       && openrouterHost === 'openrouter.ai'
       && model.startsWith('anthropic/'))
@@ -13823,9 +13825,9 @@ function renderPromptCachePicker() {
   return select;
 }
 
-/* 输入框的模型面板，照 Claude 的样子排：最常用的四个在上面，其余常用的收进 More models；
-   Effort、缓存各一行，点进去再选；thinking 开关在右上角。 */
-let pickerView = 'main';   // main | more | effort | cache
+/* 输入框的模型面板，照 Claude 的样子排：缓存下拉框在最上面；最常用的四个模型接着，
+   其余常用的收进 More models；Effort 一行，点进去再选；thinking 开关在右上角。 */
+let pickerView = 'main';   // main | more | effort
 function modelUseCounts() {
   try { return JSON.parse(localStorage.getItem('dwell.modelUse') || '{}') || {}; } catch { return {}; }
 }
@@ -13873,11 +13875,6 @@ function pickerNavRow(label, value, onclick) {
   row.onclick = onclick;
   return row;
 }
-const CACHE_TTLS = [
-  { id: 'off', name: '关闭', desc: '' },
-  { id: '5m', name: '5 分钟', desc: '' },
-  { id: '1h', name: '1 小时', desc: '' },
-];
 async function saveChatModelSetting(body) {
   const response = await fetch('api/model', {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
@@ -13889,19 +13886,20 @@ async function saveChatModelSetting(body) {
 function renderComposerPicker() {
   modelBack.innerHTML = '';
   modelBack.appendChild(icEl(pickerView === 'main' ? 'x' : 'chevL', 16));
-  modelTitle.textContent = { main: '切换模型', more: 'More models', effort: 'Effort', cache: '缓存' }[pickerView];
+  modelTitle.textContent = { main: '切换模型', more: 'More models', effort: 'Effort' }[pickerView];
   if (pickerView === 'main') {
+    // 缓存放在最上面，一个下拉框直接选，不用再点进去。
+    const cachePicker = renderPromptCachePicker();
+    if (cachePicker) {
+      const bar = document.createElement('div'); bar.className = 'catalog-bar picker-cache-bar';
+      bar.appendChild(cachePicker); modelBody.appendChild(bar);
+    }
     const { top } = splitFavorites();
     if (top.length) pickerGroup(top.map(item => composerModelSwipeRow(item, !!item.favorite)));
     else { const empty = document.createElement('div'); empty.className = 'gnote'; empty.textContent = '还没有常用模型。常用项请在设置的模型目录里管理。'; modelBody.appendChild(empty); }
     pickerGap();
-    const settings = [pickerNavRow('Effort', EFFORTS.find(e => e.id === curEffort)?.name || 'High',
-      () => { pickerView = 'effort'; renderProviderModelPicker(); })];
-    if (promptCacheAvailable()) {
-      settings.push(pickerNavRow('缓存', CACHE_TTLS.find(c => c.id === curPromptCacheTtl)?.name || '关闭',
-        () => { pickerView = 'cache'; renderProviderModelPicker(); }));
-    }
-    pickerGroup(settings);
+    pickerGroup([pickerNavRow('Effort', EFFORTS.find(e => e.id === curEffort)?.name || 'High',
+      () => { pickerView = 'effort'; renderProviderModelPicker(); })]);
     pickerGap();
     pickerGroup([pickerNavRow('More models', '', () => { pickerView = 'more'; renderProviderModelPicker(); })]);
   } else if (pickerView === 'more') {
@@ -13922,16 +13920,6 @@ function renderComposerPicker() {
         curEffort = data.effort || effort.id;
         pickerView = 'main'; renderProviderModelPicker();
       } catch (error) { note('（推理强度没存上：' + error.message + '）', 'err'); }
-    })));
-  } else if (pickerView === 'cache') {
-    pickerGroup(CACHE_TTLS.map(ttl => mrowEl(ttl, curPromptCacheTtl === ttl.id, async () => {
-      if (curPromptCacheTtl === ttl.id) { pickerView = 'main'; renderProviderModelPicker(); return; }
-      try {
-        const data = await saveChatModelSetting({ prompt_cache_ttl: ttl.id });
-        curPromptCacheTtl = data.prompt_cache_ttl || ttl.id;
-        if (!cacheGlowApplies()) cacheGlowStop(true, false);
-        pickerView = 'main'; renderProviderModelPicker();
-      } catch (error) { note('（缓存时长没存上：' + error.message + '）', 'err'); }
     })));
   }
   fillIcons(modelBody);
