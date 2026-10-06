@@ -702,28 +702,6 @@ html[data-theme="dark"] .composer {
   #drawerThemeBtn:active { transform: scale(.97); background: color-mix(in srgb, var(--text) 8%, transparent); }
   .freshtip { text-align: center; font-size: 13px; color: var(--dim); padding: 34px 30px; line-height: 1.8; }
   
-  #gongSheet .sheet { height: 100dvh; max-height: 100dvh; border-radius: 0; }
-  /* 换行，不然他的思维链会被挤成气泡旁边一条窄柱（8/3 截图当场看出来的） */
-  
-  #gongBody { display: flex; flex-direction: column; gap: 18px; }
-  #gongBody .gu, #gongBody .bubble { font-size: 14.5px; line-height: 1.75; }
-  #gongFoot {
-    flex: none; display: flex; align-items: flex-end; gap: 9px;
-    padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--line);
-  }
-  #gongInput {
-    flex: 1; border: 0; outline: 0; background: var(--panel); color: var(--text);
-    font: inherit; font-size: 16px; padding: 11px 14px; border-radius: 18px;
-    resize: none; max-height: 120px;
-  }
-  #gongSend {
-    width: 38px; height: 38px; border-radius: 50%; flex: none;
-    background: var(--accent); color: #fff;
-    display: flex; align-items: center; justify-content: center;
-  }
-  #gongSend .ic { width: 18px; height: 18px; }
-  #gongSend:disabled { opacity: .4; }
 
   .filecard {
     display: inline-flex; align-items: center; gap: 9px; max-width: 100%;
@@ -3078,7 +3056,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     background: transparent !important;
     color: var(--text);
     text-align: left;
-    /* 和上面「Cloudy」「Other」同一套字：手写体配几何线条图标，怎么排都别扭 */
+    /* 和上面「Cloudy」「ChatGPT」同一套字：手写体配几何线条图标，怎么排都别扭 */
     font-family: inherit;
     font-size: 14px;
     font-weight: 400;
@@ -3102,7 +3080,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   #drawer .nav .drawer-timeline {
     position: relative; display: grid; grid-template-columns: 1fr 30px 1fr;
     grid-auto-rows: 40px; column-gap: 0; row-gap: 0; padding: 14px 0 0;
-    margin-top: -24px;   /* 第一格上半截是空的，整条往上提，Tasks 才不离 Cloudy/Other 太远 */
+    margin-top: -24px;   /* 第一格上半截是空的，整条往上提，Tasks 才不离 Cloudy/ChatGPT 太远 */
   }
   #drawer .nav .drawer-timeline .drawer-tool {
     position: relative; grid-row: span 2; min-height: 0; padding: 4px 12px 4px 4px;
@@ -3135,6 +3113,14 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     position: absolute; left: 50%; top: 0; transform: translateX(-50%);
     color: var(--brand-ink); fill: currentColor; pointer-events: none;
   }
+  /* ChatGPT 那边没有 Journal 和 Library：剩下六站按原来的一左一右重新排，
+     月相只露到第六颗之后那颗小星，Recents 照样贴上来。 */
+  html[data-assistant="chatgpt"] #drawer .nav .drawer-timeline #navWall,
+  html[data-assistant="chatgpt"] #drawer .nav .drawer-timeline #navNook { display: none; }
+  html[data-assistant="chatgpt"] #drawer .nav .drawer-timeline #navRepo { grid-column: 3; grid-row: 4 / span 2; align-items: flex-start; text-align: left; padding: 4px 4px 4px 12px; }
+  html[data-assistant="chatgpt"] #drawer .nav .drawer-timeline #navHeartbeat { grid-column: 1; grid-row: 5 / span 2; align-items: flex-end; text-align: right; padding: 4px 12px 4px 4px; }
+  html[data-assistant="chatgpt"] #drawer .nav .drawer-timeline #navUsage { grid-column: 3; grid-row: 6 / span 2; }
+  html[data-assistant="chatgpt"] #drawer .nav .drawer-timeline .dt-sky { clip-path: inset(0 0 98px 0); }
   /* 时间线底下本来就留着两颗收尾的小点，Recents 直接贴上来，不再另空一大段。 */
   #drawer .nav .drawer-timeline + .drawer-section-head { padding-top: 0; margin-top: -10px; }
   #drawer .nav .drawer-tool:active {
@@ -4187,7 +4173,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   @media (prefers-color-scheme: dark) {
     html:not([data-theme="light"]) #send.stop { background: rgba(255,235,244,.12) !important; box-shadow: inset 0 0 0 .5px rgba(255,235,244,.22) !important; }
   }
-  /* 侧栏的 Cloudy / Other：选中的那块撑满自己那一半，底色是淡玻璃，不是实色。 */
+  /* 侧栏的 Cloudy / ChatGPT：选中的那块撑满自己那一半，底色是淡玻璃，不是实色。 */
   .assistant-choice > span { width: 100%; }
   .assistant-choice.on > span {
     background: rgba(255,255,255,.34);
@@ -4368,8 +4354,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div id="drawer">
     <div class="brand">Cloudy Studio</div>
     <div class="assistant-switch" role="group" aria-label="选择助手">
-      <button class="assistant-choice on" id="recGu" aria-pressed="true"><span>Cloudy</span></button>
-      <button class="assistant-choice" id="recGong" aria-pressed="false"><span>Other</span></button>
+      <button class="assistant-choice on" id="recGu" data-assistant="cloudy" aria-pressed="true"><span>Cloudy</span></button>
+      <button class="assistant-choice" id="recChatgpt" data-assistant="chatgpt" aria-pressed="false"><span>ChatGPT</span></button>
     </div>
     <div class="nav">
       <div class="drawer-tool-grid drawer-timeline" aria-label="功能">
@@ -4476,7 +4462,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       </div>
       <div class="group-label">陪伴</div>
       <div class="group">
-        <button class="grow" id="focusShareRow" type="button"><span class="ic" data-i="chat"></span>让 Cloudy 知道当前状态<span class="sw" id="focusShareSw"></span></button>
+        <button class="grow" id="focusShareRow" type="button"><span class="ic" data-i="chat"></span>让 <span class="asst-name">Cloudy</span> 知道当前状态<span class="sw" id="focusShareSw"></span></button>
         <button class="grow" id="focusLockRow" type="button"><span class="ic" data-i="lock"></span>iPhone 单页限制<span class="sw" id="focusLockSw"></span></button>
         <button class="grow" id="focusGuideBtn" type="button"><span class="ic" data-i="sliders"></span>查看首次设置步骤<span class="chev">›</span></button>
       </div>
@@ -4495,7 +4481,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       <div class="hspace"></div>
     </div>
     <div class="body" id="heartbeatBody">
-      <div class="sh-head hb-title"><h1>让他偶尔想起你</h1><div class="sub">Cloudy 会按这个节奏醒来，读一读所选聊天的上下文，再自己决定要不要发消息。</div></div>
+      <div class="sh-head hb-title"><h1>让他偶尔想起你</h1><div class="sub"><span class="asst-name">Cloudy</span> 会按这个节奏醒来，读一读所选聊天的上下文，再自己决定要不要发消息。</div></div>
       <div class="group-label">连接</div>
       <div class="group">
         <button class="grow" id="wakeRow"><span class="ic" data-i="alarm"></span>允许主动消息<span class="sw wait" id="wakeSw"></span></button>
@@ -4620,23 +4606,6 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="sheet"><div class="grabber"></div><div class="head">
     <button class="hbtn" data-close="longContext"><span class="ic" data-i="x"></span></button><div class="ht">记忆</div><div class="hspace"></div>
   </div><div class="body" id="longContextBody"></div></div>
-</div>
-
-<div class="sheetWrap" id="gongSheet">
-  <div class="shade" data-close="gong"></div>
-  <div class="sheet">
-    <div class="grabber"></div>
-    <div class="head">
-      <button class="hbtn" data-close="gong"><span class="ic" data-i="x"></span></button>
-      <div class="ht">另一位</div>
-      <div class="hspace"></div>
-    </div>
-    <div class="body" id="gongBody"></div>
-    <div id="gongFoot">
-      <textarea id="gongInput" rows="1" placeholder="说点什么…"></textarea>
-      <button id="gongSend"><span class="ic" data-i="arrowUp"></span></button>
-    </div>
-  </div>
 </div>
 
 <div class="sheetWrap page" id="healthSheet">
@@ -4926,6 +4895,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
 
 <script src="/vendor/guided-access-pomodoro.js"></script>
 <script>
+// 当前助手。放在最前面：后面很多文案在拼的时候要用到它。
+var assistantId = 'cloudy', assistantName = 'Cloudy';
 
 
 /* ============ 线条图标（feather 风格，stroke 跟文字颜色走） ============ */
@@ -5325,7 +5296,7 @@ function addProactiveDivider(messageId) {
   guEl = null; endThink(); closeGroup();
   const divider = document.createElement('div');
   divider.className = 'proactive-divider';
-  divider.textContent = 'Cloudy 主动发了一条消息';
+  divider.textContent = assistantName + ' 主动发了一条消息';
   if (marker) divider.dataset.proactiveFor = marker;
   log.appendChild(divider);
 }
@@ -7794,7 +7765,6 @@ const sheets = {
   find: document.getElementById('findSheet'),
   ctx: document.getElementById('ctxSheet'),
   health: document.getElementById('healthSheet'),
-  gong: document.getElementById('gongSheet'),
   repo: document.getElementById('repoSheet'),
 };
 const ttsState = {
@@ -8084,7 +8054,7 @@ function ttsClock(seconds) {
 function ttsPlayerLabel() {
   const cfg = ttsState.config || {};
   const active = (cfg.voices || []).find(item => item.id === cfg.active_voice_id);
-  return 'Cloudy' + (active && active.name ? ' · ' + active.name : '');
+  return assistantName + (active && active.name ? ' · ' + active.name : '');
 }
 function ttsQueueIndex() {
   return ttsState.queue.findIndex(item => item.message_id === ttsState.currentMessageId);
@@ -8544,7 +8514,7 @@ async function renderFindDay(list, day) {
     fh.append(k, (c.from === c.to ? c.from : c.from + '–' + c.to) + ' · ' + c.count + ' 句');
     const fs = document.createElement('div');
     fs.className = 'fs';
-    fs.textContent = c.snippet || '（那天只有 Cloudy 说了话）';
+    fs.textContent = c.snippet || '（那天只有 ' + assistantName + ' 说了话）';
     el.append(fh, fs);
     el.onclick = () => openSearchChatHit(c);
     list.appendChild(el);
@@ -8559,7 +8529,7 @@ async function openSearchChatHit(hit) {
     });
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error('切换失败');
-    const chat = (data.items || []).find(item => item.id === hit.chat_id) || { id: hit.chat_id, name: hit.chat_name || 'Cloudy' };
+    const chat = (data.items || []).find(item => item.id === hit.chat_id) || { id: hit.chat_id, name: hit.chat_name || assistantName };
     sheets.find.classList.remove('open');
     pollGeneration += 1;
     if (pollAbort) pollAbort.abort();
@@ -9905,7 +9875,7 @@ async function renderStudySettings() {
   nkSetBack(true);
   nkView = 'settings'; nkDetailId = ''; nkTocBtn.style.display = 'none'; nkNote('正在打开阅读安排…');
   let settings, chats, modelCatalog, books;
-  try { [settings, chats, modelCatalog, books] = await Promise.all([nkGet('settings'), fetch('api/chats?scope=live',{cache:'no-store'}).then(r=>r.json()), fetch('api/model-catalog',{cache:'no-store'}).then(r=>r.json()), nkGet('books')]); }
+  try { [settings, chats, modelCatalog, books] = await Promise.all([nkGet('settings'), fetch('api/chats?scope=live&assistant=cloudy',{cache:'no-store'}).then(r=>r.json()), fetch('api/model-catalog',{cache:'no-store'}).then(r=>r.json()), nkGet('books')]); }
   catch (e) { return nkNote('阅读安排这会儿打不开'); }
   settings = settings || {}; chats = (chats && chats.items) || []; modelCatalog = modelCatalog || {}; books = books || [];
   const panel = document.createElement('div'); panel.className = 'nk-room-panel'; panel.appendChild(nkHead('阅读安排', '藏在书房小物件里的设置。只有你来决定他什么时候读、一次读多少。'));
@@ -10522,7 +10492,7 @@ function todoRow(t, list, canTouch) {
   const bits = [];
   if (t.fixed) bits.push('\u6bcf\u5929');
   if (!t.at && t.created) bits.push(stampOf(t.created) + ' \u8bb0\u7684');
-  bits.push(t.by === 'gu' ? '\u987e\u5c7f' : 'Morry');
+  bits.push(({ gu: '\u987e\u5c7f', cloudy: 'Cloudy', chatgpt: 'ChatGPT' })[t.by] || 'Morry');
   small.textContent = bits.join(' \u00b7 ');
   tx.appendChild(small);
   r.append(box, tx);
@@ -10621,7 +10591,7 @@ function renderTodos(d) {
   c1.append(plus, add);
   todoBody.appendChild(c1);
 
-  todoBody.appendChild(sect('Cloudy \u7684\u6d3b'));
+  todoBody.appendChild(sect(assistantName + ' \u7684\u6d3b'));
   const c2 = document.createElement('div');
   c2.className = 'hcard';
   if (!d.mine.length) c2.appendChild(emptyRow('\u4ed6\u8fd9\u4f1a\u513f\u624b\u4e0a\u6ca1\u6302\u7740\u6d3b'));
@@ -10961,6 +10931,7 @@ document.getElementById('aliveRow').onclick = async () => {
       await fetch('api/newchat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"arm":false}' });
     }
   } catch {}
+  await refreshAssistant();
   try {
     const c = await (await fetch('api/chats?scope=live', { cache: 'no-store' })).json();
     const cur = (c.items || []).find(x => x.current);
@@ -11036,12 +11007,12 @@ refreshWakeTarget();
 function heartbeatStatusText(d) {
   const labels = {
     idle: '还没有进行过心跳', waiting: '正在等下一次合适的时间', queued: '已经叫他了，马上会醒',
-    thinking: 'Cloudy 正在读上下文', quiet: '上次醒来后，他觉得此刻不该打扰',
+    thinking: assistantName + ' 正在读上下文', quiet: '上次醒来后，他觉得此刻不该打扰',
     duplicate: '这次想说的话和刚才重复了，他决定不再发一遍',
     sent: '上次醒来后，他主动发了一条消息', error: '上次心跳没有成功',
     daily_limit: '今天已经达到主动消息上限', chat_busy: '所选聊天正在回复，心跳稍后再来',
     no_target: '还没有选择接收主动消息的聊天', no_user_message: '这间聊天还没有你的消息',
-    awaiting_reply: '上一条消息还在等 Cloudy 正常回复，心跳不会抢答', off: '心跳目前关着'
+    awaiting_reply: '上一条消息还在等 ' + assistantName + ' 正常回复，心跳不会抢答', off: '心跳目前关着'
   };
   let text = labels[d.last_status] || labels.idle;
   if (d.last_status === 'error' && d.last_error) text += '：' + d.last_error;
@@ -11106,96 +11077,50 @@ document.getElementById('navHeartbeat').onclick = () => {
   closeDrawer(); sheets.heartbeat.classList.add('open'); loadHeartbeat(); pushState();
 };
 
-function gongRow(role, text, think) {
-  const r = document.createElement('div');
-  r.className = 'row' + (role === 'her' ? ' me' : '');
-  const b = document.createElement('div');
-  b.className = role === 'her' ? 'bubble' : 'gu';
-  b._raw = text;
-  renderRich(b);
-  r.appendChild(b);
-  const body = document.getElementById('gongBody');
-  /* 先落地再挂思维链——思维链现在是插在这一行**前面**的独立一行，
-     行还没进 DOM 就 insertBefore，念历史的时候第一条就炸 */
-  body.appendChild(r);
-  if (think) gongThink(r, think);
-  body.scrollTop = body.scrollHeight;
-  b._row = r;
-  return b;
+/* ---------- 两个助手：Cloudy / ChatGPT ----------
+   侧栏顶上切换。切过去就是整个主聊天换过去：窗口清单、待办里「他的那栏」、
+   心跳都跟着换，回到那位上次停留的那间。ChatGPT 那边没有 Journal 和 Library。 */
+function applyAssistant(id, name) {
+  assistantId = id === 'chatgpt' ? 'chatgpt' : 'cloudy';
+  assistantName = name || (assistantId === 'chatgpt' ? 'ChatGPT' : 'Cloudy');
+  document.documentElement.dataset.assistant = assistantId;
+  document.querySelectorAll('.assistant-choice').forEach(btn => {
+    const on = btn.dataset.assistant === assistantId;
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  document.querySelectorAll('.asst-name').forEach(el => { el.textContent = assistantName; });
+  const ttsTitle = document.getElementById('ttsPlayerTitle');
+  if (ttsTitle) ttsTitle.textContent = ttsPlayerLabel();
 }
 
-function gongThink(row, think) {
-  const body = document.getElementById('gongBody');
-  row._think?.remove();
-  const line = document.createElement('button');
-  line.className = 'toolline gthink';
-  line.innerHTML = '<span class="lbl">thinking</span><span class="chev">›</span>';
-  line.prepend(icEl('clock', 15));
-  thinkStore.push({ text: think, lineEl: line, paused: true });
-  const idx = thinkStore.length - 1;
-  line.onclick = () => openThinkSheet(idx);
-  const wrap = document.createElement('div');
-  wrap.className = 'row';
-  wrap.appendChild(line);
-  body.insertBefore(wrap, row);
-  row._think = wrap;
-}
-
-function gongFill(el, text) {
-  el._raw = text;
-  el.removeAttribute('data-rich');
-  el.textContent = '';
-  renderRich(el);
-}
-
-async function loadGong() {
-  const body = document.getElementById('gongBody');
-  body.innerHTML = '';
+async function refreshAssistant() {
   try {
-    const d = await (await fetch('api/gong', { cache: 'no-store' })).json();
-    if (!d.msgs.length) {
-      body.innerHTML = '<div class="gnote" style="text-align:center;padding:44px 26px;line-height:1.9">'
-        + '这是另一位助手的房间<br><br>他记得住在这一间里说过的话<br>人设那份还等着你写</div>';
-      return;
-    }
-    d.msgs.forEach(m => gongRow(m.role, m.text, m.think));
-  } catch { body.innerHTML = '<div class="gnote">他那边没应声</div>'; }
+    const d = await (await fetch('api/assistant', { cache: 'no-store' })).json();
+    if (d.ok) applyAssistant(d.assistant, d.name);
+  } catch {}
 }
 
-async function sendGong() {
-  const inp = document.getElementById('gongInput');
-  const btn = document.getElementById('gongSend');
-  const text = inp.value.trim();
-  if (!text) return;
-  inp.value = ''; inp.style.height = '';
-  btn.disabled = true;
-  gongRow('her', text);
-  const wait = gongRow('gong', '……');
+async function switchAssistant(id) {
+  if (id === assistantId) { closeDrawer(); return; }
   try {
-    const d = await (await fetch('api/gong', {
+    const r = await fetch('api/assistant', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
-    })).json();
-    gongFill(wait, d.reply || '（他没说话）');
-    if (d.think && wait._row) gongThink(wait._row, d.think);
-  } catch { gongFill(wait, '（没送到，再试一次）'); }
-  btn.disabled = false;
-  const body = document.getElementById('gongBody');
-  body.scrollTop = body.scrollHeight;
+      body: JSON.stringify({ assistant: id })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.detail || '切换失败');
+    applyAssistant(d.assistant, d.name);
+    const c = await (await fetch('api/chats?scope=live', { cache: 'no-store' })).json();
+    const chat = (c.items || []).find(x => x.id === d.chat_id) || { id: d.chat_id, name: '' };
+    showChatHere(chat);
+    loadChats();
+  } catch { note('（没切过去，再试一次）', 'err'); }
 }
 
-document.getElementById('gongSend').onclick = sendGong;
-document.getElementById('gongInput').addEventListener('input', (e) => {
-  e.target.style.height = 'auto';
-  e.target.style.height = Math.min(120, e.target.scrollHeight) + 'px';
+document.querySelectorAll('.assistant-choice').forEach(btn => {
+  btn.onclick = () => switchAssistant(btn.dataset.assistant);
 });
-document.getElementById('gongInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendGong(); }
-});
-document.getElementById('recGong').onclick = () => {
-  closeDrawer(); sheets.gong.classList.add('open'); loadGong();
-};
-document.getElementById('recGu').onclick = closeDrawer;
 
 /* ---------- 健康 ---------- */
 const HEALTH_GROUPS = [
@@ -11571,7 +11496,7 @@ function renderChatBackgroundSettings() {
     + '<div class="ap-note">数值越高，背景图越柔和、文字越清楚；设为 0% 可看原图。</div></div>'
     + '<div class="ap-btns"><button class="ap-b go" id="backgroundChoose">从设备选择图片</button>'
     + (has ? '<button class="ap-b" id="backgroundReset">恢复默认</button>' : '') + '</div>'
-    + '<div class="ap-note">图片会在设备上压缩后保存；不会上传到服务器，也不会发送给 Cloudy。</div><div class="ap-msg" id="backgroundMsg"></div>';
+    + '<div class="ap-note">图片会在设备上压缩后保存；不会上传到服务器，也不会发送给 ' + assistantName + '。</div><div class="ap-msg" id="backgroundMsg"></div>';
   const input = document.createElement('input');
   input.type = 'file'; input.accept = 'image/*'; input.style.display = 'none'; body.appendChild(input);
   const message = body.querySelector('#backgroundMsg');
@@ -11828,21 +11753,21 @@ document.addEventListener('input', event => {
 
 function renderMessageStyleSettings() {
   const body = document.getElementById('messageStyleBody');
-  const roleLabel = messageStyleRole === 'me' ? '我的消息' : 'Cloudy 的消息';
+  const roleLabel = messageStyleRole === 'me' ? '我的消息' : assistantName + ' 的消息';
   const otherRole = messageStyleRole === 'me' ? 'cloudy' : 'me';
-  const otherLabel = otherRole === 'me' ? '我的消息' : 'Cloudy';
+  const otherLabel = otherRole === 'me' ? '我的消息' : assistantName;
   const modeLabel = messageStyleTab === 'light' ? '浅色' : '深色';
   body.innerHTML = '<div class="msg-style-preview" data-mode="' + messageStyleTab + '">'
     + '<button type="button" class="msg-preview-me msg-preview-target' + (messageStyleRole === 'me' ? ' editing' : '') + '" data-style-role="me">这是我的消息。' + (messageStyleRole === 'me' ? '<span class="msg-preview-badge">正在编辑</span>' : '') + '</button>'
     + '<div class="msg-preview-think"><span>💡</span><b>thinking</b><span class="arr">›</span></div>'
-    + '<button type="button" class="msg-preview-cloudy msg-preview-target' + (messageStyleRole === 'cloudy' ? ' editing' : '') + '" data-style-role="cloudy">这是 Cloudy 的回复。' + (messageStyleRole === 'cloudy' ? '<span class="msg-preview-badge">正在编辑</span>' : '') + '</button></div>'
+    + '<button type="button" class="msg-preview-cloudy msg-preview-target' + (messageStyleRole === 'cloudy' ? ' editing' : '') + '" data-style-role="cloudy">这是 ' + assistantName + ' 的回复。' + (messageStyleRole === 'cloudy' ? '<span class="msg-preview-badge">正在编辑</span>' : '') + '</button></div>'
     + '<div class="msg-style-role-tabs" aria-label="选择要编辑的消息"><button class="msg-style-role-tab' + (messageStyleRole === 'me' ? ' on' : '') + '" data-style-role="me">我的消息</button>'
-    + '<button class="msg-style-role-tab' + (messageStyleRole === 'cloudy' ? ' on' : '') + '" data-style-role="cloudy">Cloudy 的消息</button></div>'
+    + '<button class="msg-style-role-tab' + (messageStyleRole === 'cloudy' ? ' on' : '') + '" data-style-role="cloudy">' + assistantName + ' 的消息</button></div>'
     + '<div class="msg-style-tabs" aria-label="选择明暗模式"><button class="msg-style-tab' + (messageStyleTab === 'light' ? ' on' : '') + '" data-style-tab="light">浅色模式</button>'
     + '<button class="msg-style-tab' + (messageStyleTab === 'dark' ? ' on' : '') + '" data-style-tab="dark">深色模式</button></div>'
     + '<div class="msg-style-actions"><button type="button" class="msg-style-copy" id="messageStyleCopy">把' + roleLabel + '的' + modeLabel + '样式复制给' + otherLabel + '</button></div>'
     + '<div class="ap-section" id="messageStyleControls"></div>'
-    + '<div class="msg-style-note">双方消息可以分别调整。thinking 与工具调用属于 Cloudy 的输出，会跟随 Cloudy 的消息样式。</div>'
+    + '<div class="msg-style-note">双方消息可以分别调整。thinking 与工具调用属于 ' + assistantName + ' 的输出，会跟随 ' + assistantName + ' 的消息样式。</div>'
     + '<div class="group-label glass-effect-label">界面玻璃 · ' + modeLabel + '模式</div>'
     + '<div class="ap-section interface-glass-section" id="interfaceGlassControls"></div>'
     + '<div class="msg-style-note">输入框、左侧边栏和语音浮窗分别保存浅色与深色参数。调整会立即生效并保存在当前设备。</div>'
@@ -11966,7 +11891,7 @@ document.getElementById('rewakeRow').onclick = async () => {
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || '没有醒来');
     v.textContent = '已经叫醒，正在自己判断';
-    heartbeatMsg('Cloudy 正在读这间聊天；如果此刻不适合说话，他会保持安静。');
+    heartbeatMsg(assistantName + ' 正在读这间聊天；如果此刻不适合说话，他会保持安静。');
     setTimeout(loadHeartbeat, 2500);
     setTimeout(() => { v.textContent = '让他自己判断要不要说话'; }, 5000);
   } catch (e) { v.textContent = '没叫动，再试一次'; heartbeatMsg(e.message, true); }
@@ -12282,7 +12207,7 @@ async function openMemorySource(chatId, kind, id, content, full) {
         groups.push({role: m.role, made: m.made, texts: [m.content || ''], cited: m.cited});
       }
     });
-    const list = groups.length ? groups.map(g => `<div class="ms-msg${d.precise ? (g.cited ? ' cited' : '') : ' plain'}"><div class="ms-who"><span>${g.role === 'user' ? '我' : (g.role === 'assistant' ? 'Cloudy' : '系统')}</span><span>${instructionEsc(memorySourceTime(g.made))}</span></div><div class="ms-text">${instructionEsc(g.texts.join('\n\n'))}</div></div>`).join('') : '<div class="ms-hint">原文已经找不到了。</div>';
+    const list = groups.length ? groups.map(g => `<div class="ms-msg${d.precise ? (g.cited ? ' cited' : '') : ' plain'}"><div class="ms-who"><span>${g.role === 'user' ? '我' : (g.role === 'assistant' ? assistantName : '系统')}</span><span>${instructionEsc(memorySourceTime(g.made))}</span></div><div class="ms-text">${instructionEsc(g.texts.join('\n\n'))}</div></div>`).join('') : '<div class="ms-hint">原文已经找不到了。</div>';
     memorySourceBody.innerHTML = `<div class="ms-card" data-ms-card><span data-ms-content>${instructionEsc(content || '')}</span><button class="ms-edit" type="button" data-ms-edit aria-label="编辑这条记忆"><span class="ic" data-i="pen"></span></button></div><div class="ms-hint">${instructionEsc(hint)}</div><div class="ms-list">${list}</div>${d.can_expand ? '<button class="mc-btn" type="button" data-ms-expand>展开整段</button>' : ''}`;
     fillIcons(memorySourceBody);
     const expand = memorySourceBody.querySelector('[data-ms-expand]');
@@ -12630,7 +12555,7 @@ function ago(ts) {
 }
 
 function setTitle(name) {
-  document.querySelector('header .title h1').textContent = name || 'Cloudy';
+  document.querySelector('header .title h1').textContent = name || assistantName;
   document.title = name || 'dwell';
 }
 
@@ -12733,7 +12658,7 @@ async function deleteChat(it, event) {
     if (it.current) {
       const next = (d.items || []).find(x => x.current);
       if (next) showChatHere(next);
-      else { log.innerHTML = ''; setTitle('Cloudy'); }
+      else { log.innerHTML = ''; setTitle(''); }
     }
     loadChats();
   } catch { note('（没删掉，再试一次）', 'err'); }

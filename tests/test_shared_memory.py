@@ -123,7 +123,7 @@ class SharedOverviewTest(unittest.TestCase):
         self._with_overview("早的", "旧版总览", now - 1000)
         self._with_overview("晚的", "新版总览", now)
 
-        self.assertEqual(db.shared_memory_overview()["overview"], "新版总览")
+        self.assertEqual(db.shared_memory_overview("cloudy")["overview"], "新版总览")
 
     def test_a_chat_that_opted_out_does_not_supply_it(self):
         now = int(time.time())
@@ -132,11 +132,11 @@ class SharedOverviewTest(unittest.TestCase):
 
         db.memory_shared_set(private, False)
 
-        self.assertEqual(db.shared_memory_overview()["overview"], "共用的总览")
+        self.assertEqual(db.shared_memory_overview("cloudy")["overview"], "共用的总览")
 
     def test_no_overview_anywhere_is_not_an_error(self):
         db.chat_add("空的")
-        self.assertEqual(db.shared_memory_overview(), {})
+        self.assertEqual(db.shared_memory_overview("cloudy"), {})
 
 
 class SharedConsoleTest(unittest.TestCase):
@@ -243,7 +243,7 @@ class BorrowedOverviewPayloadTest(unittest.TestCase):
         self._with_overview("旧窗口", "我们目前的样子")
         fresh = db.chat_add("新窗口")["id"]
 
-        shared = db.shared_memory_overview()
+        shared = db.shared_memory_overview("cloudy")
 
         self.assertEqual(shared["overview"], "我们目前的样子")
         self.assertNotEqual(shared["chat_id"], fresh)
@@ -252,7 +252,7 @@ class BorrowedOverviewPayloadTest(unittest.TestCase):
     def test_a_window_with_its_own_overview_is_not_borrowing(self):
         own = self._with_overview("自己有", "自己那一份")
 
-        shared = db.shared_memory_overview()
+        shared = db.shared_memory_overview("cloudy")
 
         # 自己就是最新的那一份，界面不该显示成「来自别处」。
         self.assertEqual(shared["chat_id"], own)
