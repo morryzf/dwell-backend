@@ -28,12 +28,16 @@
   try {
     var t = localStorage.getItem('homeTheme') || 'auto';
     if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
-    var bg = localStorage.getItem('dwellChatBackground');
+    // 两位助手各有一张聊天背景。先按上次停在哪位穿上，页面问到服务器后再校正。
+    var who = localStorage.getItem('dwellAssistant') === 'chatgpt' ? 'chatgpt' : 'cloudy';
+    var suffix = who === 'chatgpt' ? ':chatgpt' : '';
+    document.documentElement.dataset.assistant = who;
+    var bg = localStorage.getItem('dwellChatBackground' + suffix);
     if (bg && bg.indexOf('data:image/') === 0) {
       document.documentElement.style.setProperty('--chat-bg-image', 'url("' + bg + '")');
       document.documentElement.classList.add('has-chat-background');
     }
-    var overlay = Number(localStorage.getItem('dwellChatBackgroundOverlay'));
+    var overlay = Number(localStorage.getItem('dwellChatBackgroundOverlay' + suffix));
     if (Number.isFinite(overlay)) {
       overlay = Math.max(0, Math.min(100, overlay));
       document.documentElement.style.setProperty('--chat-bg-overlay-top', Math.max(0, overlay - 10) + '%');
@@ -3377,24 +3381,16 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin: 9px 0; padding: 3px;
     border-radius: 14px; background: color-mix(in srgb, var(--panel) 58%, transparent);
   }
-  .msg-style-role-tabs { margin-bottom: 6px; }
+  .msg-style-role-tabs { margin-bottom: 6px; grid-template-columns: 1fr 1fr 1fr; }
   .msg-style-tabs { margin-top: 6px; }
   .msg-style-tab, .msg-style-role-tab {
     min-height: 36px; border-radius: 11px; color: var(--dim); font-size: 13px;
     transition: transform 150ms ease, background-color 180ms ease, color 180ms ease;
   }
-  .msg-style-tab:active, .msg-style-role-tab:active, .msg-style-copy:active, .msg-style-reset-choice:active { transform: scale(.97); }
+  .msg-style-tab:active, .msg-style-role-tab:active, .msg-style-reset-choice:active { transform: scale(.97); }
   .msg-style-tab.on, .msg-style-role-tab.on {
     color: var(--text); background: color-mix(in srgb, var(--card) 72%, transparent);
     box-shadow: 0 2px 10px rgba(70,54,63,.08); font-weight: 650;
-  }
-  .msg-style-actions { display: flex; margin: 3px 0 9px; }
-  .msg-style-copy {
-    width: 100%; min-height: 37px; padding: 7px 12px; border-radius: 12px;
-    color: color-mix(in srgb, var(--text) 78%, var(--accent)); font-size: 12px; font-weight: 620;
-    background: color-mix(in srgb, var(--card) 64%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
-    transition: transform 150ms ease;
   }
   .msg-style-control { min-height: 46px; padding: 7px 0; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
   .msg-style-control:last-child { border-bottom: 0; }
@@ -4896,7 +4892,9 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
 <script src="/vendor/guided-access-pomodoro.js"></script>
 <script>
 // 当前助手。放在最前面：后面很多文案在拼的时候要用到它。
+// 先用这台设备上次停在哪位，页面问到服务器后再校正。
 var assistantId = 'cloudy', assistantName = 'Cloudy';
+try { if (localStorage.getItem('dwellAssistant') === 'chatgpt') { assistantId = 'chatgpt'; assistantName = 'ChatGPT'; } } catch (e) {}
 
 
 /* ============ 线条图标（feather 风格，stroke 跟文字颜色走） ============ */
@@ -11090,6 +11088,9 @@ function applyAssistant(id, name) {
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
   document.querySelectorAll('.asst-name').forEach(el => { el.textContent = assistantName; });
+  try { localStorage.setItem('dwellAssistant', assistantId); } catch (e) {}
+  applyChatBackground();
+  applyMessageStyles();
   const ttsTitle = document.getElementById('ttsPlayerTitle');
   if (ttsTitle) ttsTitle.textContent = ttsPlayerLabel();
 }
@@ -11428,41 +11429,58 @@ document.getElementById('petVisibilityRow').onclick = () => {
 };
 refreshPetVisibilityRow();
 
-/* 聊天背景只存在这台设备的浏览器：既不上传，也不带进聊天或备份。 */
+/* 聊天背景只存在这台设备的浏览器：既不上传，也不带进聊天或备份。
+   两位助手各有一张、各有自己的遮罩；Cloudy 沿用原来的存储键。 */
 const CHAT_BACKGROUND_KEY = 'dwellChatBackground';
 const CHAT_BACKGROUND_OVERLAY_KEY = 'dwellChatBackgroundOverlay';
-function chatBackground() {
-  try { return localStorage.getItem(CHAT_BACKGROUND_KEY) || ''; } catch (e) { return ''; }
+let backgroundEditAssistant = 'cloudy';
+function backgroundKey(base, who) {
+  return (who || assistantId) === 'chatgpt' ? base + ':chatgpt' : base;
 }
-function chatBackgroundOverlay() {
+function chatBackground(who) {
+  try { return localStorage.getItem(backgroundKey(CHAT_BACKGROUND_KEY, who)) || ''; } catch (e) { return ''; }
+}
+function chatBackgroundOverlay(who) {
   try {
-    const value = Number(localStorage.getItem(CHAT_BACKGROUND_OVERLAY_KEY));
+    const value = Number(localStorage.getItem(backgroundKey(CHAT_BACKGROUND_OVERLAY_KEY, who)));
     return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 54;
   } catch (e) { return 54; }
 }
-function applyChatBackgroundOverlay(value, save = false) {
+function paintBackgroundOverlay(style, overlay) {
+  style.setProperty('--chat-bg-overlay-top', Math.max(0, overlay - 10) + '%');
+  style.setProperty('--chat-bg-overlay-bottom', Math.min(100, overlay + 10) + '%');
+}
+function applyChatBackgroundOverlay(value, save = false, who) {
+  who = who || assistantId;
   const overlay = Math.max(0, Math.min(100, Number(value) || 0));
-  document.documentElement.style.setProperty('--chat-bg-overlay-top', Math.max(0, overlay - 10) + '%');
-  document.documentElement.style.setProperty('--chat-bg-overlay-bottom', Math.min(100, overlay + 10) + '%');
+  if (who === assistantId) paintBackgroundOverlay(document.documentElement.style, overlay);
   if (save) {
-    try { localStorage.setItem(CHAT_BACKGROUND_OVERLAY_KEY, String(overlay)); } catch (e) {}
+    try { localStorage.setItem(backgroundKey(CHAT_BACKGROUND_OVERLAY_KEY, who), String(overlay)); } catch (e) {}
   }
   return overlay;
+}
+/* 把当前助手的那张背景穿到页面上。切换助手时也走这里。 */
+function applyChatBackground() {
+  const dataUrl = chatBackground();
+  const has = dataUrl.startsWith('data:image/');
+  if (has) document.documentElement.style.setProperty('--chat-bg-image', 'url("' + dataUrl + '")');
+  else document.documentElement.style.removeProperty('--chat-bg-image');
+  document.documentElement.classList.toggle('has-chat-background', has);
+  paintBackgroundOverlay(document.documentElement.style, chatBackgroundOverlay());
+  updateBackgroundRow();
 }
 function updateBackgroundRow() {
   const label = document.getElementById('backgroundVal');
   if (label) label.textContent = chatBackground() ? '已设置' : '默认';
 }
-function wearChatBackground(dataUrl) {
+function wearChatBackground(dataUrl, who) {
+  who = who || assistantId;
   const has = typeof dataUrl === 'string' && dataUrl.startsWith('data:image/');
   try {
-    if (has) localStorage.setItem(CHAT_BACKGROUND_KEY, dataUrl);
-    else localStorage.removeItem(CHAT_BACKGROUND_KEY);
+    if (has) localStorage.setItem(backgroundKey(CHAT_BACKGROUND_KEY, who), dataUrl);
+    else localStorage.removeItem(backgroundKey(CHAT_BACKGROUND_KEY, who));
   } catch (e) { throw new Error('浏览器没有足够空间保存这张图'); }
-  if (has) document.documentElement.style.setProperty('--chat-bg-image', 'url("' + dataUrl + '")');
-  else document.documentElement.style.removeProperty('--chat-bg-image');
-  document.documentElement.classList.toggle('has-chat-background', has);
-  updateBackgroundRow();
+  if (who === assistantId) applyChatBackground();
 }
 function shrinkBackground(file) {
   return new Promise((resolve, reject) => {
@@ -11488,15 +11506,30 @@ function shrinkBackground(file) {
 }
 function renderChatBackgroundSettings() {
   const body = document.getElementById('backgroundBody');
-  const has = !!chatBackground();
-  body.innerHTML = '<div class="sh-head"><h1>聊天背景</h1><div class="sub">图片只留在当前设备；上面的玻璃组件会自动保持可读。</div></div>'
-    + '<div class="background-preview' + (has ? ' has-image' : '') + '"><div class="caption">' + (has ? '正在使用这张背景图' : '默认的粉灰格纹背景') + '</div></div>'
-    + '<div class="ap-section"><div class="ap-section-title">背景遮罩 <span class="val" id="backgroundOverlayVal">' + chatBackgroundOverlay() + '%</span></div>'
-    + '<input class="ap-in" id="backgroundOverlay" type="range" min="0" max="100" step="1" value="' + chatBackgroundOverlay() + '">'
+  const who = backgroundEditAssistant;
+  const whoName = who === 'chatgpt' ? 'ChatGPT' : 'Cloudy';
+  const image = chatBackground(who);
+  const has = !!image;
+  body.innerHTML = '<div class="sh-head"><h1>聊天背景</h1><div class="sub">两位助手各用各的背景。图片只留在当前设备；上面的玻璃组件会自动保持可读。</div></div>'
+    + '<div class="msg-style-tabs background-assistant-tabs" aria-label="选择助手">'
+    + ['cloudy', 'chatgpt'].map(id => '<button class="msg-style-tab' + (who === id ? ' on' : '') + '" data-bg-assistant="' + id + '">' + (id === 'chatgpt' ? 'ChatGPT' : 'Cloudy') + '</button>').join('')
+    + '</div>'
+    + '<div class="background-preview' + (has ? ' has-image' : '') + '"><div class="caption">' + (has ? whoName + ' 正在使用这张背景图' : whoName + ' 用的是默认的粉灰格纹背景') + '</div></div>'
+    + '<div class="ap-section"><div class="ap-section-title">背景遮罩 <span class="val" id="backgroundOverlayVal">' + chatBackgroundOverlay(who) + '%</span></div>'
+    + '<input class="ap-in" id="backgroundOverlay" type="range" min="0" max="100" step="1" value="' + chatBackgroundOverlay(who) + '">'
     + '<div class="ap-note">数值越高，背景图越柔和、文字越清楚；设为 0% 可看原图。</div></div>'
     + '<div class="ap-btns"><button class="ap-b go" id="backgroundChoose">从设备选择图片</button>'
     + (has ? '<button class="ap-b" id="backgroundReset">恢复默认</button>' : '') + '</div>'
-    + '<div class="ap-note">图片会在设备上压缩后保存；不会上传到服务器，也不会发送给 ' + assistantName + '。</div><div class="ap-msg" id="backgroundMsg"></div>';
+    + '<div class="ap-note">图片会在设备上压缩后保存；不会上传到服务器，也不会发送给任何一位助手。</div><div class="ap-msg" id="backgroundMsg"></div>';
+  // 预览画的是正在编辑的那位，不一定是页面当前穿着的那张。
+  const preview = body.querySelector('.background-preview');
+  if (has) preview.style.setProperty('--chat-bg-image', 'url("' + image + '")');
+  else preview.style.removeProperty('--chat-bg-image');
+  paintBackgroundOverlay(preview.style, chatBackgroundOverlay(who));
+  body.querySelectorAll('[data-bg-assistant]').forEach(btn => btn.onclick = () => {
+    backgroundEditAssistant = btn.dataset.bgAssistant;
+    renderChatBackgroundSettings();
+  });
   const input = document.createElement('input');
   input.type = 'file'; input.accept = 'image/*'; input.style.display = 'none'; body.appendChild(input);
   const message = body.querySelector('#backgroundMsg');
@@ -11506,26 +11539,34 @@ function renderChatBackgroundSettings() {
     var pct = (inp.value - inp.min) / (inp.max - inp.min) * 100;
     inp.style.setProperty('--range-pct', pct + '%');
   }
-  overlayInput.oninput = () => { overlayValue.textContent = applyChatBackgroundOverlay(overlayInput.value, true) + '%'; paintRangeFill(overlayInput); };
+  overlayInput.oninput = () => {
+    const overlay = applyChatBackgroundOverlay(overlayInput.value, true, who);
+    paintBackgroundOverlay(preview.style, overlay);
+    overlayValue.textContent = overlay + '%'; paintRangeFill(overlayInput);
+  };
   paintRangeFill(overlayInput);
   body.querySelector('#backgroundChoose').onclick = () => input.click();
   input.onchange = async () => {
     const file = input.files && input.files[0]; if (!file) return;
     message.textContent = '正在处理图片…'; message.className = 'ap-msg on';
-    try { wearChatBackground(await shrinkBackground(file)); renderChatBackgroundSettings(); }
+    try { wearChatBackground(await shrinkBackground(file), who); renderChatBackgroundSettings(); }
     catch (e) { message.textContent = '没设上：' + e.message; message.className = 'ap-msg on bad'; }
   };
   const reset = body.querySelector('#backgroundReset');
-  if (reset) reset.onclick = () => { wearChatBackground(''); renderChatBackgroundSettings(); };
+  if (reset) reset.onclick = () => { wearChatBackground('', who); renderChatBackgroundSettings(); };
 }
-document.getElementById('backgroundRow').onclick = () => { sheets.background.classList.add('open'); renderChatBackgroundSettings(); };
-applyChatBackgroundOverlay(chatBackgroundOverlay());
-updateBackgroundRow();
+document.getElementById('backgroundRow').onclick = () => {
+  backgroundEditAssistant = assistantId;   // 打开时先编辑当前这位
+  sheets.background.classList.add('open'); renderChatBackgroundSettings();
+};
+applyChatBackground();
 
-/* 我的消息与 Cloudy 的消息各有浅色 / 深色两套玻璃样式。
-   thinking 和工具调用是 Cloudy 的输出，因此跟随 Cloudy 的样式。 */
+/* 我的消息、Cloudy 的消息、ChatGPT 的消息各有浅色 / 深色两套玻璃样式。
+   thinking 和工具调用是助手的输出，跟随当前那位助手的样式。
+   气泡的 CSS 变量只有 --msg-me-* 和 --msg-cloudy-* 两组：后一组写的是「当前助手」，
+   切到 ChatGPT 时就换成 ChatGPT 那套值。 */
 const MESSAGE_STYLE_KEY = 'dwellMessageStyle';
-const MESSAGE_STYLE_ROLES = ['me', 'cloudy'];
+const MESSAGE_STYLE_ROLES = ['me', 'cloudy', 'chatgpt'];
 const MESSAGE_STYLE_MODES = ['light', 'dark'];
 const MESSAGE_STYLE_DEFAULTS = {
   me: {
@@ -11535,8 +11576,13 @@ const MESSAGE_STYLE_DEFAULTS = {
   cloudy: {
     light: { blur: 16, background: '#f6e8ee', backgroundOpacity: 48, border: '#ffffff', borderOpacity: 38, borderWidth: 1, text: '#514a4f', radius: 18 },
     dark: { blur: 16, background: '#4f4148', backgroundOpacity: 62, border: '#f2c9dc', borderOpacity: 18, borderWidth: 1, text: '#f7edf2', radius: 18 }
+  },
+  chatgpt: {
+    light: { blur: 16, background: '#f6e8ee', backgroundOpacity: 48, border: '#ffffff', borderOpacity: 38, borderWidth: 1, text: '#514a4f', radius: 18 },
+    dark: { blur: 16, background: '#4f4148', backgroundOpacity: 62, border: '#f2c9dc', borderOpacity: 18, borderWidth: 1, text: '#f7edf2', radius: 18 }
   }
 };
+const MESSAGE_STYLE_ROLE_NAMES = { me: '我的消息', cloudy: 'Cloudy 的消息', chatgpt: 'ChatGPT 的消息' };
 const MESSAGE_STYLE_LIMITS = {
   blur: [0, 30], backgroundOpacity: [0, 100], borderOpacity: [0, 100], borderWidth: [0, 3], radius: [4, 32]
 };
@@ -11683,10 +11729,12 @@ function cloneMessageStyle(value) {
 function readMessageStyles() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(MESSAGE_STYLE_KEY) || '{}') || {}; } catch (e) {}
-  const out = { me: {}, cloudy: {} };
+  const out = { me: {}, cloudy: {}, chatgpt: {} };
   MESSAGE_STYLE_ROLES.forEach(role => {
     MESSAGE_STYLE_MODES.forEach(mode => {
-      const nested = saved[role] && saved[role][mode];
+      // ChatGPT 还没单独调过时，先穿 Cloudy 现在那身，切过去不会突然变样。
+      const nested = (saved[role] && saved[role][mode])
+        || (role === 'chatgpt' && saved.cloudy && saved.cloudy[mode]);
       const shared = saved[mode];
       const retiredFlatRole = mode === 'light' && saved[role] && !saved[role].light && !saved[role].dark ? saved[role] : null;
       const raw = nested || shared || retiredFlatRole || {};
@@ -11716,7 +11764,9 @@ function writeMessageRoleStyle(style, role, values) {
   style.setProperty(prefix + 'radius', values.radius + 'px');
 }
 function applyMessageStyleMode(mode) {
-  MESSAGE_STYLE_ROLES.forEach(role => writeMessageRoleStyle(document.documentElement.style, role, messageStyleState[role][mode]));
+  const style = document.documentElement.style;
+  writeMessageRoleStyle(style, 'me', messageStyleState.me[mode]);
+  writeMessageRoleStyle(style, 'cloudy', messageStyleState[assistantId === 'chatgpt' ? 'chatgpt' : 'cloudy'][mode]);
 }
 function applyMessageStyles() {
   applyMessageStyleMode(effectiveMessageStyleMode());
@@ -11753,21 +11803,23 @@ document.addEventListener('input', event => {
 
 function renderMessageStyleSettings() {
   const body = document.getElementById('messageStyleBody');
-  const roleLabel = messageStyleRole === 'me' ? '我的消息' : assistantName + ' 的消息';
-  const otherRole = messageStyleRole === 'me' ? 'cloudy' : 'me';
-  const otherLabel = otherRole === 'me' ? '我的消息' : assistantName;
+  if (!MESSAGE_STYLE_ROLES.includes(messageStyleRole)) messageStyleRole = 'me';
+  const roleLabel = MESSAGE_STYLE_ROLE_NAMES[messageStyleRole];
+  // 预览里的助手气泡：正在编辑哪位就是哪位；编辑我的消息时，配当前那位助手。
+  const previewRole = messageStyleRole === 'me' ? (assistantId === 'chatgpt' ? 'chatgpt' : 'cloudy') : messageStyleRole;
+  const previewName = previewRole === 'chatgpt' ? 'ChatGPT' : 'Cloudy';
   const modeLabel = messageStyleTab === 'light' ? '浅色' : '深色';
   body.innerHTML = '<div class="msg-style-preview" data-mode="' + messageStyleTab + '">'
     + '<button type="button" class="msg-preview-me msg-preview-target' + (messageStyleRole === 'me' ? ' editing' : '') + '" data-style-role="me">这是我的消息。' + (messageStyleRole === 'me' ? '<span class="msg-preview-badge">正在编辑</span>' : '') + '</button>'
     + '<div class="msg-preview-think"><span>💡</span><b>thinking</b><span class="arr">›</span></div>'
-    + '<button type="button" class="msg-preview-cloudy msg-preview-target' + (messageStyleRole === 'cloudy' ? ' editing' : '') + '" data-style-role="cloudy">这是 ' + assistantName + ' 的回复。' + (messageStyleRole === 'cloudy' ? '<span class="msg-preview-badge">正在编辑</span>' : '') + '</button></div>'
-    + '<div class="msg-style-role-tabs" aria-label="选择要编辑的消息"><button class="msg-style-role-tab' + (messageStyleRole === 'me' ? ' on' : '') + '" data-style-role="me">我的消息</button>'
-    + '<button class="msg-style-role-tab' + (messageStyleRole === 'cloudy' ? ' on' : '') + '" data-style-role="cloudy">' + assistantName + ' 的消息</button></div>'
+    + '<button type="button" class="msg-preview-cloudy msg-preview-target' + (messageStyleRole === previewRole ? ' editing' : '') + '" data-style-role="' + previewRole + '">这是 ' + previewName + ' 的回复。' + (messageStyleRole === previewRole ? '<span class="msg-preview-badge">正在编辑</span>' : '') + '</button></div>'
+    + '<div class="msg-style-role-tabs" aria-label="选择要编辑的消息">'
+    + MESSAGE_STYLE_ROLES.map(role => '<button class="msg-style-role-tab' + (messageStyleRole === role ? ' on' : '') + '" data-style-role="' + role + '">' + MESSAGE_STYLE_ROLE_NAMES[role] + '</button>').join('')
+    + '</div>'
     + '<div class="msg-style-tabs" aria-label="选择明暗模式"><button class="msg-style-tab' + (messageStyleTab === 'light' ? ' on' : '') + '" data-style-tab="light">浅色模式</button>'
     + '<button class="msg-style-tab' + (messageStyleTab === 'dark' ? ' on' : '') + '" data-style-tab="dark">深色模式</button></div>'
-    + '<div class="msg-style-actions"><button type="button" class="msg-style-copy" id="messageStyleCopy">把' + roleLabel + '的' + modeLabel + '样式复制给' + otherLabel + '</button></div>'
     + '<div class="ap-section" id="messageStyleControls"></div>'
-    + '<div class="msg-style-note">双方消息可以分别调整。thinking 与工具调用属于 ' + assistantName + ' 的输出，会跟随 ' + assistantName + ' 的消息样式。</div>'
+    + '<div class="msg-style-note">三种消息可以分别调整。thinking 与工具调用属于助手的输出，会跟随当前那位助手的消息样式。</div>'
     + '<div class="group-label glass-effect-label">界面玻璃 · ' + modeLabel + '模式</div>'
     + '<div class="ap-section interface-glass-section" id="interfaceGlassControls"></div>'
     + '<div class="msg-style-note">输入框、左侧边栏和语音浮窗分别保存浅色与深色参数。调整会立即生效并保存在当前设备。</div>'
@@ -11780,7 +11832,8 @@ function renderMessageStyleSettings() {
     + '<button class="msg-style-reset-choice msg-style-reset-cancel" data-reset-scope="cancel">取消</button></div></div>';
 
   const preview = body.querySelector('.msg-style-preview');
-  MESSAGE_STYLE_ROLES.forEach(role => writeMessageRoleStyle(preview.style, role, messageStyleState[role][messageStyleTab]));
+  writeMessageRoleStyle(preview.style, 'me', messageStyleState.me[messageStyleTab]);
+  writeMessageRoleStyle(preview.style, 'cloudy', messageStyleState[previewRole][messageStyleTab]);
 
   body.querySelectorAll('[data-style-role]').forEach(btn => btn.onclick = () => {
     messageStyleRole = btn.dataset.styleRole;
@@ -11809,7 +11862,7 @@ function renderMessageStyleSettings() {
     }
     input.addEventListener('input', () => {
       current[spec.key] = spec.type === 'color' ? input.value : Number(input.value);
-      writeMessageRoleStyle(preview.style, messageStyleRole, current);
+      writeMessageRoleStyle(preview.style, messageStyleRole === 'me' ? 'me' : 'cloudy', current);
       if (messageStyleTab === effectiveMessageStyleMode()) applyMessageStyles();
       saveMessageStyles();
     });
@@ -11817,18 +11870,6 @@ function renderMessageStyleSettings() {
   });
   renderInterfaceGlassControls();
   paintRanges(body);
-
-  body.querySelector('#messageStyleCopy').onclick = () => {
-    messageStyleState[otherRole][messageStyleTab] = cloneMessageStyle(current);
-    writeMessageRoleStyle(preview.style, otherRole, messageStyleState[otherRole][messageStyleTab]);
-    if (messageStyleTab === effectiveMessageStyleMode()) applyMessageStyles();
-    saveMessageStyles();
-    const copy = body.querySelector('#messageStyleCopy');
-    copy.textContent = '已经复制给' + otherLabel;
-    setTimeout(() => {
-      if (copy.isConnected) copy.textContent = '把' + roleLabel + '的' + modeLabel + '样式复制给' + otherLabel;
-    }, 900);
-  };
 
   const resetMenu = body.querySelector('#messageStyleResetMenu');
   document.getElementById('messageStyleReset').onclick = () => { resetMenu.hidden = false; };
