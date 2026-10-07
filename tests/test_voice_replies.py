@@ -212,8 +212,10 @@ class VoiceCacheDirTest(unittest.TestCase):
                          "_tts_message_cache_details", "_tts_api_key")
         }
         saved_client = main.httpx.AsyncClient
+        saved_chat_assistant = main.db.chat_assistant
+        main.db.chat_assistant = lambda chat_id: "cloudy"
         main._get_or_create_current_chat = lambda: "chat"
-        main._tts_config = lambda: {
+        main._tts_config = lambda *a: {
             "base_url": "https://api.elevenlabs.io", "voice_id": "v", "model_id": "m",
         }
         main._tts_message_cache_details = lambda *a, **k: {"spoken": "hi", "path": doomed}
@@ -226,6 +228,7 @@ class VoiceCacheDirTest(unittest.TestCase):
             for name, value in saved.items():
                 setattr(main, name, value)
             main.httpx.AsyncClient = saved_client
+            main.db.chat_assistant = saved_chat_assistant
             os.remove(blocker.name)
 
         self.assertEqual(caught.exception.status_code, 500)
