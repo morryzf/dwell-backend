@@ -349,7 +349,8 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
                          state: dict | None = None,
                          rewrite_rules: list[dict] | None = None,
                          mcp_servers: dict | None = None,
-                         require_english: bool = False) -> dict:
+                         require_english: bool = False,
+                         require_language: str = "") -> dict:
     """组装一次桥接请求。
 
     tools 只用来判断这轮要不要多跑几圈：Dwell 的 function tools 无法直接交给
@@ -407,6 +408,8 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
         payload["mcp_servers"] = mcp_servers
     if require_english:
         payload["require_english"] = True
+    if require_language in {"zh", "en"}:
+        payload["require_language"] = require_language
     # effort 关掉 thinking 时依然有意义（它还管花多少 token），能不能用由桥接判断。
     effort = str(reasoning_effort or "").strip()
     if effort:
@@ -490,7 +493,8 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                              thinking_enabled: bool = True,
                              session_key: str = "", rewrite_guard: bool = False,
                              mcp_servers: dict | None = None,
-                             require_english: bool = False):
+                             require_english: bool = False,
+                             require_language: str = ""):
     """通过桥接服务跑一轮对话。密钥是可选的：它是桥接服务的门禁，不是模型凭据。
 
     session_key 为空就每轮从头讲：心跳这类不属于这段对话的入口不该续会话，
@@ -502,7 +506,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
         model_id, messages, tools, max_tokens=max_tokens,
         reasoning_effort=reasoning_effort, thinking_enabled=thinking_enabled,
         state=load_state(chat_key), rewrite_rules=rules, mcp_servers=mcp_servers,
-        require_english=require_english,
+        require_english=require_english, require_language=require_language,
     )
     if not payload["prompt"] and not payload.get("images"):
         yield {"type": "text", "text": "[配置错误] 这次没有可以发给 Claude Code 的内容"}
@@ -549,6 +553,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                         reasoning_effort=reasoning_effort,
                         thinking_enabled=thinking_enabled, rewrite_rules=rules,
                         mcp_servers=mcp_servers, require_english=require_english,
+                        require_language=require_language,
                     )
                     continue
 

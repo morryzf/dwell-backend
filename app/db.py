@@ -1557,6 +1557,21 @@ def message_is_voice(message_id: str) -> bool:
     return bool(row and row["voice"])
 
 
+REPLY_LANGUAGES = ("auto", "zh", "en")
+
+
+def chat_reply_language(chat_id: str) -> str:
+    """这间聊天要求的回复语言：auto（不管）/ zh / en。"""
+    value = setting_get(f"reply_language:{chat_id}", "auto")
+    return value if value in REPLY_LANGUAGES else "auto"
+
+
+def chat_reply_language_set(chat_id: str, language: str) -> str:
+    language = language if language in REPLY_LANGUAGES else "auto"
+    setting_set(f"reply_language:{chat_id}", language)
+    return language
+
+
 def chat_voice_mode(chat_id: str) -> bool:
     return setting_get(f"voice_mode:{chat_id}", "0") == "1"
 

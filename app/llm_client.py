@@ -662,12 +662,38 @@ def _affordable_tokens(status: int, body: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+_HAN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_KANA_HANGUL_RE = re.compile(r"[\u3040-\u30ff\uac00-\ud7af]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
+_CODE_OR_LINK_RE = re.compile(r"```[\s\S]*?```|`[^`]*`|https?://\S+")
+
+
+def reply_language_ok(text: str, language: str) -> bool:
+    """这一版是不是要求的语言。和桥接那边同一套口径。
+
+    en：几乎不能有汉字——英文里偶尔带个中文名字可以（最多 3 个字，英文字母至少是它的五倍）。
+    zh：要以汉字为主——夹几个英文词没关系，英文字母不能比汉字的四倍还多。
+    代码和链接不算。空回复不打回（多半是只调了工具）。
+    """
+    if language not in {"en", "zh"}:
+        return True
+    body = _CODE_OR_LINK_RE.sub(" ", str(text or ""))
+    han = len(_HAN_RE.findall(body)) + len(_KANA_HANGUL_RE.findall(body))
+    latin = len(_LATIN_RE.findall(body))
+    if not han and not latin:
+        return True
+    if language == "en":
+        return han <= 3 and latin >= han * 5 and latin > 0
+    return han > 0 and han * 4 >= latin
+
+
 async def stream_chat(provider: dict, model_id: str, messages: list, tools: list | None = None,
                       max_tokens: int | None = None, reasoning_effort: str | None = None,
                       thinking_enabled: bool = True, session_id: str | None = None,
                       agent_session_key: str = "", rewrite_guard: bool = False,
                       agent_mcp_servers: dict | None = None,
-                      agent_require_english: bool = False):
+                      agent_require_english: bool = False,
+                      agent_require_language: str = ""):
     """Stream chat through native Anthropic caching or the OpenAI-compatible path.
 
     `session_id` 是供应商侧的缓存分组；`agent_session_key` 是 Claude Code 的会话
@@ -677,7 +703,8 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
     工具改由 Claude Code 通过 MCP 回调 Dwell。
 
     `agent_require_english` 是语音回复：Claude Code 收尾前查一遍，带了中文就打回重说。
-    别的通道没有收尾前那一道关卡，只靠提示。
+    `agent_require_language` 是这间聊天选的回复语言（zh / en），同样在收尾前查。
+    别的通道在 Dwell 这边查（见 main._run_ai_reply）。
 
     `rewrite_guard` 只给「Cloudy 在跟她说话」的入口开。生成摘要、出 JSON、写
     观影笔记这些内部调用不该被重写规则打回——那些话不是说给她听的。
@@ -696,6 +723,7 @@ async def stream_chat(provider: dict, model_id: str, messages: list, tools: list
             thinking_enabled=thinking_enabled, session_key=agent_session_key,
             rewrite_guard=rewrite_guard, mcp_servers=agent_mcp_servers,
             require_english=agent_require_english,
+            require_language=agent_require_language,
         ):
             yield event
         return

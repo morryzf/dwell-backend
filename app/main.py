@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from . import auth, db, file_text, home_mcp, provider_secrets, push_service, sigillo, study, subscription_usage
 from app.pet_assets import ensure_pet_assets
 from app.agent_sdk_client import MEMORY_CARD_KEY, PROMPT_TAIL_KEY
-from app.llm_client import prompt_cache_enabled, stream_chat
+from app.llm_client import prompt_cache_enabled, reply_language_ok, stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
 from app.web_tools import WebToolError, web_fetch, web_search
 from app.kelivo_import import KelivoImportError, import_conversation as kelivo_import_conversation, preview as kelivo_preview
@@ -247,6 +247,21 @@ VOICE_REPLY_PROMPT = (
     "they sound strange when read aloud.\n"
     "Don't mention that this is a voice message. Just talk."
 )
+
+# 「+」里选的回复语言。跟语音那句一样排在这一轮最后，用对应的语言写。
+# 自动＝什么都不加。语音开着时语音说了算，这里不加。
+REPLY_LANGUAGE_PROMPTS = {
+    "en": "[From the system prompt] Please reply in English.",
+    "zh": "【来自系统提示】请用中文回复。",
+}
+# 没按选的语言说时（不走 Claude Code 的通道），在这边打回重说用的话。
+REPLY_LANGUAGE_RETRY = {
+    "en": "[From the system prompt] Your last version wasn't in English. Say it again in English. "
+          "Don't mention the redo or explain; just give the new version.",
+    "zh": "【来自系统提示】你刚才那一版不是中文。用中文重新说一遍。不要提这次打回，"
+          "也不要解释，直接给新的那一版。",
+}
+REPLY_LANGUAGE_MAX_RETRIES = 2
 
 
 # sigillo 回执单。一场亲密结束、aftercare 收尾的时候开单（不是进行中，也不是随口聊到的时候）。
@@ -5257,6 +5272,23 @@ async def voice_mode_put(chat_id: str, payload: dict = Body(...)):
     return {"ok": True, "enabled": db.chat_voice_mode(chat_id)}
 
 
+@app.get("/api/chats/{chat_id}/reply-language", dependencies=authed)
+async def reply_language_get(chat_id: str):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    return {"ok": True, "language": db.chat_reply_language(chat_id)}
+
+
+@app.put("/api/chats/{chat_id}/reply-language", dependencies=authed)
+async def reply_language_put(chat_id: str, payload: dict = Body(...)):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    language = payload.get("language")
+    if language not in db.REPLY_LANGUAGES:
+        raise HTTPException(400, "language 只能是 auto、zh 或 en")
+    return {"ok": True, "language": db.chat_reply_language_set(chat_id, language)}
+
+
 @app.get("/api/chats/{chat_id}/sigillo", dependencies=authed)
 async def sigillo_chat_get(chat_id: str):
     if not db.chat_get(chat_id):
@@ -5643,7 +5675,8 @@ def _transient_context_blocks(transient: list[dict]) -> list[dict]:
     }]
 
 
-def _voice_reply_tail(messages: list[dict], agent_sdk: bool) -> list[dict]:
+def _voice_reply_tail(messages: list[dict], agent_sdk: bool,
+                     prompt: str = VOICE_REPLY_PROMPT) -> list[dict]:
     """把语音回复的要求排到这一轮的最后，紧跟在她刚说的那句之后。
 
     以前它和设备时间这些临时上下文排在一起，在她那句话之前；遇到要从头讲的时候
@@ -5652,17 +5685,19 @@ def _voice_reply_tail(messages: list[dict], agent_sdk: bool) -> list[dict]:
     只动这一轮的请求，不碰存下来的历史；缓存前缀也不受影响——这句话本来就是新的。
     Claude Code 那条路不能改她那句话的原文（会话指纹按原文对齐），所以单独标记，
     由 agent_sdk_client 接在 prompt 末尾。
+
+    「+」里选的回复语言也走这里，`prompt` 换成那一句。
     """
     if agent_sdk:
-        return messages + [{"role": "system", "content": VOICE_REPLY_PROMPT, PROMPT_TAIL_KEY: True}]
+        return messages + [{"role": "system", "content": prompt, PROMPT_TAIL_KEY: True}]
     for index in range(len(messages) - 1, -1, -1):
         if messages[index].get("role") != "user":
             continue
         existing = messages[index].get("content", "")
         content = list(existing) if isinstance(existing, list) else [{"type": "text", "text": str(existing)}]
-        content.append({"type": "text", "text": VOICE_REPLY_PROMPT})
+        content.append({"type": "text", "text": prompt})
         return messages[:index] + [{**messages[index], "content": content}] + messages[index + 1:]
-    return messages + [{"role": "system", "content": VOICE_REPLY_PROMPT}]
+    return messages + [{"role": "system", "content": prompt}]
 
 
 def _cache_friendly_chat_messages(stable: list[dict], transient: list[dict],
@@ -5718,6 +5753,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     agent_sdk = bool(
         provider and str(provider.get("provider_type") or "") == "claude_agent_sdk"
     )
+    # 语音优先：要念出来的只能是英文，聊天选的语言这一轮不管。
+    reply_language = "auto" if voice_reply else db.chat_reply_language(chat_id)
     memory_card_message = []
     assistant_label = db.assistant_name(db.chat_assistant(chat_id))
     memory_query = _memory_card_query(history, watch_context, assistant_label)
@@ -5903,6 +5940,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             break
     if voice_reply:
         messages = _voice_reply_tail(messages, agent_sdk)
+    elif reply_language in REPLY_LANGUAGE_PROMPTS:
+        messages = _voice_reply_tail(messages, agent_sdk, REPLY_LANGUAGE_PROMPTS[reply_language])
 
     buf = []
     thinking_buf: list[str] = []
@@ -6046,8 +6085,10 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             raise RuntimeError("这个聊天还没有可用的供应商；请在设置里添加并选择一个")
         tools, tool_map = await _chat_tools(chat_id)
 
+        language_retries = 0
         for round_no in range(8):
             calls = []
+            round_text: list[str] = []
             round_usage = {}
             round_started = time.perf_counter()
             async for event in stream_chat(
@@ -6058,16 +6099,19 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 agent_session_key=f"dwell-chat:{chat_id}",
                 agent_mcp_servers=_agent_tools_mcp(provider, chat_id, current_message_id),
                 agent_require_english=voice_reply,
+                agent_require_language=reply_language if agent_sdk else "",
                 rewrite_guard=True,
             ):
                 if event["type"] == "thinking":
                     append_stream_thinking(str(event.get("thinking") or ""))
                 elif event["type"] == "text":
                     chunk = event["text"]
+                    round_text.append(chunk)
                     consume_stream_chunk(chunk)
                 elif event["type"] == "tool_calls":
                     calls.extend(event["calls"])
                 elif event["type"] == "reset":
+                    round_text = []
                     reset_stream()
                 elif event["type"] == "cache_status":
                     cache_protocol = str(event.get("protocol") or "")
@@ -6100,6 +6144,20 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     # Usage accounting must never turn a completed model round into an error.
                     pass
             if not calls:
+                # Claude Code 那边在收尾前自己查过了；别的通道在这里查。
+                said = "".join(round_text)
+                if (not agent_sdk and reply_language in REPLY_LANGUAGE_RETRY
+                        and language_retries < REPLY_LANGUAGE_MAX_RETRIES
+                        and not reply_language_ok(said, reply_language)):
+                    language_retries += 1
+                    append_stream_thinking(
+                        "（打回重说：回复不是中文）\n" if reply_language == "zh"
+                        else "（打回重说：回复不是英文）\n"
+                    )
+                    reset_stream()
+                    messages.append({"role": "assistant", "content": said})
+                    messages.append({"role": "user", "content": REPLY_LANGUAGE_RETRY[reply_language]})
+                    continue
                 break
 
             assistant_calls = []
@@ -6243,6 +6301,14 @@ async def send(request: Request):
         saved_text = "（发来了文件：" + "、".join(item["name"] for item in text_files) + "）"
 
     chat_id = _get_or_create_current_chat()
+    # 发送时带上页面上看到的语音、语言开关。开关刚点完就发的话，那次保存可能还在路上，
+    # 以这里为准就不会丢。页面上的聊天和后端的当前聊天对不上时不动，免得写到别的聊天去。
+    sent_chat = str(payload.get("chat_id") or "")
+    if not sent_chat or sent_chat == chat_id:
+        if isinstance(payload.get("voice"), bool):
+            db.chat_voice_mode_set(chat_id, payload["voice"])
+        if payload.get("reply_language") in db.REPLY_LANGUAGES:
+            db.chat_reply_language_set(chat_id, payload["reply_language"])
 
     user_message = db.message_add(chat_id, "user", saved_text)
     previews = [

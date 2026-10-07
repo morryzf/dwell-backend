@@ -2203,6 +2203,10 @@ html[data-theme="dark"] .rc { --stamp: var(--accent-soft); --rc-foot-ink: rgba(2
     margin-top: 12px; text-align: left;
   }
   .addrow .ic { width: 20px; height: 20px; }
+  /* 回复语言：一行里放名字和三段选择，不是按钮，点的是右边那几段。 */
+  .addrow.langrow { padding: 10px 10px 10px 18px; }
+  .langrow .tts-seg { grid-template-columns: repeat(3, auto); }
+  .langrow .tts-seg button { min-height: 32px; padding: 0 12px; font-size: 14px; }
 
   .menuCard {   
     position: fixed; z-index: 60; top: calc(58px + env(safe-area-inset-top)); right: 12px;
@@ -4955,6 +4959,13 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
         <button class="addbig" id="photoBtn"><span class="ic" data-i="image"></span>Photos</button>
       </div>
       <button class="addrow" id="fileBtn"><span class="ic" data-i="filePlus"></span>Add files</button>
+      <div class="addrow langrow" id="langRow"><span class="ic" data-i="languages"></span>回复语言
+        <div class="tts-seg" id="langSeg" role="radiogroup" aria-label="回复语言">
+          <button data-lang="auto" role="radio">自动</button>
+          <button data-lang="zh" role="radio">中文</button>
+          <button data-lang="en" role="radio">English</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -5009,6 +5020,7 @@ const ICONS = {
   home: S('<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>'),
   terminal: S('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
   search: S('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'),
+  languages: S('<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>'),
   globe: S('<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'),
   box: S('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>'),
   zap: S('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'),
@@ -7495,6 +7507,8 @@ async function send() {
   box.style.height = 'auto';
   setBusy(true);
   const payload = { text, device_time: deviceTimeContext() };
+  // 页面上看到的开关跟着这条一起走：开关刚点完就发，那次保存可能还没到，以这里为准。
+  if (switchesChatId) Object.assign(payload, { chat_id: switchesChatId, voice: voiceMode, reply_language: replyLanguage });
   const focusContext = focusContextForSend();
   if (focusContext) payload.focus_context = focusContext;
   if (outgoingAttachments.length) payload.attachments = outgoingAttachments;
@@ -13548,6 +13562,7 @@ async function loadChatModel() {
     setModelPill(d.model || '');
     syncReasoningButton();
   } catch { setModelPill(''); }
+  if (typeof loadChatSwitches === 'function') loadChatSwitches();
 }
 loadChatModel();
 
@@ -13569,34 +13584,78 @@ function syncVoiceButton() {
   voiceBtn.setAttribute('aria-pressed', String(voiceMode));
   voiceBtn.title = voiceMode ? '语音回复已开启：我会用英文语音回你' : '语音回复';
 }
-async function loadVoiceMode() {
+/* 语音和回复语言都按聊天存。switchesChatId 记着页面上这两个开关属于哪一间：
+   换了窗口要重读，不然发出去的是上一间的开关。 */
+var switchesChatId = '', replyLanguage = 'auto';
+let switchesLoadSeq = 0;
+const langSeg = document.getElementById('langSeg');
+function syncLangSeg() {
+  langSeg.querySelectorAll('button').forEach(b => {
+    const on = b.dataset.lang === replyLanguage;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  });
+}
+async function loadChatSwitches() {
+  const seq = ++switchesLoadSeq;
   try {
     const chat = await currentChatForMemory();
-    if (!chat) return;
-    const d = await (await fetch('api/chats/' + encodeURIComponent(chat.id) + '/voice-mode', {cache:'no-store'})).json();
-    voiceMode = !!d.enabled;
-    syncVoiceButton();
+    if (!chat || seq !== switchesLoadSeq) return;
+    const base = 'api/chats/' + encodeURIComponent(chat.id);
+    const [v, l] = await Promise.all([
+      fetch(base + '/voice-mode', {cache:'no-store'}).then(r => r.json()),
+      fetch(base + '/reply-language', {cache:'no-store'}).then(r => r.json()),
+    ]);
+    // 读的路上她点过开关了：以她点的为准。
+    if (seq !== switchesLoadSeq) return;
+    switchesChatId = chat.id;
+    voiceMode = !!v.enabled;
+    replyLanguage = l.language || 'auto';
+    syncVoiceButton(); syncLangSeg();
   } catch (_) {}
+}
+async function saveChatSwitch(path, body) {
+  switchesLoadSeq++;
+  const chat = await currentChatForMemory();
+  if (!chat) throw new Error('还没有打开聊天');
+  switchesChatId = chat.id;
+  const r = await fetch('api/chats/' + encodeURIComponent(chat.id) + path, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
+  return d;
 }
 voiceBtn.onclick = async () => {
   const next = !voiceMode;
   voiceMode = next; syncVoiceButton();   // 先亮，手感即时；失败再退回去
+  switchesLoadSeq++;
   if (next) unlockTtsAudio();            // 这一下点击顺便给 iOS 解锁音频
+  note(next ? '语音回复已开启，接下来会用英文语音回你' : '语音回复已关闭');
   try {
-    const chat = await currentChatForMemory();
-    if (!chat) throw new Error('还没有打开聊天');
-    const r = await fetch('api/chats/' + encodeURIComponent(chat.id) + '/voice-mode', {
-      method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled: next}),
-    });
-    const d = await r.json();
-    if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
-    voiceMode = !!d.enabled; syncVoiceButton();
+    const d = await saveChatSwitch('/voice-mode', {enabled: next});
+    if (voiceMode === next) { voiceMode = !!d.enabled; syncVoiceButton(); }
   } catch (e) {
-    voiceMode = !next; syncVoiceButton();
+    if (voiceMode === next) { voiceMode = !next; syncVoiceButton(); }
     note('（语音开关没切换：' + e.message + '）', 'err');
   }
 };
-loadVoiceMode();
+langSeg.onclick = async (ev) => {
+  const btn = ev.target.closest('button[data-lang]');
+  if (!btn || btn.dataset.lang === replyLanguage) return;
+  const prev = replyLanguage, next = btn.dataset.lang;
+  replyLanguage = next; syncLangSeg();
+  switchesLoadSeq++;
+  try {
+    const d = await saveChatSwitch('/reply-language', {language: next});
+    if (replyLanguage === next) { replyLanguage = d.language || 'auto'; syncLangSeg(); }
+  } catch (e) {
+    if (replyLanguage === next) { replyLanguage = prev; syncLangSeg(); }
+    note('（回复语言没切换：' + e.message + '）', 'err');
+  }
+};
+syncLangSeg();
+loadChatSwitches();
 
 /* 按消息 id 生成固定的声纹：同一条语音每次看都是同一个形状。两头收、中间高，像一句话的包络。 */
 function voiceShape(id, count) {
