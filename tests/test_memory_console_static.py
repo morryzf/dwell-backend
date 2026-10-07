@@ -16,7 +16,7 @@ class MemoryConsoleStaticTest(unittest.TestCase):
 
     def test_console_connects_every_memory_card_action(self):
         for route in (
-            "/memory-cards?include_archived=true",
+            "/memory-cards?limit='+memoryCardLimit+'&q='",
             "/memory-cards/generate",
             "/memory-cards/injection",
             "/memory-card-drafts/",
