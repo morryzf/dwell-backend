@@ -9,7 +9,7 @@ def test_primary_settings_actions_share_a_clear_visual_style():
     primary_buttons = (
         'id="heartbeatSave">保存节奏',
         'id="backgroundChoose">从设备选择图片',
-        'id="ttsSave">保存语音设置',
+        'id="ttsSaveConnection" type="button">保存连接',
         'id="apSave">保存供应商',
         'id="mcpSave">保存服务器',
         'id="instructionSave">${current ? \'保存修改\' : \'添加指令\'}',

@@ -3149,16 +3149,26 @@ def _tts_normalize_voices(raw: object, legacy_voice_id: str = "") -> list[dict]:
         if not profile_id or profile_id in seen_ids:
             profile_id = "voice-" + uuid.uuid4().hex
         seen_ids.add(profile_id)
+        preview_url = str(row.get("preview_url") or "").strip()[:500]
+        if not preview_url.startswith("https://"):
+            preview_url = ""
         clean.append({
             "id": profile_id,
             "name": str(row.get("name") or f"音色 {index + 1}").strip()[:80] or f"音色 {index + 1}",
             "voice_id": voice_id,
             "provider_name": str(row.get("provider_name") or "").strip()[:120],
+            "preview_url": preview_url,
         })
     return clean
 
 
-def _tts_config() -> dict:
+# 语音分两层：ElevenLabs 连接和「音色库」两位助手共用；用哪个音色、哪个模型、
+# 读不读斜体、要不要自动播，每位助手各一份。Cloudy 那份就是原来顶层那几个字段，
+# 别的助手存在 profiles 里，第一次打开时先照 Cloudy 的模型和朗读方式，音色留空让她挑。
+TTS_PROFILE_KEYS = ("active_voice_id", "model_id", "model_name", "auto_play", "read_mode")
+
+
+def _tts_saved() -> dict:
     cfg = _tts_default_config()
     try:
         saved = json.loads(db.setting_get(TTS_CONFIG_KEY) or "{}")
@@ -3167,19 +3177,53 @@ def _tts_config() -> dict:
     except json.JSONDecodeError:
         pass
     cfg["voices"] = _tts_normalize_voices(cfg.get("voices"), str(cfg.get("voice_id") or "").strip())
-    voice_ids = {item["id"] for item in cfg["voices"]}
-    if cfg.get("active_voice_id") not in voice_ids:
-        cfg["active_voice_id"] = cfg["voices"][0]["id"] if cfg["voices"] else ""
-    active = next((item for item in cfg["voices"] if item["id"] == cfg["active_voice_id"]), None)
-    cfg["voice_id"] = active["voice_id"] if active else ""
+    if not isinstance(cfg.get("profiles"), dict):
+        cfg["profiles"] = {}
     return cfg
 
 
-def _tts_public_config(cfg: dict | None = None) -> dict:
-    cfg = cfg or _tts_config()
-    keys = ("name", "base_url", "model_id", "model_name", "voice_id", "voices", "active_voice_id", "auto_play", "read_mode")
-    return {key: cfg[key] for key in keys} | {
-        "has_key": bool(cfg.get("api_key_box")),
+def _tts_profile(cfg: dict, assistant: str) -> dict:
+    """这位助手自己的那份朗读设置，已经对过音色库。"""
+    assistant = db.clean_assistant(assistant)
+    if assistant == db.DEFAULT_ASSISTANT:
+        profile = {key: cfg.get(key) for key in TTS_PROFILE_KEYS}
+    else:
+        saved = cfg["profiles"].get(assistant)
+        if isinstance(saved, dict):
+            profile = {key: saved.get(key, cfg.get(key)) for key in TTS_PROFILE_KEYS}
+        else:
+            profile = {key: cfg.get(key) for key in TTS_PROFILE_KEYS} | {"active_voice_id": ""}
+    voice_ids = {item["id"] for item in cfg["voices"]}
+    if profile.get("active_voice_id") not in voice_ids:
+        # Cloudy 原来就默认用第一个；新助手不替她挑。
+        profile["active_voice_id"] = (
+            cfg["voices"][0]["id"] if cfg["voices"] and assistant == db.DEFAULT_ASSISTANT else ""
+        )
+    profile["model_id"] = str(profile.get("model_id") or "eleven_multilingual_v2")
+    profile["model_name"] = str(profile.get("model_name") or profile["model_id"])
+    profile["auto_play"] = bool(profile.get("auto_play"))
+    if profile.get("read_mode") not in {"plain", "plain_and_italic"}:
+        profile["read_mode"] = "plain"
+    active = next((item for item in cfg["voices"] if item["id"] == profile["active_voice_id"]), None)
+    profile["voice_id"] = active["voice_id"] if active else ""
+    return profile
+
+
+def _tts_config(assistant: str = "cloudy") -> dict:
+    """合成语音用的那一份：共用的连接、音色库，加上这位助手自己的选择。"""
+    cfg = _tts_saved()
+    return cfg | _tts_profile(cfg, assistant)
+
+
+def _tts_public_config(cfg: dict | None = None, assistant: str = "cloudy") -> dict:
+    saved = _tts_saved() if cfg is None else cfg
+    assistant = db.clean_assistant(assistant)
+    profile = _tts_profile(saved, assistant)
+    profiles = {key: _tts_profile(saved, key) for key in db.ASSISTANTS}
+    return {key: saved[key] for key in ("name", "base_url", "voices")} | profile | {
+        "assistant": assistant,
+        "profiles": profiles,
+        "has_key": bool(saved.get("api_key_box")),
         "encryption_ready": provider_secrets.encryption_ready(),
     }
 
@@ -3277,33 +3321,40 @@ def _tts_api_key(cfg: dict) -> str:
 
 
 @app.get("/api/tts/config", dependencies=authed)
-async def tts_config_get():
-    return {"ok": True, **_tts_public_config()}
+async def tts_config_get(assistant: str = ""):
+    return {"ok": True, **_tts_public_config(assistant=_request_assistant(assistant))}
 
 
 @app.post("/api/tts/config", dependencies=authed)
 async def tts_config_set(request: Request):
+    """共用的连接和音色库直接改；朗读选择只改 assistant 指的那一位（默认当前助手）。"""
     payload = await _read_json(request)
-    cfg = _tts_config()
+    assistant = _request_assistant(payload.get("assistant"))
+    cfg = _tts_saved()
     cfg["name"] = str(payload.get("name", cfg["name"]))[:80].strip() or "ElevenLabs"
     try:
         cfg["base_url"] = _tts_base_url(payload.get("base_url", cfg["base_url"]))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    cfg["model_id"] = str(payload.get("model_id", cfg["model_id"]))[:120].strip()
-    cfg["model_name"] = str(payload.get("model_name", cfg.get("model_name") or cfg["model_id"]))[:160].strip()
-    cfg["auto_play"] = bool(payload.get("auto_play", cfg["auto_play"]))
-    cfg["read_mode"] = str(payload.get("read_mode", cfg["read_mode"]))
-    if cfg["read_mode"] not in {"plain", "plain_and_italic"}:
-        raise HTTPException(400, "朗读范围无效")
     if "voices" in payload:
         cfg["voices"] = _tts_normalize_voices(payload.get("voices"))
-    cfg["active_voice_id"] = str(payload.get("active_voice_id", cfg.get("active_voice_id") or ""))[:80]
-    valid_profile_ids = {item["id"] for item in cfg["voices"]}
-    if cfg["active_voice_id"] not in valid_profile_ids:
-        cfg["active_voice_id"] = cfg["voices"][0]["id"] if cfg["voices"] else ""
-    active = next((item for item in cfg["voices"] if item["id"] == cfg["active_voice_id"]), None)
-    cfg["voice_id"] = active["voice_id"] if active else ""
+    profile = _tts_profile(cfg, assistant)
+    profile["model_id"] = str(payload.get("model_id", profile["model_id"]))[:120].strip()
+    profile["model_name"] = str(payload.get("model_name", profile["model_name"] or profile["model_id"]))[:160].strip()
+    profile["auto_play"] = bool(payload.get("auto_play", profile["auto_play"]))
+    profile["read_mode"] = str(payload.get("read_mode", profile["read_mode"]))
+    if profile["read_mode"] not in {"plain", "plain_and_italic"}:
+        raise HTTPException(400, "朗读范围无效")
+    profile["active_voice_id"] = str(payload.get("active_voice_id", profile["active_voice_id"]) or "")[:80]
+    if profile["active_voice_id"] not in {item["id"] for item in cfg["voices"]}:
+        profile["active_voice_id"] = ""
+    chosen = {key: profile[key] for key in TTS_PROFILE_KEYS}
+    if assistant == db.DEFAULT_ASSISTANT:
+        cfg.update(chosen)
+        active = next((item for item in cfg["voices"] if item["id"] == chosen["active_voice_id"]), None)
+        cfg["voice_id"] = active["voice_id"] if active else ""
+    else:
+        cfg["profiles"] = {**cfg["profiles"], assistant: chosen}
     if "token" in payload:
         token = str(payload.get("token") or "").strip()
         if token:
@@ -3314,7 +3365,7 @@ async def tts_config_set(request: Request):
         else:
             cfg["api_key_box"] = ""
     db.setting_set(TTS_CONFIG_KEY, json.dumps(cfg, ensure_ascii=False))
-    return {"ok": True, **_tts_public_config(cfg)}
+    return {"ok": True, **_tts_public_config(cfg, assistant)}
 
 
 @app.get("/api/tts/cache", dependencies=authed)
@@ -3330,7 +3381,7 @@ async def tts_cache_clear():
 
 @app.get("/api/tts/catalog", dependencies=authed)
 async def tts_catalog_get():
-    cfg = _tts_config()
+    cfg = _tts_saved()
     api_key = _tts_api_key(cfg)
     headers = {"xi-api-key": api_key, "accept": "application/json"}
     models = []
@@ -3431,7 +3482,7 @@ def _tts_message_cache_details(chat_id: str, message_id: str, cfg: dict) -> dict
 @app.get("/api/tts/cache/messages", dependencies=authed)
 async def tts_cached_messages():
     chat_id = _get_or_create_current_chat()
-    cfg = _tts_config()
+    cfg = _tts_config(db.chat_assistant(chat_id))
     directory = TTS_CACHE_DIR / re.sub(r"[^a-zA-Z0-9_-]", "", chat_id)[:80]
     if not directory.exists() or not cfg.get("voice_id") or not cfg.get("model_id"):
         return {"ok": True, "items": []}
@@ -3459,7 +3510,7 @@ async def tts_cached_messages():
 @app.get("/api/tts/messages/{message_id}", dependencies=authed)
 async def tts_message_audio(message_id: str, cached_only: bool = False):
     chat_id = _get_or_create_current_chat()
-    cfg = _tts_config()
+    cfg = _tts_config(db.chat_assistant(chat_id))
     details = _tts_message_cache_details(chat_id, message_id, cfg)
     spoken = details["spoken"]
     path = details["path"]

@@ -39,8 +39,8 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn('"voices": []', self.source)
         self.assertIn('"active_voice_id": ""', self.source)
         self.assertIn('"provider_name"', self.source)
-        self.assertIn("我的音色", self.ui_source)
-        self.assertIn("同步模型与音色", self.ui_source)
+        self.assertIn("音色库 · 两位共用", self.ui_source)
+        self.assertIn("同步目录", self.ui_source)
         self.assertIn("openTtsPicker('model'", self.ui_source)
         self.assertIn("openTtsPicker('voice'", self.ui_source)
 
