@@ -7488,7 +7488,7 @@ function deviceTimeContext() {
   const now = new Date();
   let timeZone = '';
   try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
-  let local = now.toLocaleString('zh-CN', {dateStyle: 'full', timeStyle: 'medium', hour12: false});
+  let local = now.toLocaleString('en-US', {dateStyle: 'full', timeStyle: 'medium', hour12: false});
   return { local, iso: now.toISOString(), time_zone: timeZone, offset_minutes: -now.getTimezoneOffset() };
 }
 

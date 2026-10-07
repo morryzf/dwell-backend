@@ -55,17 +55,23 @@ class HeartbeatUnansweredTest(unittest.TestCase):
         pending = main._heartbeat_unanswered(self.chat_id)
         self.assertEqual([item["content"] for item in pending], ["到家了吗？"])
         trigger = self._trigger()
-        self.assertIn("已经主动给她发过 1 条消息，她都还没有回", trigger)
+        self.assertIn("you've already sent her 1 message on your own, and she hasn't replied yet", trigger)
         self.assertIn("到家了吗？", trigger)
         # 她回复前 Cloudy 自己接的那句不算追发。
         self.assertNotIn("什么时候到", trigger)
+
+    def test_a_chat_with_no_messages_yet_does_not_count_from_1970(self):
+        trigger = self._trigger()
+        self.assertIn("Morry hasn't said anything in this chat yet", trigger)
+        self.assertIn("you haven't said anything in this chat yet", trigger)
+        self.assertNotIn("days", trigger)
 
     def test_her_reply_clears_the_list(self):
         db.message_add(self.chat_id, "assistant", "到家了吗？", origin="heartbeat")
         db.message_add(self.chat_id, "user", "到了")
         db.message_add(self.chat_id, "assistant", "那就好")
         self.assertEqual(main._heartbeat_unanswered(self.chat_id), [])
-        self.assertNotIn("还没有回", self._trigger())
+        self.assertNotIn("hasn't replied yet", self._trigger())
 
     def test_asks_for_tagged_output(self):
         db.message_add(self.chat_id, "user", "嗯")

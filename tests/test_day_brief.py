@@ -47,10 +47,10 @@ class DayBriefTest(unittest.TestCase):
         db.cal_add_event(self.today, "Claude 订阅该续期了")
         first = self._text()
         self.assertIn("续期", first)
-        self.assertNotIn("已经给过", first, "头一回不该说给过了")
+        self.assertNotIn("already been given", first, "头一回不该说给过了")
         second = self._text()
         self.assertIn("续期", second, "后面每一轮都要还在")
-        self.assertIn("这些今天已经给过你一次了", second)
+        self.assertIn("(you've already been given this once today)", second)
 
     def test_a_new_day_is_first_again(self):
         db.cal_add_event(self.today, "Claude 订阅该续期了")
@@ -61,7 +61,7 @@ class DayBriefTest(unittest.TestCase):
         again = self._text(tomorrow)
         self.assertIn("09-25 Claude", again)
         self.assertIn("2026-09-26", again)
-        self.assertNotIn("已经给过", again, "新的一天又是头一回")
+        self.assertNotIn("already been given", again, "新的一天又是头一回")
 
     def test_quiet_day_says_nothing(self):
         self.assertEqual(self._text(), "", "没事就什么都不说")
