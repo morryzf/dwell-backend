@@ -7994,7 +7994,9 @@ function renderTtsSettings(cfg) {
       ? '<span class="tts-row-btn" data-rename="' + esc(item.id) + '">改名</span><span class="tts-row-btn danger" data-remove="' + esc(item.id) + '">删除</span>'
       : '<span class="tts-check">' + (active && active.id === item.id ? '✓' : '') + '</span>';
     return '<button class="grow tts-voice-row" type="button" data-voice="' + esc(item.id) + '">'
-      + '<span class="tts-voice-name"><strong>' + esc(item.name) + '</strong><small>' + esc(item.provider_name || item.voice_id) + '</small></span>'
+      // 第二行一律给 ElevenLabs 的音色 ID；原名和我起的名字不一样时，把原名放在 ID 前面
+      + '<span class="tts-voice-name"><strong>' + esc(item.name) + '</strong><small>'
+      + esc((item.provider_name && item.provider_name !== item.name ? item.provider_name + ' · ' : '') + item.voice_id) + '</small></span>'
       + (ttsLibEditing ? '' : '<span class="tts-voice-tags">' + tags + '</span>') + tail + '</button>';
   }).join('');
 
