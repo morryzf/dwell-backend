@@ -51,5 +51,21 @@ class ComposerPaddingFollowsItsHeightTest(unittest.TestCase):
         self.assertIn("if (wasAtBottom) log.scrollTop = log.scrollHeight;", section)
 
 
+class KeyboardKeepsHerPlaceTest(unittest.TestCase):
+    """没停在最底下时点输入框，消息也要跟着输入卡一起上去。"""
+
+    def test_keyboard_keeps_the_distance_from_the_end_not_only_at_bottom(self):
+        self.assertNotIn("const stick = atBottom();", HTML)
+        self.assertIn("log.scrollTop = Math.max(0, log.scrollHeight - log.clientHeight - kbKeepDist);", HTML)
+        for caller in ("  rememberLogPosition();\n  const lift = kbGuess();",
+                       "  rememberLogPosition();\n  const tick = () => {",
+                       "box.addEventListener('blur', () => { rememberLogPosition();"):
+            self.assertIn(caller, HTML)
+
+    def test_rows_skipped_by_the_observer_are_drawn_after_the_keyboard_settles(self):
+        self.assertIn("function unfarNearRows() {", HTML)
+        self.assertIn("      restoreLogPosition();\n      unfarNearRows();", HTML)
+
+
 if __name__ == "__main__":
     unittest.main()
