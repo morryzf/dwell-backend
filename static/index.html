@@ -7558,6 +7558,41 @@ function endKbPreShift() {
   clearTimeout(kbPreShiftTimer);
 }
 function sheetIsOpen() { return !!document.querySelector('.sheetWrap.open'); }
+/* 键盘起落时，消息跟着输入卡一起走：记住她眼前那一屏离末尾有多远，留白变了也保持这个距离。
+   以前只有原本停在最底下才跟着走——翻到上面一点再点输入框，输入卡升上去，消息原地不动，
+   眼前那几条就被压在下面了。手一碰消息列表就不再扶着。
+   键盘的 resize 事件可能比 focus 晚好一会儿才来，那时候再量就已经被挤歪了，
+   所以记下的距离在键盘还在动的这段时间里一直有效（每次动都续 1.5 秒）。 */
+let kbKeepDist = null, kbKeepUntil = 0;
+function kbKeepAlive() {
+  if (kbKeepDist !== null && performance.now() > kbKeepUntil) kbKeepDist = null;
+  return kbKeepDist !== null;
+}
+function rememberLogPosition() {
+  if (!kbKeepAlive()) {
+    const dist = log.scrollHeight - log.scrollTop - log.clientHeight;
+    kbKeepDist = dist < 90 ? 0 : dist;   // 本来就在底部附近的，直接贴底
+  }
+  kbKeepUntil = performance.now() + 1500;
+}
+function restoreLogPosition() {
+  if (!kbKeepAlive()) return;
+  log.scrollTop = Math.max(0, log.scrollHeight - log.clientHeight - kbKeepDist);
+  updateScrollBtn();
+}
+log.addEventListener('touchstart', () => { kbKeepDist = null; }, { passive: true });
+/* 远处不画的那些行靠 IntersectionObserver 摘掉 .far。键盘起落时 iPhone 有时不报，
+   眼前的消息就一直是空白。键盘停稳后自己量一遍，补上漏掉的。 */
+function unfarNearRows() {
+  const far = log.querySelectorAll(':scope > .row.far');
+  if (!far.length) return;
+  const box = log.getBoundingClientRect();
+  const margin = box.height * 1.5;
+  for (const el of far) {
+    const r = el.getBoundingClientRect();
+    if (r.bottom >= box.top - margin && r.top <= box.bottom + margin) el.classList.remove('far');
+  }
+}
 function resetChatKeyboardAdjustment() {
   kbShift = 0; kbGap = 0;
   footerEl.style.paddingBottom = '';
@@ -7605,6 +7640,7 @@ function fitKeyboard() {
   }
   setLogTail(footerEl.offsetHeight + (on ? -kbShift + 16 : 48));
   clampLogScroll();
+  restoreLogPosition();
   if (on && window.scrollY !== 0) window.scrollTo(0, 0);
 }
 /* 键盘是动画上来的（约 0.3 秒），头尾各校一次会卡在半路——整段动画都盯着 */
@@ -7612,16 +7648,19 @@ let kbTracking = 0;
 function trackKeyboard() {
   const me = ++kbTracking;
   let n = 0;
-  /* 原来停在底部的，键盘起落这一路每帧都贴着底，不等动画全走完才一次跳上去
-     （iPhone 上那 45 帧被压得很慢，消息就慢了半拍）。手一碰就松开。 */
-  if (atBottom()) lockToBottom(1000);
+  /* 键盘起落这一路每帧都按住她眼前那一屏（见 rememberLogPosition），
+     不等动画全走完才一次跳过去（iPhone 上那 45 帧被压得很慢，消息就慢了半拍）。 */
+  rememberLogPosition();
   const tick = () => {
     if (me !== kbTracking) return;
     fitKeyboard();
     if (++n < 45) requestAnimationFrame(tick);
-    else if (kbGap > 20) {
-      scroll(true);
-      try { if (kbShift < -100) localStorage.setItem('dwell.kbLift', String(Math.round(-kbShift))); } catch {}
+    else {
+      restoreLogPosition();
+      unfarNearRows();
+      if (kbGap > 20) {
+        try { if (kbShift < -100) localStorage.setItem('dwell.kbLift', String(Math.round(-kbShift))); } catch {}
+      }
     }
   };
   tick();
@@ -7740,14 +7779,14 @@ box.addEventListener('touchend', (e) => {
   // 不能拿「输入框有没有焦点」判断：页面一打开就让它拿了焦点，iPhone 上那时并没有键盘。
   if (kbShift < 0 || kbGap > 20 || sheetIsOpen() || e.touches.length) return;
   e.preventDefault();
-  const stick = atBottom();
+  rememberLogPosition();
   const lift = kbGuess();
   kbPreShift = lift;
   kbShift = -lift;
   footerEl.style.transform = 'translateY(' + kbShift + 'px)';
   // 消息和输入卡同一刻上去：留白先按估的键盘高度给足，原本在底部就贴着底
   setLogTail(footerEl.offsetHeight + lift + 16);
-  if (stick) log.scrollTop = log.scrollHeight;
+  restoreLogPosition();
   // 键盘没出来（外接键盘之类）就放回原处
   clearTimeout(kbPreShiftTimer);
   kbPreShiftTimer = setTimeout(() => { endKbPreShift(); fitKeyboard(); }, 900);
@@ -7757,7 +7796,7 @@ box.addEventListener('touchend', (e) => {
   try { box.setSelectionRange(end, end); } catch {}
 }, { passive: false });
 box.addEventListener('focus', trackKeyboard);
-box.addEventListener('blur', () => setTimeout(trackKeyboard, 50));
+box.addEventListener('blur', () => { rememberLogPosition(); setTimeout(trackKeyboard, 50); });
 new ResizeObserver(() => {
   const wasBottom = atBottom();
   setLogTail(footerEl.offsetHeight + (kbGap > 20 ? kbGap + 16 : 48));
