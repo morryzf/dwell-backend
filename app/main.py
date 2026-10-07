@@ -4840,6 +4840,21 @@ async def memory_card_draft_discard(chat_id: str, draft_id: str):
     return {"ok": True, "state": _memory_card_review_state(chat_id)}
 
 
+@app.post("/api/chats/{chat_id}/memory-cards", dependencies=authed)
+async def memory_card_post(chat_id: str, request: Request):
+    """手动加一张记忆卡：分类全是她自己选的，正文原样保存，直接生效。"""
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    payload = await _read_json(request)
+    try:
+        clean = _memory_card_clean(payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    card = db.memory_card_add_manual(chat_id, clean)
+    asyncio.create_task(_embed_memory_card(card["id"], card["content"]))
+    return {"ok": True, "item": card}
+
+
 @app.put("/api/chats/{chat_id}/memory-cards/{card_id}", dependencies=authed)
 async def memory_card_put(chat_id: str, card_id: str, request: Request):
     current = db.memory_card_get(chat_id, card_id)
@@ -5542,6 +5557,8 @@ def _memory_card_query(history: list[dict], watch_context: dict | None = None,
 
 
 def _memory_card_date(card: dict) -> str:
+    if card.get("undated"):
+        return ""
     stamp = int(card.get("happened") or card.get("made") or 0)
     if not stamp:
         return ""

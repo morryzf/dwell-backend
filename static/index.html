@@ -3515,6 +3515,9 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .mc-tab[aria-selected="true"] .mc-count { background: color-mix(in srgb, var(--accent-soft) 22%, var(--panel)); color: var(--text); }
   .mc-panel { min-height: 220px; }
   .mc-toolbar { display: flex; align-items: center; gap: 9px; margin: 2px 0 13px; }
+  .mc-add { width: 100%; margin: 2px 0 12px; }
+  .mc-add[hidden] { display: none; }
+  #memoryNewSlot .mc-card { margin-bottom: 13px; border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
   .mc-toolbar .ap-in { min-width: 0; }
   .mc-toolbar select { width: auto; max-width: 155px; }
   /* 待确认：生成单独一排；采用全部 / 全部忽略是一对，并排各占一半 */
@@ -7859,9 +7862,24 @@ function ttsProfileId() {
   if (window.crypto && crypto.randomUUID) return 'voice-' + crypto.randomUUID();
   return 'voice-' + Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
+/* 试听：同一个按钮再点一下是暂停；点别的按钮先停掉正在放的那个，把它的图标也换回 ▶。 */
+let ttsPreviewButton = null;
+function stopTtsPreview() {
+  if (ttsState.previewAudio) { ttsState.previewAudio.pause(); ttsState.previewAudio = null; }
+  if (ttsPreviewButton) { ttsPreviewButton.textContent = '▶'; ttsPreviewButton = null; }
+}
+function toggleTtsPreview(button, url) {
+  const same = ttsPreviewButton === button && ttsState.previewAudio;
+  stopTtsPreview();
+  if (same || !url) return;
+  const audio = new Audio(url);
+  ttsState.previewAudio = audio; ttsPreviewButton = button; button.textContent = 'Ⅱ';
+  audio.onended = audio.onerror = () => { if (ttsState.previewAudio === audio) stopTtsPreview(); };
+  audio.play().catch(() => { if (ttsState.previewAudio === audio) stopTtsPreview(); });
+}
 function closeTtsPicker() {
   ttsPicker.classList.remove('on');
-  if (ttsState.previewAudio) { ttsState.previewAudio.pause(); ttsState.previewAudio = null; }
+  stopTtsPreview();
 }
 document.getElementById('ttsPickerClose').onclick = closeTtsPicker;
 ttsPicker.querySelector('.tts-picker-shade').onclick = closeTtsPicker;
@@ -7897,14 +7915,7 @@ function renderTtsPicker() {
     if (ttsPickerMode === 'voice' && item.preview_url) {
       const preview = document.createElement('button');
       preview.type = 'button'; preview.className = 'tts-preview'; preview.textContent = '▶'; preview.title = '试听';
-      preview.onclick = () => {
-        if (ttsState.previewAudio) ttsState.previewAudio.pause();
-        const audio = new Audio(item.preview_url);
-        ttsState.previewAudio = audio;
-        preview.textContent = 'Ⅱ';
-        audio.onended = audio.onerror = () => { preview.textContent = '▶'; if (ttsState.previewAudio === audio) ttsState.previewAudio = null; };
-        audio.play().catch(() => { preview.textContent = '▶'; });
-      };
+      preview.onclick = () => toggleTtsPreview(preview, item.preview_url);
       row.appendChild(preview);
     }
     ttsPickerList.appendChild(row);
@@ -8059,14 +8070,7 @@ function renderTtsSettings(cfg) {
     catch (e) { ttsSavedToast(body, e.message, true); }
   });
   const hero = body.querySelector('#ttsHeroPlay');
-  hero.onclick = () => {
-    if (!active || !active.preview_url) return;
-    if (ttsState.previewAudio) { ttsState.previewAudio.pause(); ttsState.previewAudio = null; hero.textContent = '▶'; return; }
-    const audio = new Audio(active.preview_url);
-    ttsState.previewAudio = audio; hero.textContent = 'Ⅱ';
-    audio.onended = audio.onerror = () => { hero.textContent = '▶'; if (ttsState.previewAudio === audio) ttsState.previewAudio = null; };
-    audio.play().catch(() => { hero.textContent = '▶'; });
-  };
+  hero.onclick = () => { if (active && active.preview_url) toggleTtsPreview(hero, active.preview_url); };
   body.querySelector('#ttsModelRow').onclick = () => openTtsPicker('model', cfg.model_id, item =>
     saveProfile({model_id: item.model_id, model_name: item.name || item.model_id}));
   body.querySelectorAll('[data-read]').forEach(btn => btn.onclick = () => {
@@ -12344,6 +12348,7 @@ function memoryDate(ts) {
   return ts ? new Date(ts * 1000).toLocaleString('zh-CN') : '';
 }
 function memorySource(item) {
+  if (item.undated) return '来源：手动添加';
   const start = Number(item.source_start_rowid || 0), end = Number(item.source_end_rowid || 0);
   if (!start && !end) return '来源：已有摘要分段';
   const cited = (item.source_rowids || []).length;
@@ -12439,7 +12444,7 @@ function memoryCardForm(item, taxonomy, kind) {
     <div class="mc-form-grid"><label>类型<select class="ap-in" name="memory_type">${memoryOptions(taxonomy.types, item.memory_type)}</select></label><label>重要程度<select class="ap-in" name="importance">${memoryOptions(taxonomy.importance, item.importance)}</select></label></div>
     <div class="mc-form-grid"><label>保存时间<select class="ap-in" name="retention">${memoryOptions(taxonomy.retention, item.retention)}</select></label><label>有效至（仅“截至某日”需要）<input class="ap-in" name="valid_until" type="date" value="${instructionEsc(item.valid_until || '')}"></label></div>
     <label>主题（最多选 3 个）<span class="mc-topic-list">${topics}</span></label>
-    <div class="mc-actions"><button class="mc-btn primary" type="submit">${kind === 'draft' ? '采用这条' : '保存修改'}</button><button class="mc-btn quiet" type="button" data-memory-cancel>取消</button></div>
+    <div class="mc-actions"><button class="mc-btn primary" type="submit">${kind === 'draft' ? '采用这条' : kind === 'new' ? '添加' : '保存修改'}</button><button class="mc-btn quiet" type="button" data-memory-cancel>取消</button></div>
     <div class="ap-msg" data-memory-msg></div>
   </form>`;
 }
@@ -12611,7 +12616,7 @@ function removeMemoryCard(card, tabKey) {
 function wireMemoryCards(chat, cardState, allItems) {
   document.querySelectorAll('[data-memory-edit]').forEach(button => button.onclick = () => { const item=[...(cardState.drafts||[]),...allItems].find(value=>value.id===button.dataset.memoryEdit); const card=button.closest('.mc-card'); card.innerHTML=memoryCardForm(item,cardState.taxonomy,button.dataset.kind); wireMemoryCards(chat,cardState,allItems); });
   document.querySelectorAll('[data-memory-cancel]').forEach(button => button.onclick = () => { const form=button.closest('[data-memory-form]'); const item=[...(cardState.drafts||[]),...allItems].find(v=>v.id===form.dataset.memoryForm); const card=button.closest('.mc-card'); if(item){memoryCardReplace(card,item,cardState.taxonomy,form.dataset.kind==='draft'?'draft':'card');wireMemoryCards(chat,cardState,allItems);}else{loadLongContext();} });
-  document.querySelectorAll('[data-memory-form]').forEach(form => { form.querySelectorAll('.mc-topic input').forEach(input => input.onchange=()=>{ if(form.querySelectorAll('.mc-topic input:checked').length>3){ input.checked=false; const msg=form.querySelector('[data-memory-msg]'); msg.textContent='一条记忆最多选 3 个主题。'; msg.className='ap-msg on bad'; } }); form.onsubmit=async event=>{ event.preventDefault(); const msg=form.querySelector('[data-memory-msg]'); const payload=memoryReadForm(form); if(!payload.content){msg.textContent='记忆内容不能为空。';msg.className='ap-msg on bad';return;} msg.textContent='正在保存…';msg.className='ap-msg on'; try { const editing=form.dataset.kind==='draft'?null:allItems.find(v=>v.id===form.dataset.memoryForm);const base='api/chats/'+encodeURIComponent(memoryCardChatId(editing,chat)); const url=form.dataset.kind==='draft'?base+'/memory-card-drafts/'+encodeURIComponent(form.dataset.memoryForm)+'/accept':base+'/memory-cards/'+encodeURIComponent(form.dataset.memoryForm); await memoryJson(url,{method:form.dataset.kind==='draft'?'POST':'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const card=form.closest('.mc-card'); if(form.dataset.kind==='draft'){removeMemoryCard(card,'review');updateMemoryTabCount('cards',1);}else{const item=allItems.find(v=>v.id===form.dataset.memoryForm);if(item)Object.assign(item,payload);memoryCardReplace(card,item||payload,cardState.taxonomy,'card');wireMemoryCards(chat,cardState,allItems);} } catch(e){msg.textContent='没有保存：'+e.message;msg.className='ap-msg on bad';} }; });
+  document.querySelectorAll('[data-memory-form]').forEach(form => { form.querySelectorAll('.mc-topic input').forEach(input => input.onchange=()=>{ if(form.querySelectorAll('.mc-topic input:checked').length>3){ input.checked=false; const msg=form.querySelector('[data-memory-msg]'); msg.textContent='一条记忆最多选 3 个主题。'; msg.className='ap-msg on bad'; } }); form.onsubmit=async event=>{ event.preventDefault(); const msg=form.querySelector('[data-memory-msg]'); const payload=memoryReadForm(form); if(!payload.content){msg.textContent='记忆内容不能为空。';msg.className='ap-msg on bad';return;} msg.textContent='正在保存…';msg.className='ap-msg on'; try { if(form.dataset.kind==='new'){ await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); memoryConsoleTab='cards'; loadLongContext(); return; } const editing=form.dataset.kind==='draft'?null:allItems.find(v=>v.id===form.dataset.memoryForm);const base='api/chats/'+encodeURIComponent(memoryCardChatId(editing,chat)); const url=form.dataset.kind==='draft'?base+'/memory-card-drafts/'+encodeURIComponent(form.dataset.memoryForm)+'/accept':base+'/memory-cards/'+encodeURIComponent(form.dataset.memoryForm); await memoryJson(url,{method:form.dataset.kind==='draft'?'POST':'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const card=form.closest('.mc-card'); if(form.dataset.kind==='draft'){removeMemoryCard(card,'review');updateMemoryTabCount('cards',1);}else{const item=allItems.find(v=>v.id===form.dataset.memoryForm);if(item)Object.assign(item,payload);memoryCardReplace(card,item||payload,cardState.taxonomy,'card');wireMemoryCards(chat,cardState,allItems);} } catch(e){msg.textContent='没有保存：'+e.message;msg.className='ap-msg on bad';} }; });
   document.querySelectorAll('[data-memory-accept]').forEach(button => button.onclick=async()=>{ button.disabled=true; try { await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/'+encodeURIComponent(button.dataset.memoryAccept)+'/accept',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); removeMemoryCard(button.closest('.mc-card'),'review');updateMemoryTabCount('cards',1); } catch(e){button.disabled=false;alert('没有采用：'+e.message);} });
   document.querySelectorAll('[data-memory-discard]').forEach(button => button.onclick=async()=>{ if(!confirm('忽略这条候选记忆？'))return; try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/'+encodeURIComponent(button.dataset.memoryDiscard),{method:'DELETE'});removeMemoryCard(button.closest('.mc-card'),'review');}catch(e){alert('没有忽略：'+e.message);} });
   document.querySelectorAll('[data-memory-toggle]').forEach(button => button.onclick=async()=>{ const item=allItems.find(value=>value.id===button.dataset.memoryToggle); try{await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(item.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...item,status:button.dataset.status})});item.status=button.dataset.status;const card=button.closest('.mc-card');memoryCardReplace(card,item,cardState.taxonomy,'card');wireMemoryCards(chat,cardState,allItems);}catch(e){alert('没有修改：'+e.message);} });
@@ -12644,7 +12649,7 @@ async function loadLongContext(quiet) {
     if(memoryConsoleTab==='summary') panel=memorySummaryHtml(summary);
     if(memoryConsoleTab==='settings') panel=memorySettingsHtml(model,cards,embeddingModel,sigilloState);
     if(memoryConsoleTab==='review') panel=`<div class="mc-toolbar mc-review-actions"><button class="mc-btn primary" id="memoryGenerate" ${cardWorking?'disabled':''}>${cardWorking?'正在整理…':'生成未处理分段的记忆卡草稿'}</button>${drafts.length?`<div class="mc-pair"><button class="mc-btn" id="memoryAcceptAll" ${cardWorking?'disabled':''}>采用全部（${drafts.length}）</button><button class="mc-btn quiet danger" id="memoryDiscardAll" ${cardWorking?'disabled':''}>全部忽略（${drafts.length}）</button></div>`:''}</div>${cards.state&&cards.state.error?`<div class="ap-msg on bad">${instructionEsc(cards.state.error)}</div>`:''}${(cards.state&&cards.state.note&&!cards.state.error)?`<div class="ap-msg on">${instructionEsc(cards.state.note)}</div>`:''}${drafts.length?`<div class="mc-stack">${drafts.map(item=>memoryCardView(item,cards.taxonomy,'draft',null,cardById)).join('')}</div>`:memoryEmpty(cardWorking?'正在整理候选':'没有待确认内容',cardWorking?'完成后会自动出现在这里。':'可以让模型检查尚未处理的新分段；任何候选都要由你逐条采用。')}`;
-    if(memoryConsoleTab==='cards') panel=`${(()=>{ const lastUse=cards.last_injection; if(!lastUse||!(lastUse.items||[]).length) return ''; /* 最近一次带入是「结果」不是设置：放记忆卡顶上，折叠着不挡翻卡 */ return `<details class="mc-used-fold"><summary>最近一次带入 · ${instructionEsc(memoryDate(lastUse.used_at))} · ${lastUse.items.length} 条</summary><div class="mc-stack mc-used-scroll" style="margin-top:10px">${lastUse.items.map(item=>memoryCardView(item,cards.taxonomy,'used')).join('')}</div></details>`; })()}<div class="mc-toolbar"><input class="ap-in" id="memorySearch" type="search" placeholder="搜索记忆内容" value="${instructionEsc(memoryConsoleQuery)}"><select class="ap-in" id="memoryFilter"><option value="all">全部状态</option><option value="active" ${memoryConsoleFilter==='active'?'selected':''}>可被挑选</option><option value="hidden" ${memoryConsoleFilter==='hidden'?'selected':''}>已隐藏</option><option value="high" ${memoryConsoleFilter==='high'?'selected':''}>固定保留</option><option value="archived" ${memoryConsoleFilter==='archived'?'selected':''}>已归档（${archived.length}）</option></select></div>${(active.length||archived.length)?`<div class="mc-stack">${active.concat(archived).map(item=>memoryCardView(item,cards.taxonomy,'card',recentIds)).join('')}</div><div class="mc-empty" id="memoryFilteredEmpty" hidden><strong>没有符合条件的记忆</strong>换个关键词或筛选条件看看。</div>`:memoryEmpty('还没有正式记忆卡','先到“待确认”生成候选，并逐条采用。')}`;
+    if(memoryConsoleTab==='cards') panel=`${(()=>{ const lastUse=cards.last_injection; if(!lastUse||!(lastUse.items||[]).length) return ''; /* 最近一次带入是「结果」不是设置：放记忆卡顶上，折叠着不挡翻卡 */ return `<details class="mc-used-fold"><summary>最近一次带入 · ${instructionEsc(memoryDate(lastUse.used_at))} · ${lastUse.items.length} 条</summary><div class="mc-stack mc-used-scroll" style="margin-top:10px">${lastUse.items.map(item=>memoryCardView(item,cards.taxonomy,'used')).join('')}</div></details>`; })()}<button class="mc-btn primary mc-add" id="memoryAdd" type="button">＋ 添加记忆卡</button><div id="memoryNewSlot"></div><div class="mc-toolbar"><input class="ap-in" id="memorySearch" type="search" placeholder="搜索记忆内容" value="${instructionEsc(memoryConsoleQuery)}"><select class="ap-in" id="memoryFilter"><option value="all">全部状态</option><option value="active" ${memoryConsoleFilter==='active'?'selected':''}>可被挑选</option><option value="hidden" ${memoryConsoleFilter==='hidden'?'selected':''}>已隐藏</option><option value="high" ${memoryConsoleFilter==='high'?'selected':''}>固定保留</option><option value="archived" ${memoryConsoleFilter==='archived'?'selected':''}>已归档（${archived.length}）</option></select></div>${(active.length||archived.length)?`<div class="mc-stack">${active.concat(archived).map(item=>memoryCardView(item,cards.taxonomy,'card',recentIds)).join('')}</div><div class="mc-empty" id="memoryFilteredEmpty" hidden><strong>没有符合条件的记忆</strong>换个关键词或筛选条件看看。</div>`:memoryEmpty('还没有正式记忆卡','先到“待确认”生成候选，并逐条采用。')}`;
     
     body.innerHTML=`<div class="mc-intro"><h1>${instructionEsc(chat.name||'新对话')}</h1><p>记忆卡把重要细节拆成可以管理的小条目；摘要维持这段关系的连续性。</p><div class="mc-safety${cards.injection_enabled?'':' off'}"><span class="ic" data-i="${cards.injection_enabled?'check':'x'}"></span><span>${cards.injection_enabled?'按需记忆已开启：每轮最多带入 5 条相关卡片；隐藏、归档和过期内容会自动排除。':'按需记忆已暂停：AI 仍会看到长期摘要和最近原文，但不会看到记忆卡。'}</span></div></div><div class="mc-tabs" role="tablist" aria-label="记忆管理">${tabHtml}</div><section class="mc-panel${(memoryConsoleTab==='summary'||memoryConsoleTab==='settings')?' mc-flat':''}" role="tabpanel">${panel}</section>`;
     if(quiet) body.scrollTop=keepScroll;
@@ -12656,6 +12661,9 @@ async function loadLongContext(quiet) {
     const generate=document.getElementById('memoryGenerate'); if(generate&&!cardWorking)generate.onclick=async()=>{generate.disabled=true;generate.textContent='正在开始…';try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/generate',{method:'POST'});loadLongContext();}catch(e){generate.disabled=false;generate.textContent='生成未处理分段的记忆卡草稿';alert('没有开始：'+e.message);}};
     const discardAll=document.getElementById('memoryDiscardAll'); if(discardAll&&!cardWorking)discardAll.onclick=async()=>{if(!confirm('忽略全部 '+drafts.length+' 条待确认记忆？它们不会变成记忆卡，这些分段也不会再重新出卡。'))return;discardAll.disabled=true;discardAll.textContent='正在忽略…';try{const result=await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/discard-all',{method:'POST'});note('（已忽略 '+result.discarded+' 条候选）');loadLongContext();}catch(e){discardAll.disabled=false;discardAll.textContent='全部忽略（'+drafts.length+'）';alert('没有全部忽略：'+e.message);}};
     const acceptAll=document.getElementById('memoryAcceptAll'); if(acceptAll&&!cardWorking)acceptAll.onclick=async()=>{if(!confirm('采用全部 '+drafts.length+' 条待确认记忆？它们会直接按当前内容成为正式记忆卡。'))return;acceptAll.disabled=true;acceptAll.textContent='正在采用…';try{const result=await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/accept-all',{method:'POST'});note('（已采用 '+result.accepted+' 条记忆）');document.querySelectorAll('.mc-card').forEach(c=>removeMemoryCard(c,'review'));updateMemoryTabCount('cards',result.accepted);acceptAll.remove();}catch(e){acceptAll.disabled=false;acceptAll.textContent='采用全部（'+drafts.length+'）';alert('没有全部采用：'+e.message);}};
+    // 手动加卡：在列表上面摊开一张空表单，分类全自己选；正文原样存，不带日期。
+    const addCard=document.getElementById('memoryAdd'), newSlot=document.getElementById('memoryNewSlot');
+    if(addCard&&newSlot)addCard.onclick=()=>{ addCard.hidden=true; newSlot.innerHTML='<article class="mc-card mc-new">'+memoryCardForm({id:'new',content:'',memory_type:'stable_fact',importance:'normal',retention:'long_term',topics:[]},cards.taxonomy,'new')+'</article>'; wireMemoryCards(chat,cards,cards.items||[]); const box=newSlot.querySelector('textarea'); if(box)box.focus(); };
     const search=document.getElementById('memorySearch'), filter=document.getElementById('memoryFilter');
     const allCards=active.concat(archived); const applyCardFilter=()=>{ const query=(memoryConsoleQuery||'').toLocaleLowerCase(); let visible=0; body.querySelectorAll('[data-memory-item]').forEach(card=>{ const item=allCards.find(value=>value.id===card.dataset.memoryItem); if(!item)return; const isArchived=item.status==='archived'; const hit=!query||(item.content||'').toLocaleLowerCase().includes(query); /* 归档是独立一档：选它只看归档，不选它就一张归档都不露 */ const scope=memoryConsoleFilter==='archived'?isArchived:!isArchived&&(memoryConsoleFilter==='all'||item.status===memoryConsoleFilter||item.importance===memoryConsoleFilter); const show=hit&&scope; card.hidden=!show; if(show)visible+=1; }); const empty=document.getElementById('memoryFilteredEmpty'); if(empty)empty.hidden=visible!==0; };
     if(search)search.oninput=()=>{memoryConsoleQuery=search.value;applyCardFilter();};
