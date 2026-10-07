@@ -60,6 +60,12 @@ class HeartbeatUnansweredTest(unittest.TestCase):
         # 她回复前 Cloudy 自己接的那句不算追发。
         self.assertNotIn("什么时候到", trigger)
 
+    def test_a_chat_with_no_messages_yet_does_not_count_from_1970(self):
+        trigger = self._trigger()
+        self.assertIn("Morry hasn't said anything in this chat yet", trigger)
+        self.assertIn("you haven't said anything in this chat yet", trigger)
+        self.assertNotIn("days", trigger)
+
     def test_her_reply_clears_the_list(self):
         db.message_add(self.chat_id, "assistant", "到家了吗？", origin="heartbeat")
         db.message_add(self.chat_id, "user", "到了")

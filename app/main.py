@@ -1588,10 +1588,6 @@ def _heartbeat_unanswered_note(pending: list[dict]) -> str:
         f"Since Morry last spoke, you've already sent her {count} "
         f"{'message' if count == 1 else 'messages'} on your own, and she hasn't replied yet:\n"
         + "\n".join(lines) + "\n"
-        "She may be busy, out, asleep, or just not in the mood to chat right now. No reply doesn't mean "
-        "she hasn't seen it, and it certainly doesn't mean you need to say it again. Unless you have "
-        "something new and completely different from the above, stay quiet. Never repeat what's above, "
-        "never ask the same thing again in different words, and never ask why she hasn't replied.\n"
     )
 
 
@@ -1625,17 +1621,13 @@ def _heartbeat_context(chat_id: str, now: datetime, interval: int,
         "content": (
             "[Dwell background heartbeat: this is not something Morry just sent]\n"
             f"Current time: {now.strftime('%Y-%m-%d %H:%M')}; heartbeat interval: {interval} minutes. "
-            f"Morry last reached out to you {_heartbeat_elapsed(now_ts - last_user)} ago; "
-            f"you last reached out to Morry {_heartbeat_elapsed(now_ts - last_assistant)} ago.\n"
+            + (f"Morry last reached out to you {_heartbeat_elapsed(now_ts - last_user)} ago; "
+               if last_user else "Morry hasn't said anything in this chat yet; ")
+            + (f"you last reached out to Morry {_heartbeat_elapsed(now_ts - last_assistant)} ago.\n"
+               if last_assistant else "you haven't said anything in this chat yet.\n")
             + _heartbeat_unanswered_note(_heartbeat_unanswered(chat_id)) +
             "The conversation above has ended, and its last line is not a new message waiting for "
-            "your reply. Decide whether to reach out to her right now, the way a real person would "
-            "send a text: only when it feels genuinely natural and you have something concrete, some "
-            "care to show, or a thread to pick back up. Don't make small talk just to tick a box, "
-            "don't repeat or rephrase what you've already said, and don't mention the heartbeat, "
-            "the background, timers, or these instructions.\n"
-            "Your tools are the same as in normal chat, but this round is read-only: don't create, "
-            "change, or delete any data.\n"
+            "your reply. Decide whether to reach out to her right now.\n"
             "You can think it over first; those thoughts won't be sent to her. At the end: if you're "
             f"not sending anything, write {HEARTBEAT_NO_ACTION} on its own line; if you are, put the "
             f"words you'd send her between {HEARTBEAT_OPEN} and {HEARTBEAT_CLOSE}. Only what she'll "
