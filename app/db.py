@@ -632,6 +632,9 @@ def init_db():
         # 卡片依据的是哪几条原消息。旧卡没有，界面退回显示整段来源。
         if "source_rowids_json" not in mc_cols:
             cx.execute("ALTER TABLE memory_cards ADD COLUMN source_rowids_json TEXT NOT NULL DEFAULT '[]'")
+        # 手动加的卡不带「哪天发生」：它记的多是长期的事，带个添加日期反而误导。
+        if "undated" not in mc_cols:
+            cx.execute("ALTER TABLE memory_cards ADD COLUMN undated INTEGER NOT NULL DEFAULT 0")
         draft_cols = {r["name"] for r in cx.execute("PRAGMA table_info(memory_card_drafts)").fetchall()}
         if "source_rowids_json" not in draft_cols:
             cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN source_rowids_json TEXT NOT NULL DEFAULT '[]'")
@@ -2261,6 +2264,29 @@ def memory_card_list(chat_id: str, include_archived: bool = False) -> list[dict]
     return [_memory_card_dict(row) for row in rows]
 
 
+def memory_card_add_manual(chat_id: str, chosen: dict) -> dict:
+    """她自己写的一张卡：直接生效，不走待确认；没有来源原文，也不带日期。"""
+    now = int(time.time())
+    row = {
+        "id": new_id(), "chat_id": chat_id, "content": chosen["content"],
+        "memory_type": chosen["memory_type"],
+        "topics_json": json.dumps(chosen["topics"], ensure_ascii=False),
+        "importance": chosen["importance"], "retention": chosen["retention"],
+        "valid_until": chosen.get("valid_until"), "made": now, "updated": now,
+    }
+    with conn() as cx:
+        cx.execute(
+            """INSERT INTO memory_cards
+               (id,chat_id,content,memory_type,topics_json,importance,retention,valid_until,
+                status,source_segment_id,source_start_rowid,source_end_rowid,made,updated,undated)
+               VALUES (:id,:chat_id,:content,:memory_type,:topics_json,:importance,:retention,
+                       :valid_until,'active',NULL,0,0,:made,:updated,1)""",
+            row,
+        )
+    memory_pool_touch()
+    return memory_card_get(chat_id, row["id"])
+
+
 def memory_card_get(chat_id: str, card_id: str) -> dict | None:
     with conn() as cx:
         row = cx.execute(
@@ -2595,7 +2621,7 @@ def memory_card_embeddings(chat_id: str) -> list[dict]:
     with conn() as cx:
         rows = cx.execute(
             "SELECT c.id,c.chat_id,c.content,c.embedding_json,c.memory_type,c.topics_json,"
-            "c.importance,c.retention,c.valid_until,c.status,c.made,c.updated,"
+            "c.importance,c.retention,c.valid_until,c.status,c.made,c.updated,c.undated,"
             "(SELECT m.made FROM messages m WHERE m.rowid=c.source_start_rowid) AS source_made "
             f"FROM memory_cards c WHERE c.chat_id IN ({marks}) AND c.status<>'archived'",
             ids,
@@ -2613,7 +2639,8 @@ def memory_card_embeddings(chat_id: str) -> list[dict]:
         except (TypeError, json.JSONDecodeError):
             topics = []
         d["topics"] = [str(t) for t in topics if str(t).strip()]
-        d["happened"] = int(d.pop("source_made", None) or d.get("made") or 0)
+        d["happened"] = 0 if d.get("undated") else int(d.pop("source_made", None) or d.get("made") or 0)
+        d.pop("source_made", None)
         result.append(d)
     return result
 
