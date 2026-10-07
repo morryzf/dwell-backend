@@ -2299,12 +2299,13 @@ def _memory_card_pool(chat_id: str) -> list[str]:
 
 
 def memory_card_page(chat_id: str, query: str = "", scope: str = "all",
-                     limit: int = 30, offset: int = 0) -> dict:
+                     limit: int = 30, offset: int = 0, topic: str = "") -> dict:
     """记忆控制台分页看卡：最近改过的在前，一次一页。
 
     搜索和筛选在这里对整个卡池做，不是只在已经发到界面上的那几页里找。
     scope：all / active / hidden / high（固定保留）/ archived。归档是单独一档，
     选它只看归档，其余几档都不含归档——和界面原来的筛法一样。
+    topic：只看带这个类别的卡（健康与安全、日程……）；空＝全部类别。
     """
     ids = _memory_card_pool(chat_id)
     marks = ",".join("?" for _ in ids)
@@ -2318,6 +2319,10 @@ def memory_card_page(chat_id: str, query: str = "", scope: str = "all",
             where.append("c.status=?"); args.append(scope)
         elif scope == "high":
             where.append("c.importance='high'")
+    topic = str(topic or "").strip()
+    if topic and re.fullmatch(r"[a-z_]{1,40}", topic):
+        where.append("c.topics_json LIKE ?")
+        args.append(f'%"{topic}"%')
     query = str(query or "").strip()[:80]
     if query:
         where.append("c.content LIKE ? ESCAPE '\\'")

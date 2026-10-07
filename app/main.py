@@ -4679,14 +4679,15 @@ async def memory_badge_seen(request: Request):
 
 @app.get("/api/chats/{chat_id}/memory-cards", dependencies=authed)
 async def memory_cards_get(chat_id: str, include_archived: bool = False, limit: int = 0,
-                           offset: int = 0, q: str = "", filter: str = "all"):
+                           offset: int = 0, q: str = "", filter: str = "all", topic: str = ""):
     """给了 limit 就分页：控制台一次只拿一页，搜索和筛选在这里对全部卡片做。"""
     if not db.chat_get(chat_id):
         raise HTTPException(404, "chat 不存在")
     drafts = db.memory_card_draft_list(chat_id)
     paging = {}
     if limit:
-        page = db.memory_card_page(chat_id, q, filter, limit, offset)
+        page = db.memory_card_page(chat_id, q, filter, limit, offset,
+                                   topic if topic in MEMORY_CARD_TOPICS else "")
         items = page["items"]
         paging = {
             "total": page["total"], "counts": page["counts"],

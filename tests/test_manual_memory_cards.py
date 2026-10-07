@@ -87,9 +87,14 @@ class MemoryHeaderButtonsStaticTest(unittest.TestCase):
         self.assertLess(head.index('id="memorySearchBtn"'), head.index('id="memoryAddBtn"'))
         self.assertNotIn("mc-cards-bar", html)
         self.assertIn("${memorySearchOpen?`<div class=\"mc-search-panel\">", html)
-        self.assertIn('data-mc-filter="${key}"', html)
+        # 状态在搜索框左边，类别在下面一排
+        self.assertIn('<form class="mc-search-box" id="memorySearchForm" role="search"><select id="memoryStatus"', html)
+        self.assertIn('data-mc-topic="${key}"', html)
+        # 打字不搜，点 🔍 或键盘上的「搜索」才搜
+        self.assertIn("if(search)search.oninput=()=>{ memorySearchDraft=search.value; };", html)
+        self.assertIn('<button type="submit" class="mc-search-go" aria-label="搜索">', html)
         # 收起搜索时清掉关键词和筛选
-        self.assertIn("if (!memorySearchOpen) { memoryConsoleQuery = ''; memoryConsoleFilter = 'all'; }", html)
+        self.assertIn("if (!memorySearchOpen) { memoryConsoleQuery = ''; memorySearchDraft = ''; memoryConsoleFilter = 'all'; memoryConsoleTopic = ''; }", html)
         self.assertIn('.mc-form input[type="date"] { display: block; width: 100%; min-width: 0;', html)
 
 
@@ -145,6 +150,16 @@ class MemoryCardPagingTest(unittest.TestCase):
         db.memory_card_update(self.chat, self._get()["items"][0]["id"], {**main._memory_card_clean(CARD), "status": "hidden"})
         self.assertEqual(self._get(filter="hidden")["total"], 1)
         self.assertEqual(self._get(filter="active")["total"], 73)
+
+    def test_topic_filter_combines_with_status_and_search(self):
+        target = self._get(q="芒果")["items"][0]
+        db.memory_card_update(self.chat, target["id"], {
+            **main._memory_card_clean({**CARD, "content": target["content"], "topics": ["health_safety"]}),
+            "importance": "high"})
+        self.assertEqual([c["content"] for c in self._get(topic="health_safety")["items"]], ["第3张卡·芒果"])
+        self.assertEqual(self._get(topic="health_safety", filter="high")["total"], 1)
+        self.assertEqual(self._get(topic="health_safety", q="第4")["total"], 0)
+        self.assertEqual(self._get(topic="not_a_topic")["total"], 74)   # 不认识的类别不筛
 
     def test_old_unpaged_call_still_works(self):
         data = self.client.get(f"/api/chats/{self.chat}/memory-cards?include_archived=true").json()
