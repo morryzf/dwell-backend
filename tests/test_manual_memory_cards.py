@@ -76,14 +76,18 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class MemoryToolbarStaticTest(unittest.TestCase):
-    """记忆卡页：搜索、状态、添加并排一行；编辑表单里的日期框不超出卡片。"""
+class MemoryHeaderButtonsStaticTest(unittest.TestCase):
+    """记忆页右上角两个按钮：🔍 展开搜索和状态筛选，＋ 摊开一张空卡；编辑表单里的日期框不超出卡片。"""
 
-    def test_toolbar_is_one_row_with_add_button(self):
+    def test_search_and_add_live_in_the_header(self):
         from pathlib import Path
         html = Path("static/index.html").read_text(encoding="utf-8")
-        bar = html.split('<div class="mc-toolbar mc-cards-bar">', 1)[1].split("</div>", 1)[0]
-        self.assertLess(bar.index('id="memorySearch"'), bar.index('id="memoryFilter"'))
-        self.assertLess(bar.index('id="memoryFilter"'), bar.index('id="memoryAdd"'))
-        self.assertIn(".mc-toolbar:not(.mc-cards-bar) { align-items: stretch; flex-direction: column; }", html)
+        head = html.split('<div class="sheetWrap" id="longContextSheet">', 1)[1].split('<div class="body"', 1)[0]
+        self.assertLess(head.index('<div class="ht">记忆</div>'), head.index('id="memorySearchBtn"'))
+        self.assertLess(head.index('id="memorySearchBtn"'), head.index('id="memoryAddBtn"'))
+        self.assertNotIn("mc-cards-bar", html)
+        self.assertIn("${memorySearchOpen?`<div class=\"mc-search-panel\">", html)
+        self.assertIn('data-mc-filter="${key}"', html)
+        # 收起搜索时清掉关键词和筛选
+        self.assertIn("if (!memorySearchOpen) { memoryConsoleQuery = ''; memoryConsoleFilter = 'all'; }", html)
         self.assertIn('.mc-form input[type="date"] { display: block; width: 100%; min-width: 0;', html)
