@@ -5063,6 +5063,19 @@ async def memory_card_draft_put(chat_id: str, draft_id: str, request: Request):
     return {"ok": True, "item": item}
 
 
+@app.post("/api/chats/{chat_id}/memory-cards/{card_id}/share", dependencies=authed)
+async def memory_card_share(chat_id: str, card_id: str):
+    """把这张卡复制一份给另一位助手。"""
+    try:
+        shared = db.memory_card_share(chat_id, card_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "item": shared["item"], "to": shared["to"],
+            "to_name": db.assistant_name(shared["to"])}
+
+
 @app.delete("/api/chats/{chat_id}/memory-cards/{card_id}", dependencies=authed)
 async def memory_card_delete(chat_id: str, card_id: str):
     """可恢复地归档一张卡片；不删除来源消息或分段摘要。"""

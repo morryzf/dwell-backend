@@ -12569,12 +12569,18 @@ function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
   // 互通开着时这里列的是整个公共池，标一下哪些是别的窗口记下的。
   const foreign = kind === 'card' && item.chat_id && memoryCurrentChatId
     && item.chat_id !== memoryCurrentChatId;
+  // 共享：复制一张给另一位。复制过去的那张标「共享自」，原卡标「已共享给」。
+  const otherName = document.documentElement.dataset.assistant === 'chatgpt' ? 'Cloudy' : 'ChatGPT';
+  const sharedTag = kind !== 'card' ? ''
+    : item.shared_from ? `<span class="mc-tag">共享自 ${otherName}</span>`
+    : item.shared_count ? `<span class="mc-tag">已共享给 ${otherName}</span>` : '';
+  const canShare = kind === 'card' && !item.shared_from && !item.shared_count;
   let actions = '';
   if (kind === 'draft') actions = `<button class="mc-btn primary" data-memory-accept="${instructionEsc(item.id)}">采用</button><button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="draft">先修改</button>${item.action === 'update' ? '' : `<button class="mc-btn quiet" data-memory-split="${instructionEsc(item.id)}" data-kind="draft">拆开</button>`}<button class="mc-btn quiet" data-memory-discard="${instructionEsc(item.id)}">忽略</button>`;
   else if (kind === 'used') actions = '';
   else if (archived) actions = `<button class="mc-btn" data-memory-restore="${instructionEsc(item.id)}">恢复</button><button class="mc-btn quiet danger" data-memory-delete-permanent="${instructionEsc(item.id)}">永久删除</button>`;
-  else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button>${foreign ? '' : `<button class="mc-btn quiet" data-memory-split="${instructionEsc(item.id)}">拆开</button>`}<button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
-  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${instructionEsc(item.content || '')}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${foreign ? `<span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span>` : ''}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}${splitOf ? '<span class="mc-tag">拆分</span>' : ''}</div>${retagLine}${splitLine}${kind !== 'used' ? memorySourceHtml(item, kind) : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
+  else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button>${canShare ? `<button class="mc-btn quiet" data-memory-share="${instructionEsc(item.id)}">共享</button>` : ''}<button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
+  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${instructionEsc(item.content || '')}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${foreign ? `<span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span>` : ''}${sharedTag}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}${splitOf ? '<span class="mc-tag">拆分</span>' : ''}</div>${retagLine}${splitLine}${kind !== 'used' ? memorySourceHtml(item, kind) : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
 }
 function memoryEmpty(title, text, button) {
   return `<div class="mc-empty"><strong>${instructionEsc(title)}</strong>${instructionEsc(text)}${button || ''}</div>`;
@@ -12716,6 +12722,18 @@ function wireMemoryCards(chat, cardState, allItems) {
   document.querySelectorAll('[data-memory-restore]').forEach(button => button.onclick=async()=>{ const item=allItems.find(value=>value.id===button.dataset.memoryRestore); try{await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(item.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...item,status:'active'})});removeMemoryCard(button.closest('.mc-card'),'archive');updateMemoryTabCount('cards',1);}catch(e){alert('没有恢复：'+e.message);} });
   document.querySelectorAll('[data-memory-source]').forEach(button => button.onclick = () => { const item=[...(cardState.drafts||[]),...allItems].find(value=>value.id===button.dataset.memorySource); openMemorySource(button.dataset.kind==='draft'?chat.id:memoryCardChatId(item,chat), button.dataset.kind, button.dataset.memorySource, item&&item.content); });
   document.querySelectorAll('[data-memory-split]').forEach(button => button.onclick=async()=>{ const draft=button.dataset.kind==='draft'; if(!confirm(draft?'让模型把这条按「一件事一张」拆开？\n拆出来的几条会替换这一条，仍然留在「待确认」里。':'让模型把这张卡按「一件事一张」拆开？\n拆出来的会放进「待确认」；你采用其中一条后，原卡才会收进归档（可恢复）。'))return; button.disabled=true; try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+(draft?'/memory-card-drafts/':'/memory-cards/')+encodeURIComponent(button.dataset.memorySplit)+'/split',{method:'POST'});memoryConsoleTab='review';loadLongContext();}catch(e){button.disabled=false;alert('没有开始拆：'+e.message);} });
+  document.querySelectorAll('[data-memory-share]').forEach(button => button.onclick = async () => {
+    const item = allItems.find(value => value.id === button.dataset.memoryShare);
+    if (!item) return;
+    const otherName = document.documentElement.dataset.assistant === 'chatgpt' ? 'Cloudy' : 'ChatGPT';
+    if (!confirm('把这张卡复制一份给 ' + otherName + '？\n复制过去之后两边各改各的。')) return;
+    button.disabled = true;
+    try {
+      const d = await memoryJson('api/chats/' + encodeURIComponent(memoryCardChatId(item, chat)) + '/memory-cards/' + encodeURIComponent(item.id) + '/share', { method: 'POST' });
+      note('已共享给 ' + (d.to_name || otherName));
+      loadLongContext(true);
+    } catch (e) { button.disabled = false; alert('没有共享：' + e.message); }
+  });
   document.querySelectorAll('[data-memory-delete-permanent]').forEach(button => button.onclick=async()=>{ if(!confirm('永久删除这张记忆卡？删除后无法恢复，与它关联的带入记录也会一起清除。'))return; const item=allItems.find(value=>value.id===button.dataset.memoryDeletePermanent); button.disabled=true; try{await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(button.dataset.memoryDeletePermanent)+'/permanent',{method:'DELETE'});removeMemoryCard(button.closest('.mc-card'),'archive');}catch(e){button.disabled=false;alert('没有永久删除：'+e.message);} });
 }
 async function loadLongContext(quiet) {

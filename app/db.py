@@ -635,6 +635,9 @@ def init_db():
         # 手动加的卡不带「哪天发生」：它记的多是长期的事，带个添加日期反而误导。
         if "undated" not in mc_cols:
             cx.execute("ALTER TABLE memory_cards ADD COLUMN undated INTEGER NOT NULL DEFAULT 0")
+        # 从另一位那里共享过来的卡，记着原卡是哪张。复制过来之后两边各改各的。
+        if "shared_from" not in mc_cols:
+            cx.execute("ALTER TABLE memory_cards ADD COLUMN shared_from TEXT NOT NULL DEFAULT ''")
         draft_cols = {r["name"] for r in cx.execute("PRAGMA table_info(memory_card_drafts)").fetchall()}
         if "source_rowids_json" not in draft_cols:
             cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN source_rowids_json TEXT NOT NULL DEFAULT '[]'")
@@ -2285,7 +2288,8 @@ def memory_card_list(chat_id: str, include_archived: bool = False) -> list[dict]
 _CARD_LIST_COLUMNS = (
     "c.id,c.chat_id,c.content,c.memory_type,c.topics_json,c.importance,c.retention,"
     "c.valid_until,c.surface_scope,c.status,c.source_segment_id,c.source_start_rowid,"
-    "c.source_end_rowid,c.source_rowids_json,c.made,c.updated,c.undated"
+    "c.source_end_rowid,c.source_rowids_json,c.made,c.updated,c.undated,c.shared_from,"
+    "(SELECT COUNT(*) FROM memory_cards s WHERE s.shared_from=c.id AND s.status<>'archived') AS shared_count"
 )
 
 
@@ -2379,10 +2383,69 @@ def memory_card_add_manual(chat_id: str, chosen: dict) -> dict:
     return memory_card_get(chat_id, row["id"])
 
 
+def memory_card_share(chat_id: str, card_id: str) -> dict:
+    """把一张卡复制给另一位助手。
+
+    她挑着共享的多是关于她自己的事（喜好、近况），所以原文照搬。复制之后是两张卡，
+    两边各改各的；对方那张进它当前那间聊天的卡池，摘要和按需取回都会用到。
+    「哪天发生」跟着原卡走，不算成今天。
+    """
+    card = memory_card_get(chat_id, card_id)
+    if not card or card.get("status") == "archived":
+        raise LookupError("没有找到这张记忆卡片")
+    if card.get("shared_from"):
+        raise ValueError("这张是从另一位那里共享来的，不能再共享回去")
+    source = clean_assistant(chat_assistant(chat_id))
+    target = next(a for a in ASSISTANTS if a != source)
+    with conn() as cx:
+        live = cx.execute(
+            "SELECT 1 FROM memory_cards WHERE shared_from=? AND status<>'archived'", (card_id,)
+        ).fetchone()
+        if live:
+            raise ValueError(f"已经共享给 {assistant_name(target)} 了")
+        saved = cx.execute(
+            "SELECT value FROM settings WHERE key=?", (assistant_key("current_chat_id", target),)
+        ).fetchone()
+        target_chat = ""
+        if saved and saved["value"]:
+            row = cx.execute(
+                "SELECT id FROM chats WHERE id=? AND assistant=?", (saved["value"], target)
+            ).fetchone()
+            target_chat = row["id"] if row else ""
+        if not target_chat:
+            row = cx.execute(
+                "SELECT id FROM chats WHERE assistant=? ORDER BY made DESC LIMIT 1", (target,)
+            ).fetchone()
+            target_chat = row["id"] if row else ""
+        if not target_chat:
+            raise ValueError(f"{assistant_name(target)} 还没有聊天，先去和它说句话吧")
+        original = cx.execute(
+            "SELECT c.*, (SELECT m.made FROM messages m WHERE m.rowid=c.source_start_rowid) AS source_made "
+            "FROM memory_cards c WHERE c.id=?", (card_id,),
+        ).fetchone()
+        now = int(time.time())
+        new_card = new_id()
+        cx.execute(
+            """INSERT INTO memory_cards
+               (id,chat_id,content,memory_type,topics_json,importance,retention,valid_until,
+                status,source_segment_id,source_start_rowid,source_end_rowid,made,updated,
+                undated,embedding_json,shared_from)
+               VALUES (?,?,?,?,?,?,?,?,'active',NULL,0,0,?,?,?,?,?)""",
+            (new_card, target_chat, original["content"], original["memory_type"],
+             original["topics_json"], original["importance"], original["retention"],
+             original["valid_until"], int(original["source_made"] or original["made"] or now), now,
+             int(original["undated"] or 0), original["embedding_json"] or "", card_id),
+        )
+    memory_pool_touch()
+    return {"item": memory_card_get(target_chat, new_card), "to": target}
+
+
 def memory_card_get(chat_id: str, card_id: str) -> dict | None:
     with conn() as cx:
         row = cx.execute(
-            "SELECT * FROM memory_cards WHERE id=? AND chat_id=?", (card_id, chat_id)
+            "SELECT c.*, (SELECT COUNT(*) FROM memory_cards s WHERE s.shared_from=c.id "
+            "AND s.status<>'archived') AS shared_count FROM memory_cards c WHERE c.id=? AND c.chat_id=?",
+            (card_id, chat_id),
         ).fetchone()
     return _memory_card_dict(row)
 
