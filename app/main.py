@@ -3311,6 +3311,34 @@ def _tts_prune_cache() -> None:
             break
 
 
+# ElevenLabs 拒绝时会在 detail.status 里说为什么；同一个 401 可能是 Key 不对、Key 没开权限、
+# 也可能是额度用完。只报数字她没法判断，把原因翻成一句话带上。
+TTS_ERROR_HINTS = {
+    "invalid_api_key": "API Key 不对，去「连接」里重新填一下",
+    "missing_permissions": "这个 API Key 没有开「文字转语音」权限，去 ElevenLabs 后台给它勾上",
+    "quota_exceeded": "ElevenLabs 这个月的字数额度用完了",
+    "detected_unusual_activity": "ElevenLabs 认为这个账号有异常活动，暂时停用了免费额度",
+    "voice_not_found": "这个音色在 ElevenLabs 账号里找不到了，换一个或重新添加",
+    "model_not_found": "这个语音模型 ElevenLabs 不认，换一个模型试试",
+}
+
+
+def _tts_error_text(status_code: int, body: bytes) -> str:
+    status, message = "", ""
+    try:
+        detail = json.loads(body.decode("utf-8", errors="ignore") or "{}").get("detail")
+        if isinstance(detail, dict):
+            status = str(detail.get("status") or detail.get("code") or "").strip()
+            message = str(detail.get("message") or "").strip()
+        elif isinstance(detail, str):
+            message = detail.strip()
+    except (ValueError, AttributeError):
+        pass
+    hint = TTS_ERROR_HINTS.get(status)
+    reason = hint or message[:200] or status
+    return f"语音服务返回 {status_code}" + (f"：{reason}" if reason else "")
+
+
 def _tts_api_key(cfg: dict) -> str:
     if not cfg.get("api_key_box"):
         raise HTTPException(409, "请先保存 ElevenLabs API Key")
@@ -3528,7 +3556,7 @@ async def tts_message_audio(message_id: str, cached_only: bool = False):
                     json={"text": spoken, "model_id": cfg["model_id"]},
                 )
             if response.status_code >= 400:
-                raise HTTPException(502, "语音服务返回 " + str(response.status_code))
+                raise HTTPException(502, _tts_error_text(response.status_code, response.content))
             if not response.content or len(response.content) > 30 * 1024 * 1024:
                 raise HTTPException(502, "语音服务没有返回有效音频")
             try:

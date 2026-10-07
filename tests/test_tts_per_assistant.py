@@ -79,3 +79,18 @@ class TtsPerAssistantTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TtsErrorTextTest(unittest.TestCase):
+    """ElevenLabs 回 401 时，把它说的原因带出来，而不是只报一个数字。"""
+
+    def test_known_reasons_are_explained(self):
+        body = json.dumps({"detail": {"status": "quota_exceeded", "message": "insufficient quota"}}).encode()
+        self.assertEqual(main._tts_error_text(401, body), "语音服务返回 401：ElevenLabs 这个月的字数额度用完了")
+        body = json.dumps({"detail": {"status": "missing_permissions", "message": "x"}}).encode()
+        self.assertIn("文字转语音", main._tts_error_text(401, body))
+
+    def test_unknown_reasons_pass_the_message_through(self):
+        body = json.dumps({"detail": {"status": "something_new", "message": "Model is not available on your plan"}}).encode()
+        self.assertEqual(main._tts_error_text(401, body), "语音服务返回 401：Model is not available on your plan")
+        self.assertEqual(main._tts_error_text(500, b"not json"), "语音服务返回 500")
