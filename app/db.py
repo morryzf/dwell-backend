@@ -2151,6 +2151,8 @@ def _memory_card_dict(row: sqlite3.Row | dict | None) -> dict | None:
         topics = []
     item["topics"] = [str(topic) for topic in topics if str(topic).strip()]
     item["source_rowids"] = _source_rowids(item.pop("source_rowids_json", "[]"))
+    # 向量只给检索用，一张卡几千个数字。界面用不着，别跟着卡片一起发出去。
+    item.pop("embedding_json", None)
     return item
 
 
@@ -2260,6 +2262,81 @@ def memory_card_list(chat_id: str, include_archived: bool = False) -> list[dict]
             f"WHERE c.chat_id IN ({marks}) {archived}"
             f"ORDER BY c.updated DESC, c.rowid DESC",
             ids,
+        ).fetchall()
+    return [_memory_card_dict(row) for row in rows]
+
+
+# 控制台列卡片要的那些列：不带向量，向量动辄几十 KB 一张。
+_CARD_LIST_COLUMNS = (
+    "c.id,c.chat_id,c.content,c.memory_type,c.topics_json,c.importance,c.retention,"
+    "c.valid_until,c.surface_scope,c.status,c.source_segment_id,c.source_start_rowid,"
+    "c.source_end_rowid,c.source_rowids_json,c.made,c.updated,c.undated"
+)
+
+
+def _memory_card_pool(chat_id: str) -> list[str]:
+    ids = memory_shared_chat_ids(chat_assistant(chat_id)) if memory_shared_enabled(chat_id) else [chat_id]
+    return ids if chat_id in ids else [*ids, chat_id]
+
+
+def memory_card_page(chat_id: str, query: str = "", scope: str = "all",
+                     limit: int = 30, offset: int = 0) -> dict:
+    """记忆控制台分页看卡：最近改过的在前，一次一页。
+
+    搜索和筛选在这里对整个卡池做，不是只在已经发到界面上的那几页里找。
+    scope：all / active / hidden / high（固定保留）/ archived。归档是单独一档，
+    选它只看归档，其余几档都不含归档——和界面原来的筛法一样。
+    """
+    ids = _memory_card_pool(chat_id)
+    marks = ",".join("?" for _ in ids)
+    where = [f"c.chat_id IN ({marks})"]
+    args: list = list(ids)
+    if scope == "archived":
+        where.append("c.status='archived'")
+    else:
+        where.append("c.status<>'archived'")
+        if scope in {"active", "hidden"}:
+            where.append("c.status=?"); args.append(scope)
+        elif scope == "high":
+            where.append("c.importance='high'")
+    query = str(query or "").strip()[:80]
+    if query:
+        where.append("c.content LIKE ? ESCAPE '\\'")
+        args.append("%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+    limit = max(1, min(int(limit or 30), 200))
+    offset = max(0, int(offset or 0))
+    sql_where = " AND ".join(where)
+    with conn() as cx:
+        total = cx.execute(f"SELECT COUNT(*) FROM memory_cards c WHERE {sql_where}", args).fetchone()[0]
+        rows = cx.execute(
+            f"SELECT {_CARD_LIST_COLUMNS}, ch.name AS chat_name FROM memory_cards c "
+            f"LEFT JOIN chats ch ON ch.id=c.chat_id WHERE {sql_where} "
+            f"ORDER BY c.updated DESC, c.rowid DESC LIMIT ? OFFSET ?",
+            [*args, limit, offset],
+        ).fetchall()
+        counts = cx.execute(
+            f"SELECT SUM(status<>'archived') AS active, SUM(status='archived') AS archived "
+            f"FROM memory_cards WHERE chat_id IN ({marks})", ids,
+        ).fetchone()
+    return {
+        "items": [_memory_card_dict(row) for row in rows],
+        "total": int(total or 0),
+        "counts": {"active": int(counts["active"] or 0), "archived": int(counts["archived"] or 0)},
+    }
+
+
+def memory_cards_by_id(chat_id: str, card_ids: list[str]) -> list[dict]:
+    """待确认里「重新分类」「拆分」要对照的原卡，不管它在不在当前这一页。"""
+    card_ids = [str(i) for i in card_ids if i][:200]
+    if not card_ids:
+        return []
+    ids = _memory_card_pool(chat_id)
+    with conn() as cx:
+        rows = cx.execute(
+            f"SELECT {_CARD_LIST_COLUMNS}, ch.name AS chat_name FROM memory_cards c "
+            f"LEFT JOIN chats ch ON ch.id=c.chat_id "
+            f"WHERE c.chat_id IN ({','.join('?' for _ in ids)}) AND c.id IN ({','.join('?' for _ in card_ids)})",
+            [*ids, *card_ids],
         ).fetchall()
     return [_memory_card_dict(row) for row in rows]
 

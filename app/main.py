@@ -4662,16 +4662,32 @@ async def memory_badge_seen(request: Request):
 
 
 @app.get("/api/chats/{chat_id}/memory-cards", dependencies=authed)
-async def memory_cards_get(chat_id: str, include_archived: bool = False):
+async def memory_cards_get(chat_id: str, include_archived: bool = False, limit: int = 0,
+                           offset: int = 0, q: str = "", filter: str = "all"):
+    """给了 limit 就分页：控制台一次只拿一页，搜索和筛选在这里对全部卡片做。"""
     if not db.chat_get(chat_id):
         raise HTTPException(404, "chat 不存在")
+    drafts = db.memory_card_draft_list(chat_id)
+    paging = {}
+    if limit:
+        page = db.memory_card_page(chat_id, q, filter, limit, offset)
+        items = page["items"]
+        paging = {
+            "total": page["total"], "counts": page["counts"],
+            "draft_targets": db.memory_cards_by_id(
+                chat_id, [d.get("target_card_id") for d in drafts if d.get("target_card_id")]
+            ),
+        }
+    else:
+        items = db.memory_card_list(chat_id, include_archived=include_archived)
     return {
         "ok": True,
         "chat_id": chat_id,
         "state": db.memory_card_state_get(chat_id),
         "taxonomy": _memory_card_taxonomy(),
-        "items": db.memory_card_list(chat_id, include_archived=include_archived),
-        "drafts": db.memory_card_draft_list(chat_id),
+        "items": items,
+        **paging,
+        "drafts": drafts,
         "injection_enabled": db.memory_card_injection_enabled(chat_id),
         "shared_enabled": db.memory_shared_enabled(chat_id),
         "last_injection": db.memory_card_last_injection(chat_id),
