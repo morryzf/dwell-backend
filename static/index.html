@@ -7558,29 +7558,36 @@ function endKbPreShift() {
   clearTimeout(kbPreShiftTimer);
 }
 function sheetIsOpen() { return !!document.querySelector('.sheetWrap.open'); }
-/* 键盘起落时，消息跟着输入卡一起走：记住她眼前那一屏离末尾有多远，留白变了也保持这个距离。
-   以前只有原本停在最底下才跟着走——翻到上面一点再点输入框，输入卡升上去，消息原地不动，
-   眼前那几条就被压在下面了。手一碰消息列表就不再扶着。
+/* 键盘起落时，消息跟着输入卡一起走。以前只有原本停在最底下才跟着走——翻到上面一点
+   再点输入框，输入卡升上去，消息原地不动，眼前那几条就被压在下面了。手一碰消息列表就不再扶着。
    键盘的 resize 事件可能比 focus 晚好一会儿才来，那时候再量就已经被挤歪了，
-   所以记下的距离在键盘还在动的这段时间里一直有效（每次动都续 1.5 秒）。 */
-let kbKeepDist = null, kbKeepUntil = 0;
+   所以记下的位置在键盘还在动的这段时间里一直有效（每次动都续 1.5 秒）。
+   第一版按「离末尾多远」对齐，可留白是按整个底栏算的，「↓」按钮一出一收底栏就差 42px，
+   消息比输入卡少走一截。现在直接看输入卡：它走了多少，消息就滚多少。 */
+let kbKeep = null, kbKeepUntil = 0;
 function kbKeepAlive() {
-  if (kbKeepDist !== null && performance.now() > kbKeepUntil) kbKeepDist = null;
-  return kbKeepDist !== null;
+  if (kbKeep && performance.now() > kbKeepUntil) kbKeep = null;
+  return !!kbKeep;
 }
 function rememberLogPosition() {
   if (!kbKeepAlive()) {
-    const dist = log.scrollHeight - log.scrollTop - log.clientHeight;
-    kbKeepDist = dist < 90 ? 0 : dist;   // 本来就在底部附近的，直接贴底
+    kbKeep = { top: log.scrollTop, card: composerEl.getBoundingClientRect().top, bottom: atBottom() };
   }
   kbKeepUntil = performance.now() + 1500;
 }
 function restoreLogPosition() {
   if (!kbKeepAlive()) return;
-  log.scrollTop = Math.max(0, log.scrollHeight - log.clientHeight - kbKeepDist);
+  if (kbKeep.bottom) log.scrollTop = log.scrollHeight;   // 本来就在底部附近的，贴底
+  else log.scrollTop = Math.max(0, kbKeep.top + kbKeep.card - composerEl.getBoundingClientRect().top);
   updateScrollBtn();
 }
-log.addEventListener('touchstart', () => { kbKeepDist = null; }, { passive: true });
+log.addEventListener('touchstart', () => { kbKeep = null; }, { passive: true });
+/* 末尾留白：从输入卡上沿量，不从整个底栏量——底栏里还装着「↓」那颗按钮，它一出一收，
+   留白就跟着跳。键盘开着时贴近一点。 */
+function fitLogTail() {
+  const gap = (kbShift < 0 || kbGap > 20) ? 20 : 52;
+  setLogTail(log.getBoundingClientRect().bottom - composerEl.getBoundingClientRect().top + gap);
+}
 /* 远处不画的那些行靠 IntersectionObserver 摘掉 .far。键盘起落时 iPhone 有时不报，
    眼前的消息就一直是空白。键盘停稳后自己量一遍，补上漏掉的。 */
 function unfarNearRows() {
@@ -7597,19 +7604,12 @@ function resetChatKeyboardAdjustment() {
   kbShift = 0; kbGap = 0;
   footerEl.style.paddingBottom = '';
   footerEl.style.transform = '';
-  setLogTail(footerEl.offsetHeight + 48);
+  fitLogTail();
   clampLogScroll();
 }
 // 输入卡的高度会变：模型名换行、附件条出现、字体加载完都会撑高它。留白只在
 // 几个固定时机算过一次，之后就不准了，最后一条消息会被玻璃压住看不到。
 // 键盘态交给 fitKeyboard，这里只管静止时。
-new ResizeObserver(() => {
-  if (sheetIsOpen() || kbShift || kbGap > 20) return;
-  const wasAtBottom = atBottom();
-  setLogTail(footerEl.offsetHeight + 48);
-  if (wasAtBottom) log.scrollTop = log.scrollHeight;
-  else clampLogScroll();
-}).observe(footerEl);
 function fitKeyboard() {
   const vv = window.visualViewport;
   if (!vv) return;
@@ -7638,7 +7638,7 @@ function fitKeyboard() {
     kbShift = 0;
     footerEl.style.transform = '';
   }
-  setLogTail(footerEl.offsetHeight + (on ? -kbShift + 16 : 48));
+  fitLogTail();
   clampLogScroll();
   restoreLogPosition();
   if (on && window.scrollY !== 0) window.scrollTo(0, 0);
@@ -7785,7 +7785,7 @@ box.addEventListener('touchend', (e) => {
   kbShift = -lift;
   footerEl.style.transform = 'translateY(' + kbShift + 'px)';
   // 消息和输入卡同一刻上去：留白先按估的键盘高度给足，原本在底部就贴着底
-  setLogTail(footerEl.offsetHeight + lift + 16);
+  fitLogTail();
   restoreLogPosition();
   // 键盘没出来（外接键盘之类）就放回原处
   clearTimeout(kbPreShiftTimer);
@@ -7797,11 +7797,15 @@ box.addEventListener('touchend', (e) => {
 }, { passive: false });
 box.addEventListener('focus', trackKeyboard);
 box.addEventListener('blur', () => { rememberLogPosition(); setTimeout(trackKeyboard, 50); });
+// 输入卡的高度会变：模型名换行、附件条出现、字体加载完都会撑高它。留白跟着重量，
+// 否则最后一条会被玻璃压住看不到。
 new ResizeObserver(() => {
+  if (sheetIsOpen()) return;
   const wasBottom = atBottom();
-  setLogTail(footerEl.offsetHeight + (kbGap > 20 ? kbGap + 16 : 48));
+  fitLogTail();
   if (wasBottom) scroll(true);
-}).observe(footerEl);
+  else clampLogScroll();
+}).observe(composerEl);
 
 /* ---------- 抽屉 / 弹层 ---------- */
 const drawerWrap = document.getElementById('drawerWrap');

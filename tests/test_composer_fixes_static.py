@@ -39,24 +39,25 @@ class BorderWidthStepTest(unittest.TestCase):
 class ComposerPaddingFollowsItsHeightTest(unittest.TestCase):
     """输入卡撑高之后留白要跟上，否则最后一条会被玻璃压住。"""
 
-    def test_footer_height_is_observed(self):
-        self.assertIn(").observe(footerEl);", HTML)
+    def test_composer_height_is_observed(self):
+        observer = HTML.index("new ResizeObserver(() => {\n  if (sheetIsOpen()) return;\n  const wasBottom = atBottom();")
+        section = HTML[observer:observer + 300]
+        self.assertIn("fitLogTail();", section)
+        self.assertIn("}).observe(composerEl);", section)
 
-    def test_keyboard_state_is_left_to_fit_keyboard(self):
-        observer = HTML.index("new ResizeObserver(() => {\n  if (sheetIsOpen() || kbShift || kbGap > 20) return;")
-        section = HTML[observer:observer + 400]
-        self.assertIn("const wasAtBottom = atBottom();", section)
-        self.assertIn("setLogTail(footerEl.offsetHeight + 48);", section)
-        # 本来就在底部的人才跟着走，不然会把正在往回翻的人拽下来。
-        self.assertIn("if (wasAtBottom) log.scrollTop = log.scrollHeight;", section)
+    def test_tail_is_measured_from_the_card_not_the_whole_footer(self):
+        # 底栏里还装着「↓」按钮，按底栏量，它一出一收留白就跟着跳。
+        self.assertNotIn("footerEl.offsetHeight", HTML)
+        self.assertIn("setLogTail(log.getBoundingClientRect().bottom - composerEl.getBoundingClientRect().top + gap);", HTML)
 
 
 class KeyboardKeepsHerPlaceTest(unittest.TestCase):
     """没停在最底下时点输入框，消息也要跟着输入卡一起上去。"""
 
-    def test_keyboard_keeps_the_distance_from_the_end_not_only_at_bottom(self):
+    def test_messages_follow_the_card_not_only_at_bottom(self):
         self.assertNotIn("const stick = atBottom();", HTML)
-        self.assertIn("log.scrollTop = Math.max(0, log.scrollHeight - log.clientHeight - kbKeepDist);", HTML)
+        # 输入卡走了多少，消息就滚多少。
+        self.assertIn("else log.scrollTop = Math.max(0, kbKeep.top + kbKeep.card - composerEl.getBoundingClientRect().top);", HTML)
         for caller in ("  rememberLogPosition();\n  const lift = kbGuess();",
                        "  rememberLogPosition();\n  const tick = () => {",
                        "box.addEventListener('blur', () => { rememberLogPosition();"):
