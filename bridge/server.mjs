@@ -314,6 +314,29 @@ const ENGLISH_ONLY_REASON = "This reply will be read aloud by an English voice, 
   + "but your last version contained Chinese characters. Say it again entirely in English, "
   + "with no Chinese at all. Don't mention the redo or explain; just give the new version.";
 
+// 这间聊天选了回复语言时的兜底。口径和 app/llm_client.py 的 reply_language_ok 一致：
+// 代码和链接不算；en 最多容得下三个汉字，zh 要以汉字为主。
+const HAN_G = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/g;
+const LATIN_G = /[A-Za-z]/g;
+const CODE_OR_LINK_G = /```[\s\S]*?```|`[^`]*`|https?:\/\/\S+/g;
+
+function replyLanguageOk(text, language) {
+  if (language !== "en" && language !== "zh") return true;
+  const body = String(text || "").replace(CODE_OR_LINK_G, " ");
+  const han = (body.match(HAN_G) || []).length;
+  const latin = (body.match(LATIN_G) || []).length;
+  if (!han && !latin) return true;
+  if (language === "en") return han <= 3 && latin >= han * 5 && latin > 0;
+  return han > 0 && han * 4 >= latin;
+}
+
+const LANGUAGE_REASONS = {
+  zh: "你刚才那一版不是中文。用中文重新说一遍。不要提这次打回，也不要解释，直接给新的那一版。",
+  en: "Your last version wasn't in English. Say it again in English. "
+    + "Don't mention the redo or explain; just give the new version.",
+};
+const LANGUAGE_NOTICES = { zh: "打回重说：回复不是中文", en: "打回重说：回复不是英文" };
+
 function usagePayload(usage) {
   if (!usage || typeof usage !== "object") return null;
   return {
@@ -386,7 +409,10 @@ async function runChat(res, request) {
   // 语音回复只能说英文：中文会被英文音色念得一塌糊涂。提示里已经要求过，
   // 这里是兜底——模型偶尔还是会被前面满屏的中文带回去。
   const requireEnglish = request.require_english === true;
-  if (rules.length || requireEnglish) {
+  // 语音优先：要念出来的那一轮只认英文，不再看这间聊天选的语言。
+  const requireLanguage = requireEnglish ? "" : String(request.require_language || "");
+  const checkLanguage = requireLanguage === "zh" || requireLanguage === "en";
+  if (rules.length || requireEnglish || checkLanguage) {
     // 打回之后它还要再说一遍，那是多出来的一轮——不放宽就会撞上 maxTurns。
     options.maxTurns += 1;
     options.hooks = {
@@ -401,6 +427,9 @@ async function runChat(res, request) {
           if (requireEnglish && hasCjk(text)) {
             notice = "打回重说：语音回复里出现了中文";
             reason = ENGLISH_ONLY_REASON;
+          } else if (checkLanguage && !replyLanguageOk(text, requireLanguage)) {
+            notice = LANGUAGE_NOTICES[requireLanguage];
+            reason = LANGUAGE_REASONS[requireLanguage];
           } else {
             const breach = firstBreach(rules, text);
             if (!breach) return {};

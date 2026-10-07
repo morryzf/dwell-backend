@@ -161,7 +161,7 @@ class ResetWipesTheFirstVersionTest(unittest.TestCase):
     """后端收到 reset 要把这一轮已经落库的气泡收回去，不能只清内存。"""
 
     def test_the_reply_loop_handles_reset(self):
-        self.assertIn('elif event["type"] == "reset":\n                    reset_stream()', MAIN)
+        self.assertIn('elif event["type"] == "reset":\n                    round_text = []\n                    reset_stream()', MAIN)
 
     def test_reset_takes_back_the_split_bubbles_too(self):
         body = MAIN[MAIN.index("    def reset_stream():"):MAIN.index("    def consume_stream_chunk(")]
@@ -186,7 +186,7 @@ class BridgeHookTest(unittest.TestCase):
 
     def test_voice_replies_are_held_to_english(self):
         self.assertIn("if (requireEnglish && hasCjk(text)) {", BRIDGE)
-        self.assertIn("if (rules.length || requireEnglish) {", BRIDGE)
+        self.assertIn("if (rules.length || requireEnglish || checkLanguage) {", BRIDGE)
 
     def test_it_only_blocks_once(self):
         # 再拦下去就没完没了——它可能根本绕不开那句话。
