@@ -74,3 +74,16 @@ class ManualMemoryCardTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MemoryToolbarStaticTest(unittest.TestCase):
+    """记忆卡页：搜索、状态、添加并排一行；编辑表单里的日期框不超出卡片。"""
+
+    def test_toolbar_is_one_row_with_add_button(self):
+        from pathlib import Path
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        bar = html.split('<div class="mc-toolbar mc-cards-bar">', 1)[1].split("</div>", 1)[0]
+        self.assertLess(bar.index('id="memorySearch"'), bar.index('id="memoryFilter"'))
+        self.assertLess(bar.index('id="memoryFilter"'), bar.index('id="memoryAdd"'))
+        self.assertIn(".mc-toolbar:not(.mc-cards-bar) { align-items: stretch; flex-direction: column; }", html)
+        self.assertIn('.mc-form input[type="date"] { display: block; width: 100%; min-width: 0;', html)
