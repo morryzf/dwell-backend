@@ -13731,7 +13731,12 @@ langSeg.onclick = async (ev) => {
   switchesLoadSeq++;
   try {
     const d = await saveChatSwitch('/reply-language', {language: next});
-    if (replyLanguage === next) { replyLanguage = d.language || 'auto'; syncLangSeg(); }
+    if (replyLanguage === next) {
+      replyLanguage = d.language || 'auto'; syncLangSeg();
+      // 存好了才说：她看到这句再发，就不会赶在开关生效之前。
+      note(replyLanguage === 'auto' ? '回复语言已改回自动'
+        : '回复语言已切到' + btn.textContent.trim() + '，接下来都用它回你');
+    }
   } catch (e) {
     if (replyLanguage === next) { replyLanguage = prev; syncLangSeg(); }
     note('（回复语言没切换：' + e.message + '）', 'err');
