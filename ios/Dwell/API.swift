@@ -39,7 +39,7 @@ final class API {
 
     // MARK: - 底层
 
-    private func request(_ method: String, _ path: String,
+    func request(_ method: String, _ path: String,
                          query: [String: String] = [:],
                          body: [String: Any]? = nil,
                          timeout: TimeInterval? = nil) async throws -> [String: Any] {

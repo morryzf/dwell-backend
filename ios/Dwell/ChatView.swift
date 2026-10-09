@@ -6,6 +6,7 @@ struct ChatView: View {
 
     @State private var draft = ""
     @State private var showChats = false
+    @State private var showMemory = false
     @State private var sentCount = 0
     @State private var pickedItems: [PhotosPickerItem] = []
     @State private var pendingImages: [PendingImage] = []
@@ -30,6 +31,11 @@ struct ChatView: View {
         .sheet(isPresented: $showChats) {
             ChatListView()
                 .environmentObject(store)
+        }
+        .sheet(isPresented: $showMemory, onDismiss: {
+            Task { await store.refreshMemoryBadge() }
+        }) {
+            MemoryView(chatID: store.chatID, chatTitle: headerTitle)
         }
         .sheet(item: $editing) { message in
             EditMessageSheet(message: message) { text in
@@ -312,6 +318,15 @@ struct ChatView: View {
     private var moreMenu: some View {
         Menu {
             Button {
+                showMemory = true
+            } label: {
+                Label(store.memoryUnseen > 0 ? "记忆 · \(store.memoryUnseen) 条新的" : "记忆", systemImage: "book")
+            }
+            Toggle(isOn: Binding(get: { store.memoryInjection },
+                                 set: { on in Task { await store.setMemoryInjection(on) } })) {
+                Label("按需记忆", systemImage: "sparkles")
+            }
+            Button {
                 Task { await store.newChat() }
             } label: {
                 Label("新窗口", systemImage: "square.and.pencil")
@@ -343,6 +358,12 @@ struct ChatView: View {
                 .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(Theme.text)
                 .frame(width: 40, height: 40)
+                // 跟网页一样：有新的待确认记忆时，三个点右上角一颗粉点。
+                .overlay(alignment: .topTrailing) {
+                    if store.memoryUnseen > 0 {
+                        Circle().fill(Theme.accent).frame(width: 7, height: 7).offset(x: -6, y: 9)
+                    }
+                }
         }
         .accessibilityLabel("更多")
     }

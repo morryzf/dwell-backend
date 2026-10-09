@@ -16,6 +16,10 @@ final class ChatStore: ObservableObject {
     @Published var assistant: AssistantInfo?
     /// 当前这间聊天的名字，顶栏标题用；没起名时显示助手的名字（跟网页一样）。
     @Published var chatName = ""
+    /// 记忆面板里有几条新的待确认（三个点上那颗粉点）。
+    @Published var memoryUnseen = 0
+    /// 按需记忆开没开（菜单里那个开关）。
+    @Published var memoryInjection = false
     @Published var messages: [Message] = []
     /// 正在流进来、还没说完的那一段。
     @Published var streamingText = ""
@@ -77,6 +81,7 @@ final class ChatStore: ObservableObject {
             try await reloadMessages()
             startPolling()
             chatName = (try? await api.chats())?.first { $0.id == chatID }?.name ?? ""
+            await refreshMemoryBadge()
         } catch {
             handle(error)
         }
@@ -99,6 +104,20 @@ final class ChatStore: ObservableObject {
         messages = older + fresh
         streamingText = ""
         streamingThinking = ""
+    }
+
+    func refreshMemoryBadge() async {
+        guard let json = try? await api.request("GET", "api/memory/badge") else { return }
+        memoryUnseen = json["unseen"] as? Int ?? 0
+        memoryInjection = json["injection_enabled"] as? Bool ?? false
+    }
+
+    func setMemoryInjection(_ on: Bool) async {
+        guard !chatID.isEmpty else { return }
+        do {
+            let json = try await api.request("PUT", "api/chats/\(chatID)/memory-cards/injection", body: ["enabled": on])
+            memoryInjection = json["enabled"] as? Bool ?? on
+        } catch { handle(error) }
     }
 
     func loadOlder() async {
