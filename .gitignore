@@ -9,3 +9,10 @@ node_modules/
 package-lock.json
 # 启动时由 app/pet_assets.py 从上游拉取，不进仓库
 static/pet/
+
+# iOS：工程文件由 xcodegen 现生成
+ios/Dwell.xcodeproj/
+ios/build/
+ios/Payload/
+ios/*.ipa
+ios/Dwell/Info.plist
