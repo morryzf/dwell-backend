@@ -19,48 +19,14 @@ struct ChatView: View {
     private let maxImages = 2
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    if store.hasMore {
-                        olderButton(proxy)
-                    }
-                    ForEach(Array(store.messages.enumerated()), id: \.element.id) { index, message in
-                        if index == 0 || !Calendar.current.isDate(message.at, inSameDayAs: store.messages[index - 1].at) {
-                            DaySeparator(date: message.at)
-                        }
-                        MessageRow(message: message,
-                                   onEdit: { editing = $0 },
-                                   onDelete: { deleting = $0 })
-                    }
-                    if !store.streamingThinking.isEmpty {
-                        ThinkingView(text: store.streamingThinking, live: store.streamingText.isEmpty)
-                    }
-                    if !store.streamingText.isEmpty {
-                        Bubble(text: store.streamingText, kind: .gu)
-                    } else if store.isReplying && store.streamingThinking.isEmpty {
-                        TypingDots()
-                    }
-                    Color.clear.frame(height: 1).id(bottomID)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-            }
-            .defaultScrollAnchor(.bottom)
-            // 原生 app 最舒服的一点：往下一拖，键盘跟着手指收回去。
-            .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background)
-            // 只在最底下多了新消息时才滚到底；往上翻出更早的消息时不能把人拽回去。
-            .onChange(of: store.messages.last?.id) { _, _ in scrollToBottom(proxy) }
-            .onChange(of: store.streamingText) { _, _ in scrollToBottom(proxy, animated: false) }
-            .onChange(of: inputFocused) { _, focused in
-                if focused { scrollToBottom(proxy) }
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) { inputBar }
+        GeometryReader { geo in
+            chatScroll
+                // 网页上气泡最宽占这一行的 85%。
+                .environment(\.bubbleMaxWidth, (geo.size.width - 36) * 0.85)
         }
-        .navigationTitle(store.assistant?.name ?? "Dwell")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { toolbarContent }
+        .background(PaperBackground())
+        .toolbar(.hidden, for: .navigationBar)
+        .safeAreaInset(edge: .top, spacing: 0) { header }
         .sheet(isPresented: $showChats) {
             ChatListView()
                 .environmentObject(store)
@@ -85,6 +51,47 @@ struct ChatView: View {
         }
         .onChange(of: pickedItems) { _, items in
             Task { await takePicked(items) }
+        }
+    }
+
+    private var chatScroll: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    if store.hasMore {
+                        olderButton(proxy)
+                    }
+                    ForEach(Array(store.messages.enumerated()), id: \.element.id) { index, message in
+                        if index == 0 || !Calendar.current.isDate(message.at, inSameDayAs: store.messages[index - 1].at) {
+                            DaySeparator(date: message.at)
+                        }
+                        MessageRow(message: message,
+                                   onEdit: { editing = $0 },
+                                   onDelete: { deleting = $0 })
+                    }
+                    if !store.streamingThinking.isEmpty {
+                        ThinkingView(text: store.streamingThinking, live: store.streamingText.isEmpty)
+                    }
+                    if !store.streamingText.isEmpty {
+                        Bubble(text: store.streamingText)
+                    } else if store.isReplying && store.streamingThinking.isEmpty {
+                        TypingDots()
+                    }
+                    Color.clear.frame(height: 1).id(bottomID)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+            }
+            .defaultScrollAnchor(.bottom)
+            // 原生 app 最舒服的一点：往下一拖，键盘跟着手指收回去。
+            .scrollDismissesKeyboard(.interactively)
+            // 只在最底下多了新消息时才滚到底；往上翻出更早的消息时不能把人拽回去。
+            .onChange(of: store.messages.last?.id) { _, _ in scrollToBottom(proxy) }
+            .onChange(of: store.streamingText) { _, _ in scrollToBottom(proxy, animated: false) }
+            .onChange(of: inputFocused) { _, focused in
+                if focused { scrollToBottom(proxy) }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) { inputBar }
         }
     }
 
@@ -115,43 +122,54 @@ struct ChatView: View {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingImages.isEmpty
     }
 
+    /// 网页的 composer：一张浮在方格纸上的圆角卡，上面是输入框，下面一排圆按钮和粉色发送键。
     private var inputBar: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             if !store.status.isEmpty {
                 Text(store.status)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.dim)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 18)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.chipText)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Theme.chip))
+                    .overlay(Capsule().stroke(Theme.chipBorder, lineWidth: 1))
             }
-            if !pendingImages.isEmpty || preparingImages {
-                attachmentStrip
-            }
-            HStack(alignment: .bottom, spacing: 8) {
-                PhotosPicker(selection: $pickedItems,
-                             maxSelectionCount: max(1, maxImages - pendingImages.count),
-                             matching: .images) {
-                    Image(systemName: "photo")
-                        .font(.system(size: 22))
-                        .foregroundStyle(Theme.dim)
-                        .frame(width: 34, height: 38)
+            VStack(alignment: .leading, spacing: 4) {
+                if !pendingImages.isEmpty || preparingImages {
+                    attachmentStrip
                 }
-                .disabled(pendingImages.count >= maxImages)
-                .accessibilityLabel("选图片")
-
-                TextField("说点什么", text: $draft, axis: .vertical)
+                TextField("", text: $draft,
+                          prompt: Text("说点什么…").foregroundStyle(Theme.dim),
+                          axis: .vertical)
+                    .font(.system(size: 16))
+                    .foregroundStyle(Theme.text)
                     .lineLimit(1...6)
                     .focused($inputFocused)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(Theme.userBubble, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-                sendButton
+                    .padding(.horizontal, 2)
+                    .padding(.top, 2)
+                    .padding(.bottom, 8)
+                HStack(spacing: 8) {
+                    PhotosPicker(selection: $pickedItems,
+                                 maxSelectionCount: max(1, maxImages - pendingImages.count),
+                                 matching: .images) {
+                        RoundIcon(systemName: "plus")
+                    }
+                    .disabled(pendingImages.count >= maxImages)
+                    .accessibilityLabel("添加照片")
+                    Spacer()
+                    sendButton
+                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.top, 10)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 7)
+            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Theme.composer))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.composerBorder, lineWidth: 1))
+            .shadow(color: Theme.composerShadow, radius: 11, y: 8)
         }
-        .background(.bar)
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
+        .padding(.bottom, 2)
     }
 
     private var attachmentStrip: some View {
@@ -189,9 +207,7 @@ struct ChatView: View {
             Button {
                 Task { await store.stop() }
             } label: {
-                Image(systemName: "stop.circle.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(Theme.dim)
+                sendCircle(systemName: "stop.fill", size: 13)
             }
             .accessibilityLabel("停下")
         } else {
@@ -203,14 +219,22 @@ struct ChatView: View {
                 sentCount += 1
                 Task { await store.send(text, images: images) }
             } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(canSend ? Theme.accent : Theme.dim.opacity(0.5))
+                sendCircle(systemName: "arrow.up", size: 17)
+                    .opacity(canSend ? 1 : 0.55)
             }
             .disabled(!canSend || preparingImages)
             .sensoryFeedback(.impact(weight: .light), trigger: sentCount)
             .accessibilityLabel("发送")
         }
+    }
+
+    private func sendCircle(systemName: String, size: CGFloat) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: size, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 38, height: 38)
+            .background(Circle().fill(Theme.send))
+            .shadow(color: Theme.sendShadow, radius: 6, y: 5)
     }
 
     private func takePicked(_ items: [PhotosPickerItem]) async {
@@ -237,49 +261,90 @@ struct ChatView: View {
 
     // MARK: - 顶栏
 
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
+    /// 网页的 header：左边开侧栏的箭头，中间「✦ 名字 ୨୧」加一行小字，右边三个点。
+    private var header: some View {
+        HStack(spacing: 8) {
             Button {
                 showChats = true
             } label: {
-                Image(systemName: "list.bullet")
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.text)
+                    .frame(width: 40, height: 40)
             }
             .accessibilityLabel("聊天列表")
+
+            VStack(spacing: 1) {
+                (Text("✦  ").font(.system(size: 12.24, weight: .semibold)).foregroundColor(Theme.accent)
+                 + Text(headerTitle).font(.system(size: 17, weight: .semibold)).foregroundColor(Theme.text)
+                 + Text("  ୨୧").font(.system(size: 14.96, weight: .semibold)).foregroundColor(Theme.accent))
+                    .kerning(0.765)
+                    .lineLimit(1)
+                Text(headerSubtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.dim)
+            }
+            .frame(maxWidth: .infinity)
+
+            moreMenu
         }
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button {
-                    Task { await store.newChat() }
-                } label: {
-                    Label("新窗口", systemImage: "square.and.pencil")
-                }
-                if let assistant = store.assistant, assistant.all.count > 1 {
-                    Section("换一位") {
-                        ForEach(assistant.all) { item in
-                            Button {
-                                Task { await store.switchAssistant(item.id) }
-                            } label: {
-                                if item.id == assistant.id {
-                                    Label(item.name, systemImage: "checkmark")
-                                } else {
-                                    Text(item.name)
-                                }
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
+        .padding(.bottom, 12)
+        .background(
+            Theme.header
+                .opacity(0.92)
+                .background(.ultraThinMaterial)
+                .shadow(color: Theme.headerShadow, radius: 10, y: 7)
+                .ignoresSafeArea(edges: .top)
+        )
+    }
+
+    /// 跟网页的 setTitle 一样：聊天起了名字就用名字，没起就用助手的名字。
+    private var headerTitle: String {
+        store.chatName.isEmpty ? (store.assistant?.name ?? "Dwell") : store.chatName
+    }
+
+    private var headerSubtitle: String {
+        store.assistant?.id == "chatgpt" ? "ChatGPT" : "Claude Code"
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Button {
+                Task { await store.newChat() }
+            } label: {
+                Label("新窗口", systemImage: "square.and.pencil")
+            }
+            if let assistant = store.assistant, assistant.all.count > 1 {
+                Section("换一位") {
+                    ForEach(assistant.all) { item in
+                        Button {
+                            Task { await store.switchAssistant(item.id) }
+                        } label: {
+                            if item.id == assistant.id {
+                                Label(item.name, systemImage: "checkmark")
+                            } else {
+                                Text(item.name)
                             }
                         }
                     }
                 }
-                Section {
-                    Button(role: .destructive) {
-                        Task { await store.logout() }
-                    } label: {
-                        Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
-                    }
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
             }
+            Section {
+                Button(role: .destructive) {
+                    Task { await store.logout() }
+                } label: {
+                    Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(Theme.text)
+                .frame(width: 40, height: 40)
         }
+        .accessibilityLabel("更多")
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
@@ -293,6 +358,17 @@ struct ChatView: View {
 
 // MARK: - 一条消息
 
+private struct BubbleMaxWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 300
+}
+
+extension EnvironmentValues {
+    var bubbleMaxWidth: CGFloat {
+        get { self[BubbleMaxWidthKey.self] }
+        set { self[BubbleMaxWidthKey.self] = newValue }
+    }
+}
+
 struct MessageRow: View {
     @EnvironmentObject private var store: ChatStore
 
@@ -304,32 +380,34 @@ struct MessageRow: View {
         switch message.kind {
         case .system:
             Text(message.text)
-                .font(.caption)
+                .font(.system(size: 11.5))
                 .foregroundStyle(Theme.dim)
                 .frame(maxWidth: .infinity)
         case .me, .gu:
             let isMe = message.kind == .me
             VStack(alignment: isMe ? .trailing : .leading, spacing: 6) {
-                if !message.thinking.isEmpty {
-                    ThinkingView(text: message.thinking, live: false)
-                }
-                if !message.tools.isEmpty {
-                    Label("用了 " + message.tools.joined(separator: "、"), systemImage: "wrench.and.screwdriver")
-                        .font(.caption)
-                        .foregroundStyle(Theme.dim)
-                        .lineLimit(1)
+                if !message.thinking.isEmpty || !message.tools.isEmpty {
+                    HStack(spacing: 6) {
+                        if !message.thinking.isEmpty {
+                            ThinkingView(text: message.thinking, live: false)
+                        }
+                        if !message.tools.isEmpty {
+                            ToolChip(names: message.tools)
+                        }
+                    }
                 }
                 ForEach(Array(message.images.enumerated()), id: \.offset) { _, url in
                     MessageImage(url: url)
                 }
                 ForEach(Array(message.bubbles.enumerated()), id: \.offset) { _, text in
-                    Bubble(text: text, kind: message.kind)
+                    Bubble(text: text, isMe: isMe)
                         .contextMenu { menu(copying: text) }
                 }
                 if message.fromHeartbeat && !isMe {
                     Text("主动找你的")
-                        .font(.caption2)
+                        .font(.system(size: 11))
                         .foregroundStyle(Theme.dim)
+                        .padding(.leading, 4)
                 }
             }
             .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
@@ -367,24 +445,25 @@ struct MessageRow: View {
     }
 }
 
+/// 网页的气泡：两边同一种，圆角 18，淡粉毛玻璃，底下一圈很浅的影子。
 struct Bubble: View {
     let text: String
-    let kind: Message.Kind
+    var isMe = false
+    @Environment(\.bubbleMaxWidth) private var maxWidth
 
     var body: some View {
-        let isMe = kind == .me
         Text(Self.render(text))
-            .font(.body)
-            .lineSpacing(3)
-            .padding(.horizontal, isMe ? 14 : 2)
-            .padding(.vertical, isMe ? 9 : 2)
-            .background {
-                // 跟网页一样：自己说的话在气泡里，回复直接铺在背景上。
-                if isMe {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.userBubble)
-                }
-            }
-            .frame(maxWidth: isMe ? 300 : .infinity, alignment: isMe ? .trailing : .leading)
+            .font(Theme.bubbleFont)
+            .lineSpacing(Theme.bubbleLineSpacing)
+            .foregroundStyle(Theme.bubbleText)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.bubble))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.bubbleBorder, lineWidth: 1))
+            .shadow(color: Theme.bubbleShadow, radius: 10, y: 6)
+            // 自己说的靠右：这个框占满 85% 宽，气泡贴着框的右边。
+            .frame(maxWidth: maxWidth, alignment: isMe ? .trailing : .leading)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// 只认行内 Markdown（加粗、斜体、代码、链接），换行原样保留。解析不了就当纯文本。
@@ -396,38 +475,70 @@ struct Bubble: View {
     }
 }
 
-/// 回复前的思考，默认折起来，点开看。
+/// 网页回复上方那颗小胶囊。
+struct Chip<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack(spacing: 5) { content }
+            .font(.system(size: 11.5))
+            .foregroundStyle(Theme.chipText)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Theme.chip))
+            .overlay(Capsule().stroke(Theme.chipBorder, lineWidth: 1))
+            .shadow(color: Theme.bubbleShadow.opacity(0.6), radius: 5, y: 3)
+    }
+}
+
+/// 「thinking ›」胶囊，点开在下面展开思考内容。
 struct ThinkingView: View {
     let text: String
-    /// 还在想：标题显示「在想…」。
+    /// 还在想：小灯泡跟着呼吸。
     let live: Bool
     @State private var expanded = false
+    @Environment(\.bubbleMaxWidth) private var maxWidth
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
                 withAnimation(.easeOut(duration: 0.2)) { expanded.toggle() }
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "sparkles")
-                    Text(live ? "在想…" : "想了想")
-                    Image(systemName: "chevron.right")
+                Chip {
+                    Image(systemName: "lightbulb")
+                        .font(.system(size: 11))
+                        .symbolEffect(.pulse, isActive: live)
+                    Text("thinking")
+                    Text("›")
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                 }
-                .font(.caption)
-                .foregroundStyle(Theme.dim)
             }
             .buttonStyle(.plain)
             if expanded {
                 Text(text)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.dim)
-                    .padding(.leading, 10)
-                    .overlay(alignment: .leading) {
-                        Rectangle().fill(Theme.dim.opacity(0.3)).frame(width: 2)
-                    }
+                    .font(.system(size: 13))
+                    .lineSpacing(3)
+                    .foregroundStyle(Theme.chipText)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.chip))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.chipBorder, lineWidth: 1))
+                    .frame(maxWidth: maxWidth, alignment: .leading)
                     .textSelection(.enabled)
             }
+        }
+    }
+}
+
+struct ToolChip: View {
+    let names: [String]
+
+    var body: some View {
+        Chip {
+            Image(systemName: "wrench")
+                .font(.system(size: 10.5))
+            Text(names.count == 1 ? names[0] : "\(names[0]) 等 \(names.count) 个")
+                .lineLimit(1)
         }
     }
 }
@@ -437,10 +548,10 @@ struct DaySeparator: View {
 
     var body: some View {
         Text(label)
-            .font(.caption)
+            .font(.system(size: 11.5))
             .foregroundStyle(Theme.dim)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+            .padding(.vertical, 2)
     }
 
     private var label: String {
@@ -503,7 +614,7 @@ struct TypingDots: View {
         HStack(spacing: 5) {
             ForEach(0..<3) { index in
                 Circle()
-                    .fill(Theme.dim)
+                    .fill(Theme.accent)
                     .frame(width: 7, height: 7)
                     .opacity(0.3 + 0.7 * abs(sin(phase + Double(index) * 0.6)))
             }

@@ -14,6 +14,8 @@ final class ChatStore: ObservableObject {
 
     @Published var phase: Phase = .checking
     @Published var assistant: AssistantInfo?
+    /// 当前这间聊天的名字，顶栏标题用；没起名时显示助手的名字（跟网页一样）。
+    @Published var chatName = ""
     @Published var messages: [Message] = []
     /// 正在流进来、还没说完的那一段。
     @Published var streamingText = ""
@@ -74,6 +76,7 @@ final class ChatStore: ObservableObject {
             assistant = try await api.assistant()
             try await reloadMessages()
             startPolling()
+            chatName = (try? await api.chats())?.first { $0.id == chatID }?.name ?? ""
         } catch {
             handle(error)
         }

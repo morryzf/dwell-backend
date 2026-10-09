@@ -46,7 +46,7 @@ struct ChatListView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Theme.background)
+            .background(PaperBackground())
             .navigationTitle(store.assistant?.name ?? "聊天")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

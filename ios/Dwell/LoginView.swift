@@ -51,7 +51,7 @@ struct LoginView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Theme.background)
+            .background(PaperBackground())
             .navigationTitle("Dwell")
         }
     }
