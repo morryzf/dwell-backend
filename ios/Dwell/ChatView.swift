@@ -9,6 +9,7 @@ struct ChatView: View {
     @State private var drawerOpen = false
     @State private var drawerDrag: CGFloat = 0
     @State private var showSettings = false
+    @State private var page: NativePage?
     @State private var showMemory = false
     @State private var sentCount = 0
     @State private var pickedItems: [PhotosPickerItem] = []
@@ -42,6 +43,19 @@ struct ChatView: View {
         .overlay { drawer }
         .sheet(isPresented: $showSettings) {
             SettingsView().environmentObject(store)
+        }
+        // 跟网页一样：从侧边栏点进去的页面，返回时侧边栏还开着。
+        .fullScreenCover(item: $page, onDismiss: {
+            withAnimation(.easeOut(duration: 0.24)) { drawerOpen = true }
+        }) { page in
+            Group {
+                switch page {
+                case .tasks: TasksPage()
+                case .calendar: CalendarPage()
+                case .usage: UsagePage()
+                }
+            }
+            .environmentObject(store)
         }
         .sheet(isPresented: $showMemory, onDismiss: {
             Task { await store.refreshMemoryBadge() }
@@ -426,6 +440,9 @@ struct ChatView: View {
                     Sidebar(isOpen: $drawerOpen, onSettings: {
                         closeDrawer()
                         showSettings = true
+                    }, onPage: { next in
+                        closeDrawer()
+                        page = next
                     })
                     .environmentObject(store)
                     .frame(width: width)

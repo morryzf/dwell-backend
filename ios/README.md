@@ -1,6 +1,6 @@
 # Dwell iOS
 
-原生聊天页。其他页面（日记、待办、日历、书房……）暂时还在网页里。
+原生的聊天页、记忆、设置，加上侧边栏里的清单、日子、用量。其他页面（日记、书房……）暂时还在网页里，侧边栏点了会用网页打开。
 
 不需要 Mac，也不需要付费开发者账号：
 
@@ -53,6 +53,10 @@
 | `Dwell/MemoryPanels.swift` | 记忆面板的「摘要」「设置」两页 |
 | `Dwell/MemoryStore.swift`、`MemoryModels.swift` | 记忆面板的状态和数据，接口跟网页的记忆控制台同一套 |
 | `Dwell/Sidebar.swift` | 侧边栏：助手切换、月相时间线、Recents（重命名 / 收纳 / 删除）、设置和日夜按钮 |
+| `Dwell/Pages.swift` | 清单 / 日子 / 用量共用的页面架子；按北京时间算的「今天」 |
+| `Dwell/TasksPage.swift` | 清单：Plum 的（勾、删、新增、定时、每天）和助手的活 |
+| `Dwell/CalendarPage.swift` | 日子：月历、那天的事（每年、重要日子）、心情 |
+| `Dwell/UsagePage.swift` | 用量：Claude 订阅额度；OpenRouter 余额、今日 / 本周 / 本月、命中率、柱状图 |
 | `Dwell/SettingsView.swift` | 设置首页 |
 | `Dwell/SettingsPages.swift` | 模型供应商、MCP 工具、重写规则、系统日志、导入 Kelivo |
 | `Dwell/TTSSettings.swift` | 语音服务：两位各自的音色和朗读方式，共用的音色库和 ElevenLabs 连接 |

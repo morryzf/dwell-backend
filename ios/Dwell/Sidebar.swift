@@ -10,6 +10,8 @@ struct Sidebar: View {
 
     @Binding var isOpen: Bool
     let onSettings: () -> Void
+    /// 已经搬进 app 的页面（Tasks / Calendar / Usage）交给聊天页去开。
+    let onPage: (NativePage) -> Void
 
     @State private var scope = "live"
     @State private var chats: [ChatSummary] = []
@@ -156,7 +158,11 @@ struct Sidebar: View {
                 ForEach(Array(Self.tools.enumerated()), id: \.offset) { index, tool in
                     let left = index % 2 == 0
                     Button {
-                        notYet = tool
+                        if let page = NativePage(rawValue: tool.title) {
+                            onPage(page)
+                        } else {
+                            notYet = tool
+                        }
                     } label: {
                         VStack(alignment: left ? .trailing : .leading, spacing: 2) {
                             Text(tool.title)
@@ -348,6 +354,12 @@ enum SidebarStyle {
 }
 
 /// 还没搬进 app 的页面先在网页里打开。用 Safari 的视图，网页那边的登录状态还在。
+/// 侧边栏里已经做成原生的那几页。
+enum NativePage: String, Identifiable {
+    case tasks = "Tasks", calendar = "Calendar", usage = "Usage"
+    var id: String { rawValue }
+}
+
 struct SafariView: UIViewControllerRepresentable {
     let url: URL
 
