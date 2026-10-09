@@ -227,6 +227,13 @@ class LanguageFrontendTest(unittest.TestCase):
     def test_voice_toggle_says_what_happened(self):
         self.assertIn("note(next ? '语音回复已开启，接下来会用英文语音回你' : '语音回复已关闭');", HTML)
 
+    def test_language_switch_says_so_once_it_is_saved(self):
+        handler = HTML[HTML.index("langSeg.onclick"):HTML.index("syncLangSeg();\nloadChatSwitches();")]
+        saved = handler.index("await saveChatSwitch('/reply-language'")
+        told = handler.index("'回复语言已切到'")
+        self.assertLess(saved, told, "存好了才提示")
+        self.assertIn("'回复语言已改回自动'", handler)
+
 
 if __name__ == "__main__":
     unittest.main()
