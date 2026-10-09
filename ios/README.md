@@ -45,6 +45,9 @@
 | `Dwell/ChatStore.swift` | 聊天页状态；处理 `/api/poll` 的流式事件 |
 | `Dwell/ChatView.swift` | 聊天页：气泡、日期分隔、思考过程、长按菜单、编辑 |
 | `Dwell/Theme.swift` | 网页那套皮：配色、方格纸底、圆按钮（数值量自网页的计算样式） |
+| `Dwell/ChatControls.swift` | 输入框那一排的状态：语音、回复语言、指令、工具、模型；语音播放器 |
+| `Dwell/ComposerSheets.swift` | ＋（拍照 / 相册 / 文件 / 回复语言）、指令、工具、切换模型这几个面板 |
+| `Dwell/VoiceBar.swift` | 语音回复的语音条 |
 | `Dwell/Images.swift` | 选图压缩（跟网页同样的尺寸）、记录里的图片显示和放大 |
 | `Dwell/MemoryView.swift` | 记忆面板：记忆卡（搜索、筛选、编辑、共享、隐藏、归档）、待确认（采用、先修改、拆开、忽略）、看原文 |
 | `Dwell/MemoryPanels.swift` | 记忆面板的「摘要」「设置」两页 |

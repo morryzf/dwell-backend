@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ChatView: View {
     @EnvironmentObject private var store: ChatStore
@@ -11,6 +12,13 @@ struct ChatView: View {
     @State private var pickedItems: [PhotosPickerItem] = []
     @State private var pendingImages: [PendingImage] = []
     @State private var preparingImages = false
+    @State private var pendingFiles: [PendingFile] = []
+    @State private var showAdd = false
+    @State private var showCamera = false
+    @State private var showFiles = false
+    @State private var showInstructions = false
+    @State private var showTools = false
+    @State private var showModel = false
     @State private var editing: Message?
     @State private var deleting: Message?
     @FocusState private var inputFocused: Bool
@@ -58,6 +66,42 @@ struct ChatView: View {
         .onChange(of: pickedItems) { _, items in
             Task { await takePicked(items) }
         }
+        .sheet(isPresented: $showAdd) {
+            AddContextSheet(pickedItems: $pickedItems,
+                            maxImages: max(1, maxImages - pendingImages.count),
+                            onCamera: { showCamera = true },
+                            onFiles: { showFiles = true })
+                .environmentObject(store)
+                .presentationDetents([.height(380)])
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPicker { image in
+                Task { await takeCamera(image) }
+            }
+            .ignoresSafeArea()
+        }
+        .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result {
+                Task { await takeFiles(urls) }
+            }
+        }
+        .sheet(isPresented: $showInstructions) {
+            InstructionsSheet().environmentObject(store)
+        }
+        .sheet(isPresented: $showTools) {
+            ToolsSheet().environmentObject(store)
+        }
+        .sheet(isPresented: $showModel) {
+            ModelSheet().environmentObject(store)
+        }
+        // 一轮说完：新的语音回复自动念一遍（跟网页一样）。
+        .onChange(of: store.isReplying) { _, replying in
+            guard !replying, let id = store.autoplayVoiceID else { return }
+            store.autoplayVoiceID = nil
+            if store.messages.contains(where: { $0.id == id && $0.voice && !$0.text.isEmpty }) {
+                Task { await VoicePlayer.shared.play(id) }
+            }
+        }
     }
 
     private var chatScroll: some View {
@@ -78,7 +122,10 @@ struct ChatView: View {
                     if !store.streamingThinking.isEmpty {
                         ThinkingView(text: store.streamingThinking, live: store.streamingText.isEmpty)
                     }
-                    if !store.streamingText.isEmpty {
+                    if !store.streamingText.isEmpty && store.voiceMode {
+                        // 语音回复还在说：先给一条「正在说」的语音条，说完再念。
+                        VoiceBar(messageID: "streaming", text: store.streamingText, pending: true)
+                    } else if !store.streamingText.isEmpty {
                         Bubble(text: store.streamingText)
                     } else if store.isReplying && store.streamingThinking.isEmpty {
                         TypingDots()
@@ -125,7 +172,7 @@ struct ChatView: View {
     // MARK: - 输入框
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingImages.isEmpty
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingImages.isEmpty || !pendingFiles.isEmpty
     }
 
     /// 网页的 composer：一张浮在方格纸上的圆角卡，上面是输入框，下面一排圆按钮和粉色发送键。
@@ -141,7 +188,7 @@ struct ChatView: View {
                     .overlay(Capsule().stroke(Theme.chipBorder, lineWidth: 1))
             }
             VStack(alignment: .leading, spacing: 4) {
-                if !pendingImages.isEmpty || preparingImages {
+                if !pendingImages.isEmpty || !pendingFiles.isEmpty || preparingImages {
                     attachmentStrip
                 }
                 TextField("", text: $draft,
@@ -154,17 +201,7 @@ struct ChatView: View {
                     .padding(.horizontal, 2)
                     .padding(.top, 2)
                     .padding(.bottom, 8)
-                HStack(spacing: 8) {
-                    PhotosPicker(selection: $pickedItems,
-                                 maxSelectionCount: max(1, maxImages - pendingImages.count),
-                                 matching: .images) {
-                        RoundIcon(systemName: "plus")
-                    }
-                    .disabled(pendingImages.count >= maxImages)
-                    .accessibilityLabel("添加照片")
-                    Spacer()
-                    sendButton
-                }
+                controlRow
             }
             .padding(.top, 10)
             .padding(.horizontal, 14)
@@ -178,8 +215,62 @@ struct ChatView: View {
         .padding(.bottom, 2)
     }
 
+    /// 网页那一排：＋、指令、工具、语音、模型胶囊，右边发送键。
+    private var controlRow: some View {
+        HStack(spacing: 6) {
+            Button { showAdd = true } label: { RoundIcon(systemName: "plus") }
+                .accessibilityLabel("添加照片和文件")
+            Button { showInstructions = true } label: {
+                RoundIcon(systemName: "square.3.layers.3d", on: store.instructionCount > 0)
+            }
+            .accessibilityLabel(store.instructionCount > 0 ? "这间聊天已启用 \(store.instructionCount) 条指令" : "这间聊天的指令")
+            Button { showTools = true } label: {
+                RoundIcon(systemName: "wrench", on: store.toolsEnabled)
+            }
+            .accessibilityLabel("这间聊天的工具")
+            Button {
+                Task { await store.setVoiceMode(!store.voiceMode) }
+            } label: {
+                RoundIcon(systemName: "waveform", on: store.voiceMode)
+            }
+            .accessibilityLabel("语音回复")
+            Button { showModel = true } label: {
+                Text(store.model.displayName)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: 120)
+                    .background(Capsule().fill(Theme.roundButton))
+                    .shadow(color: Theme.composerShadow, radius: 9, y: 6)
+            }
+            .accessibilityLabel("切换模型")
+            Spacer(minLength: 4)
+            sendButton
+        }
+        .buttonStyle(.plain)
+    }
+
     private var attachmentStrip: some View {
         HStack(spacing: 8) {
+            ForEach(pendingFiles) { file in
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.text")
+                    Text(file.name).lineLimit(1).frame(maxWidth: 110)
+                    Button {
+                        pendingFiles.removeAll { $0.id == file.id }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.dim)
+                    }
+                    .accessibilityLabel("去掉这个文件")
+                }
+                .font(.system(size: 12.5))
+                .foregroundStyle(Theme.text)
+                .padding(.horizontal, 10)
+                .frame(height: 40)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.chip))
+            }
             ForEach(pendingImages) { item in
                 Image(uiImage: item.thumbnail)
                     .resizable()
@@ -220,10 +311,12 @@ struct ChatView: View {
             Button {
                 let text = draft
                 let images = pendingImages
+                let files = pendingFiles
                 draft = ""
                 pendingImages = []
+                pendingFiles = []
                 sentCount += 1
-                Task { await store.send(text, images: images) }
+                Task { await store.send(text, images: images, files: files) }
             } label: {
                 sendCircle(systemName: "arrow.up", size: 17)
                     .opacity(canSend ? 1 : 0.55)
@@ -262,6 +355,55 @@ struct ChatView: View {
             } else {
                 store.status = "有一张图读不出来"
             }
+        }
+    }
+
+    private func takeCamera(_ image: UIImage) async {
+        guard pendingImages.count < maxImages else { return }
+        preparingImages = true
+        defer { preparingImages = false }
+        let prepared = await Task.detached(priority: .userInitiated) {
+            image.jpegData(compressionQuality: 0.9).flatMap { PendingImage(imageData: $0) }
+        }.value
+        if let prepared { pendingImages.append(prepared) }
+    }
+
+    /// 跟网页的 takeFiles 一样：图片走图片那条路；小的纯文本直接读成文字；
+    /// 其余的（PDF、大文件）分块传上去，服务器读成文字暂存，随下一条消息一起发。
+    private func takeFiles(_ urls: [URL]) async {
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let name = url.lastPathComponent
+            guard let data = try? Data(contentsOf: url) else {
+                store.flash("读不了 \(name)")
+                continue
+            }
+            if let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image) {
+                if pendingImages.count < maxImages, let image = PendingImage(imageData: data) {
+                    pendingImages.append(image)
+                }
+                continue
+            }
+            if let text = PendingFile.inlineText(name: name, data: data) {
+                pendingFiles.append(text)
+                continue
+            }
+            guard data.count <= 30 * 1024 * 1024 else {
+                store.flash("\(name) 太大了，最多 30MB")
+                continue
+            }
+            preparingImages = true
+            do {
+                let result = try await API.shared.upload(fileData: data, name: name) { fraction in
+                    Task { @MainActor in store.status = "在传 \(name)…\(Int(fraction * 100))%" }
+                }
+                pendingFiles.append(PendingFile(name: name, content: .upload(id: result.id)))
+                store.flash("\(name) 读好了，" + (result.truncated ? "太长只带开头一部分，" : "") + "跟下一条消息一起发")
+            } catch {
+                store.flash("\(name) 没传上：" + error.localizedDescription)
+            }
+            preparingImages = false
         }
     }
 
@@ -420,9 +562,13 @@ struct MessageRow: View {
                 ForEach(Array(message.images.enumerated()), id: \.offset) { _, url in
                     MessageImage(url: url)
                 }
-                ForEach(Array(message.bubbles.enumerated()), id: \.offset) { _, text in
-                    Bubble(text: text, isMe: isMe)
-                        .contextMenu { menu(copying: text) }
+                if message.voice && !isMe && !message.text.isEmpty {
+                    VoiceBar(messageID: message.id, text: message.text, pending: false) {
+                        bubbleList(isMe: isMe)
+                    }
+                    .contextMenu { menu(copying: message.text) }
+                } else {
+                    bubbleList(isMe: isMe)
                 }
                 if message.fromHeartbeat && !isMe {
                     Text("主动找你的")
@@ -432,6 +578,15 @@ struct MessageRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
+        }
+    }
+
+    /// 一条消息的文字气泡（分条的话是好几个）。
+    @ViewBuilder
+    private func bubbleList(isMe: Bool) -> some View {
+        ForEach(Array(message.bubbles.enumerated()), id: \.offset) { _, text in
+            Bubble(text: text, isMe: isMe)
+                .contextMenu { menu(copying: text) }
         }
     }
 

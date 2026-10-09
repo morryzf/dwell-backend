@@ -121,18 +121,68 @@ final class API {
         return (msgs, json["more"] as? Bool ?? false)
     }
 
-    func send(text: String, chatID: String, images: [PendingImage] = []) async throws {
+    func send(text: String, chatID: String, images: [PendingImage] = [], files: [PendingFile] = [],
+              voice: Bool? = nil, replyLanguage: String? = nil) async throws {
         var body: [String: Any] = [
             "text": text,
             "chat_id": chatID,
             "device_time": Self.deviceTime(),
         ]
-        if !images.isEmpty {
-            body["attachments"] = images.map {
-                ["kind": "image", "media_type": "image/jpeg", "data": $0.data, "preview": $0.preview]
-            }
+        // 跟网页一样把页面上看到的开关一起带上：开关刚点完就发，那次保存可能还在路上。
+        if let voice { body["voice"] = voice }
+        if let replyLanguage { body["reply_language"] = replyLanguage }
+        var attachments: [[String: Any]] = images.map {
+            ["kind": "image", "media_type": "image/jpeg", "data": $0.data, "preview": $0.preview]
         }
+        attachments += files.map(\.payload)
+        if !attachments.isEmpty { body["attachments"] = attachments }
         _ = try await request("POST", "api/send", body: body)
+    }
+
+    /// 拿原始字节（语音）。
+    func data(_ path: String) async throws -> Data {
+        guard let base = baseURL else { throw APIError(status: 0, message: "还没填服务器地址") }
+        var req = URLRequest(url: base.appendingPathComponent(path))
+        req.timeoutInterval = 60
+        let (data, response) = try await session.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw APIError(status: status, message: json?["detail"] as? String ?? "语音没能生成（\(status)）")
+        }
+        return data
+    }
+
+    /// 大文件分块传：跟网页的 bigUpload 一样，4MB 一块，传完服务器读成文字暂存。
+    func upload(fileData: Data, name: String, progress: (Double) -> Void) async throws -> (id: String, truncated: Bool) {
+        guard let base = baseURL else { throw APIError(status: 0, message: "还没填服务器地址") }
+        let chunk = 4 * 1024 * 1024
+        let total = max(1, Int(ceil(Double(fileData.count) / Double(chunk))))
+        var uploadID = ""
+        var truncated = false
+        for index in 0..<total {
+            let last = index == total - 1
+            var components = URLComponents(url: base.appendingPathComponent("api/upload"), resolvingAgainstBaseURL: false)!
+            components.queryItems = [
+                URLQueryItem(name: "name", value: name),
+                URLQueryItem(name: "idx", value: String(index)),
+                URLQueryItem(name: "done", value: last ? "1" : "0"),
+            ] + (uploadID.isEmpty ? [] : [URLQueryItem(name: "id", value: uploadID)])
+            var req = URLRequest(url: components.url!)
+            req.httpMethod = "POST"
+            req.timeoutInterval = 120
+            let slice = fileData.subdata(in: (index * chunk)..<min(fileData.count, (index + 1) * chunk))
+            let (data, response) = try await session.upload(for: req, from: slice)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            guard (200..<300).contains(status), json["ok"] as? Bool == true else {
+                throw APIError(status: status, message: json["detail"] as? String ?? "第 \(index + 1) 块没传过去")
+            }
+            uploadID = json["id"] as? String ?? uploadID
+            truncated = json["truncated"] as? Bool ?? false
+            progress(Double(index + 1) / Double(total))
+        }
+        return (uploadID, truncated)
     }
 
     func editMessage(_ id: String, content: String) async throws {

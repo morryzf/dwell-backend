@@ -119,17 +119,19 @@ struct PaperBackground: View {
     }
 }
 
-/// 网页上那种圆形小按钮。
+/// 网页上那种圆形小按钮。开着的时候（on）图标变粉，外面一圈淡粉的细边。
 struct RoundIcon: View {
     let systemName: String
     var size: CGFloat = 32
+    var on = false
 
     var body: some View {
         Image(systemName: systemName)
-            .font(.system(size: size * 0.47, weight: .medium))
-            .foregroundStyle(Theme.text)
+            .font(.system(size: size * 0.45, weight: .medium))
+            .foregroundStyle(on ? Theme.accent : Theme.text)
             .frame(width: size, height: size)
             .background(Circle().fill(Theme.roundButton))
+            .overlay(Circle().stroke(Theme.accent.opacity(on ? 0.42 : 0), lineWidth: 1))
             .shadow(color: Theme.composerShadow, radius: 9, y: 6)
     }
 }

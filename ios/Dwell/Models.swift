@@ -59,6 +59,8 @@ struct Message: Identifiable, Equatable {
     var thinking: String
     /// 这次回复用过的工具名，只拿来显示一行小字。
     var tools: [String]
+    /// 语音回复：画成语音条，文字默认收起。
+    var voice: Bool
 
     init(json: [String: Any]) {
         id = json["id"] as? String ?? UUID().uuidString
@@ -75,6 +77,7 @@ struct Message: Identifiable, Equatable {
         images = json["images"] as? [String] ?? []
         thinking = (json["thinking"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         tools = (json["tools"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+        voice = json["voice"] as? Bool ?? false
     }
 
     init(id: String, kind: Kind, text: String, images: [String] = [], at: Date = Date()) {
@@ -88,6 +91,7 @@ struct Message: Identifiable, Equatable {
         self.images = images
         self.thinking = ""
         self.tools = []
+        self.voice = false
     }
 
     var isLocal: Bool { id.hasPrefix("local-") }

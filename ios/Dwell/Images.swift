@@ -124,3 +124,37 @@ struct FullImageView: View {
         }
     }
 }
+
+/// 选好、还没发出去的一个文件。跟网页的 takeFiles 一样：
+/// 小的纯文本文件读成文字直接带上；别的（PDF、大文件）先分块传上去，服务器读成文字暂存。
+struct PendingFile: Identifiable {
+    enum Content {
+        case text(String)
+        case upload(id: String)
+    }
+
+    let id = UUID()
+    let name: String
+    let content: Content
+
+    var payload: [String: Any] {
+        switch content {
+        case .text(let text): return ["kind": "text", "name": name, "text": text]
+        case .upload(let id): return ["kind": "upload", "id": id, "name": name]
+        }
+    }
+
+    /// 网页 TEXT_EXT 那一串。
+    private static let textExtensions: Set<String> = [
+        "txt", "md", "markdown", "csv", "tsv", "json", "log", "yaml", "yml", "xml", "html", "htm",
+        "css", "js", "ts", "py", "sh", "ini", "conf", "toml", "sql", "srt", "vtt",
+    ]
+
+    /// 小于 200KB 的纯文本：直接读成文字。
+    static func inlineText(name: String, data: Data) -> PendingFile? {
+        let ext = (name as NSString).pathExtension.lowercased()
+        guard data.count < 200 * 1024, textExtensions.contains(ext),
+              let text = String(data: data, encoding: .utf8), !text.isEmpty else { return nil }
+        return PendingFile(name: name, content: .text(text))
+    }
+}

@@ -20,6 +20,15 @@ final class ChatStore: ObservableObject {
     @Published var memoryUnseen = 0
     /// 按需记忆开没开（菜单里那个开关）。
     @Published var memoryInjection = false
+
+    // 输入框那一排按钮的状态，都按聊天存在服务器上（见 ChatControls.swift）。
+    @Published var voiceMode = false
+    @Published var replyLanguage = "auto"
+    @Published var instructionCount = 0
+    @Published var toolsEnabled = false
+    @Published var model = ChatModelState()
+    /// 刚说完、该自动念一遍的那条语音回复。
+    @Published var autoplayVoiceID: String?
     @Published var messages: [Message] = []
     /// 正在流进来、还没说完的那一段。
     @Published var streamingText = ""
@@ -82,6 +91,7 @@ final class ChatStore: ObservableObject {
             startPolling()
             chatName = (try? await api.chats())?.first { $0.id == chatID }?.name ?? ""
             await refreshMemoryBadge()
+            await loadControls()
         } catch {
             handle(error)
         }
@@ -136,16 +146,19 @@ final class ChatStore: ObservableObject {
 
     // MARK: - 发消息
 
-    func send(_ raw: String, images: [PendingImage] = []) async {
+    func send(_ raw: String, images: [PendingImage] = [], files: [PendingFile] = []) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !images.isEmpty, !chatID.isEmpty else { return }
+        guard !text.isEmpty || !images.isEmpty || !files.isEmpty, !chatID.isEmpty else { return }
         // 先在本地放一条，echo 回来再换成真的。
-        messages.append(Message(id: "local-\(UUID().uuidString)", kind: .me, text: text,
+        let shown = text.isEmpty && images.isEmpty
+            ? "（发来了文件：" + files.map(\.name).joined(separator: "、") + "）" : text
+        messages.append(Message(id: "local-\(UUID().uuidString)", kind: .me, text: shown,
                                 images: images.map(\.previewDataURL)))
         isReplying = true
         status = ""
         do {
-            try await api.send(text: text, chatID: chatID, images: images)
+            try await api.send(text: text, chatID: chatID, images: images, files: files,
+                               voice: voiceMode, replyLanguage: replyLanguage)
         } catch {
             isReplying = false
             messages.removeAll { $0.isLocal }
@@ -270,6 +283,9 @@ final class ChatStore: ObservableObject {
             }
             streamingText = ""
             streamingThinking = ""
+
+        case "system" where (event["subtype"] as? String) == "voice_reply":
+            autoplayVoiceID = event["message_id"] as? String
 
         case "system" where (event["subtype"] as? String) == "regenerating":
             let ids = Set((event["message_ids"] as? [String] ?? []) + [event["message_id"] as? String ?? ""])

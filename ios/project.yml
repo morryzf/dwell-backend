@@ -33,3 +33,4 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         ITSAppUsesNonExemptEncryption: false
+        NSCameraUsageDescription: 拍一张照片发给 Cloudy。
