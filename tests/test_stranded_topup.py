@@ -40,7 +40,9 @@ class StrandedTopupTest(unittest.TestCase):
         def add(count, made):
             ids = []
             for _ in range(count):
-                message = db.message_add(chat, "user", "x")
+                # 两边轮流说：同一方连着发的几句只算一条。
+                role = ("user", "assistant")[db.message_rows_from(chat, 0) % 2]
+                message = db.message_add(chat, role, "x")
                 with db.conn() as cx:
                     cx.execute(
                         "UPDATE messages SET made=? WHERE id=?", (made, message["id"])
