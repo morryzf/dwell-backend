@@ -31,3 +31,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Ephesis (iOS app)
+
+The iOS app (`ios/Dwell/Fonts/Ephesis-Regular.ttf`) bundles the Ephesis typeface, the same font the web sidebar loads from Google Fonts.
+
+Copyright 2004-2021 The Ephesis Project Authors (https://github.com/googlefonts/ephesis). Licensed under the SIL Open Font License, Version 1.1; the full license text is in `ios/Dwell/Fonts/Ephesis-OFL.txt`.

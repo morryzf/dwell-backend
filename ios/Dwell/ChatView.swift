@@ -6,7 +6,9 @@ struct ChatView: View {
     @EnvironmentObject private var store: ChatStore
 
     @State private var draft = ""
-    @State private var showChats = false
+    @State private var drawerOpen = false
+    @State private var drawerDrag: CGFloat = 0
+    @State private var showSettings = false
     @State private var showMemory = false
     @State private var sentCount = 0
     @State private var pickedItems: [PhotosPickerItem] = []
@@ -33,12 +35,13 @@ struct ChatView: View {
                 // 网页上气泡最宽占这一行的 85%。
                 .environment(\.bubbleMaxWidth, (geo.size.width - 36) * 0.85)
         }
-        .background(PaperBackground())
+        .background(ChatBackground(assistant: store.assistant?.id ?? "cloudy"))
+        .environment(\.assistantID, store.assistant?.id ?? "cloudy")
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) { header }
-        .sheet(isPresented: $showChats) {
-            ChatListView()
-                .environmentObject(store)
+        .overlay { drawer }
+        .sheet(isPresented: $showSettings) {
+            SettingsView().environmentObject(store)
         }
         .sheet(isPresented: $showMemory, onDismiss: {
             Task { await store.refreshMemoryBadge() }
@@ -407,20 +410,71 @@ struct ChatView: View {
         }
     }
 
+    // MARK: - 侧边栏
+
+    /// 网页的 #drawer：从左边滑出来，宽 min(76%, 292)，后面一层半透明的遮罩，点遮罩或往左划收起。
+    /// 没开的时候左边缘留一条窄缝，从屏幕边往右划也能拉出来。
+    private var drawer: some View {
+        GeometryReader { geo in
+            let width = min(geo.size.width * 0.76, 292)
+            ZStack(alignment: .leading) {
+                if drawerOpen {
+                    Color.black.opacity(0.18)
+                        .ignoresSafeArea()
+                        .onTapGesture { closeDrawer() }
+                        .transition(.opacity)
+                    Sidebar(isOpen: $drawerOpen, onSettings: {
+                        closeDrawer()
+                        showSettings = true
+                    })
+                    .environmentObject(store)
+                    .frame(width: width)
+                    .offset(x: min(0, drawerDrag))
+                    .gesture(
+                        DragGesture(minimumDistance: 12)
+                            .onChanged { drawerDrag = $0.translation.width }
+                            .onEnded { value in
+                                if value.translation.width < -width * 0.3 { closeDrawer() }
+                                withAnimation(.easeOut(duration: 0.2)) { drawerDrag = 0 }
+                            }
+                    )
+                    .transition(.move(edge: .leading))
+                } else {
+                    Color.clear
+                        .frame(width: 12)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 16)
+                                .onEnded { value in
+                                    if value.translation.width > 50 {
+                                        withAnimation(.easeOut(duration: 0.24)) { drawerOpen = true }
+                                    }
+                                }
+                        )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        }
+    }
+
+    private func closeDrawer() {
+        withAnimation(.easeOut(duration: 0.24)) { drawerOpen = false }
+    }
+
     // MARK: - 顶栏
 
     /// 网页的 header：左边开侧栏的箭头，中间「✦ 名字 ୨୧」加一行小字，右边三个点。
     private var header: some View {
         HStack(spacing: 8) {
             Button {
-                showChats = true
+                withAnimation(.easeOut(duration: 0.24)) { drawerOpen = true }
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(Theme.text)
                     .frame(width: 40, height: 40)
             }
-            .accessibilityLabel("聊天列表")
+            .accessibilityLabel("打开侧边栏")
 
             VStack(spacing: 1) {
                 (Text("✦  ").font(.system(size: 12.24, weight: .semibold)).foregroundColor(Theme.accent)
@@ -621,21 +675,33 @@ struct MessageRow: View {
     }
 }
 
-/// 网页的气泡：两边同一种，圆角 18，淡粉毛玻璃，底下一圈很浅的影子。
+/// 网页的气泡：圆角、淡粉毛玻璃、很浅的影子。样子跟「设置 → 玻璃效果」走：
+/// 我的消息一套，Cloudy 一套，ChatGPT 一套，浅色深色各一套。
 struct Bubble: View {
     let text: String
     var isMe = false
     @Environment(\.bubbleMaxWidth) private var maxWidth
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.assistantID) private var assistant
+    @ObservedObject private var appearance = Appearance.shared
 
     var body: some View {
+        let style = appearance.style(isMe ? "me" : assistant, scheme == .dark ? "dark" : "light")
+        let shape = RoundedRectangle(cornerRadius: style.radius, style: .continuous)
         Text(Self.render(text))
             .font(Theme.bubbleFont)
             .lineSpacing(Theme.bubbleLineSpacing)
-            .foregroundStyle(Theme.bubbleText)
+            .foregroundStyle(style.textColor)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.bubble))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.bubbleBorder, lineWidth: 1))
+            .background {
+                ZStack {
+                    // 网页是 backdrop-filter 模糊；这里用系统的毛玻璃材质，模糊调到 0 就不要它。
+                    if style.blur > 0 { shape.fill(.ultraThinMaterial) }
+                    shape.fill(style.backgroundColor)
+                }
+            }
+            .overlay(shape.stroke(style.borderColor, lineWidth: style.borderWidth))
             .shadow(color: Theme.bubbleShadow, radius: 10, y: 6)
             // 自己说的靠右：这个框占满 85% 宽，气泡贴着框的右边。
             .frame(maxWidth: maxWidth, alignment: isMe ? .trailing : .leading)

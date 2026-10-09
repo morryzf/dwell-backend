@@ -34,3 +34,5 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         ITSAppUsesNonExemptEncryption: false
         NSCameraUsageDescription: 拍一张照片发给 Cloudy。
+        UIAppFonts:
+          - Ephesis-Regular.ttf

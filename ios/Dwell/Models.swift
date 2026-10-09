@@ -30,9 +30,11 @@ struct ChatSummary: Identifiable {
     let preview: String
     let last: Date
     let current: Bool
+    let archived: Bool
 
     init(json: [String: Any]) {
         id = json["id"] as? String ?? ""
+        archived = json["archived"] as? Bool ?? false
         name = json["name"] as? String ?? ""
         preview = json["preview"] as? String ?? ""
         last = Date(timeIntervalSince1970: TimeInterval(json["last"] as? Int ?? 0))

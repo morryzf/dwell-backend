@@ -761,7 +761,7 @@ private struct MoreModels: View {
 }
 
 /// 模型目录：选供应商、获取 / 刷新、筛选、加入常用、删掉、手动添加。
-private struct CatalogBrowser: View {
+struct CatalogBrowser: View {
     @ObservedObject var catalog: ModelCatalog
 
     @State private var providerID = ""

@@ -97,13 +97,26 @@ final class API {
         AssistantInfo(json: try await request("POST", "api/assistant", body: ["assistant": id]))
     }
 
-    func chats() async throws -> [ChatSummary] {
-        let json = try await request("GET", "api/chats", query: ["scope": "live"])
+    /// scope：live（Recents）/ box（收纳起来的）
+    func chats(scope: String = "live") async throws -> [ChatSummary] {
+        let json = try await request("GET", "api/chats", query: ["scope": scope])
         return (json["items"] as? [[String: Any]] ?? []).map(ChatSummary.init(json:))
     }
 
     func switchChat(_ id: String) async throws {
         _ = try await request("POST", "api/chats", body: ["action": "switch", "id": id])
+    }
+
+    func renameChat(_ id: String, name: String) async throws {
+        _ = try await request("POST", "api/chats", body: ["action": "rename", "id": id, "name": name])
+    }
+
+    func archiveChat(_ id: String, archived: Bool) async throws {
+        _ = try await request("POST", "api/chats", body: ["action": "archive", "id": id, "archived": archived])
+    }
+
+    func deleteChat(_ id: String) async throws {
+        _ = try await request("DELETE", "api/chats/\(id)")
     }
 
     func newChat() async throws {
@@ -151,6 +164,28 @@ final class API {
             throw APIError(status: status, message: json?["detail"] as? String ?? "语音没能生成（\(status)）")
         }
         return data
+    }
+
+    /// multipart/form-data 传一个文件（导入 Kelivo 用）。
+    func multipart(_ path: String, field: String, filename: String, data fileData: Data) async throws -> [String: Any] {
+        guard let base = baseURL else { throw APIError(status: 0, message: "还没填服务器地址") }
+        let boundary = "dwell-" + UUID().uuidString
+        var body = Data()
+        let safeName = filename.replacingOccurrences(of: "\"", with: "")
+        body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(field)\"; filename=\"\(safeName)\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8))
+        body.append(fileData)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        var req = URLRequest(url: base.appendingPathComponent(path))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 180
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.upload(for: req, from: body)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard (200..<300).contains(status), json["ok"] as? Bool != false else {
+            throw APIError(status: status, message: json["detail"] as? String ?? "服务器返回了 \(status)")
+        }
+        return json
     }
 
     /// 大文件分块传：跟网页的 bigUpload 一样，4MB 一块，传完服务器读成文字暂存。

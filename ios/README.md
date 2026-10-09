@@ -52,7 +52,12 @@
 | `Dwell/MemoryView.swift` | 记忆面板：记忆卡（搜索、筛选、编辑、共享、隐藏、归档）、待确认（采用、先修改、拆开、忽略）、看原文 |
 | `Dwell/MemoryPanels.swift` | 记忆面板的「摘要」「设置」两页 |
 | `Dwell/MemoryStore.swift`、`MemoryModels.swift` | 记忆面板的状态和数据，接口跟网页的记忆控制台同一套 |
-| `Dwell/ChatListView.swift` | 聊天列表 |
+| `Dwell/Sidebar.swift` | 侧边栏：助手切换、月相时间线、Recents（重命名 / 收纳 / 删除）、设置和日夜按钮 |
+| `Dwell/SettingsView.swift` | 设置首页 |
+| `Dwell/SettingsPages.swift` | 模型供应商、MCP 工具、重写规则、系统日志、导入 Kelivo |
+| `Dwell/TTSSettings.swift` | 语音服务：两位各自的音色和朗读方式，共用的音色库和 ElevenLabs 连接 |
+| `Dwell/Appearance.swift`、`AppearanceSettings.swift` | 日夜模式、聊天背景、消息玻璃效果（只存在手机上） |
+| `Dwell/Fonts/` | 侧边栏用的 Ephesis 字体（SIL OFL 1.1，许可证在同目录） |
 | `Dwell/LoginView.swift` | 登录 |
 
 登录用的是网页同一套 cookie，不需要把 `DWELL_API_TOKEN` 放进手机。
