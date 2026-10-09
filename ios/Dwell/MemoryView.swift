@@ -94,10 +94,10 @@ struct MemoryView: View {
     private var intro: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(chatTitle)
-                .font(.system(size: 30, weight: .regular, design: .serif))
+                .font(.system(size: 25, weight: .regular, design: .serif))
                 .foregroundStyle(Theme.text)
             Text("记忆卡把重要细节拆成可以管理的小条目；摘要维持这段关系的连续性。")
-                .font(.system(size: 14))
+                .font(.system(size: 13))
                 .foregroundStyle(Theme.dim)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: store.injectionEnabled ? "checkmark" : "pause.circle")
@@ -105,11 +105,12 @@ struct MemoryView: View {
                      ? "按需记忆已开启：每轮最多带入 5 条相关卡片；隐藏、归档和过期内容会自动排除。"
                      : "按需记忆已关闭：回复时不会带入记忆卡。可以在「设置」里打开。")
             }
-            .font(.system(size: 13))
+            .font(.system(size: 12.5))
             .foregroundStyle(store.injectionEnabled ? MemoryStyle.sage : Theme.dim)
-            .padding(12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.banner))
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(MemoryStyle.banner))
         }
         .padding(.top, 8)
     }
@@ -122,8 +123,8 @@ struct MemoryView: View {
             tabButton(.settings, "设置", count: nil)
         }
         .padding(6)
-        .background(Capsule().fill(Theme.composer))
-        .overlay(Capsule().stroke(MemoryStyle.border, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MemoryStyle.tabBar))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(MemoryStyle.border, lineWidth: 1))
     }
 
     private func tabButton(_ tab: MemoryStore.Tab, _ title: String, count: Int?) -> some View {
@@ -131,23 +132,26 @@ struct MemoryView: View {
         return Button {
             withAnimation(.easeOut(duration: 0.15)) { store.tab = tab }
         } label: {
-            HStack(spacing: 5) {
-                Text(title).fontWeight(selected ? .semibold : .regular)
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.system(size: 13, weight: selected ? .bold : .regular))
+                    .lineLimit(1)
                 if let count {
                     Text("\(count)")
-                        .font(.system(size: 12, weight: .semibold))
-                        .padding(.horizontal, 7)
+                        .font(.system(size: 11, weight: .bold))
+                        .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(MemoryStyle.countPill))
                 }
             }
-            .font(.system(size: 14.5))
+            .minimumScaleFactor(0.8)
             .foregroundStyle(selected ? Theme.text : Theme.dim)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 3)
             .background {
                 if selected {
-                    Capsule().fill(MemoryStyle.tabSelected)
+                    RoundedRectangle(cornerRadius: 11, style: .continuous).fill(MemoryStyle.tabSelected)
                         .shadow(color: Theme.bubbleShadow, radius: 6, y: 3)
                 }
             }
@@ -186,7 +190,7 @@ struct MemoryView: View {
                 text: isSearching ? "换个关键词或筛选条件看看。" : "先到「待确认」生成候选，并逐条采用；也可以点右上角 ＋ 自己写一张。"
             )
         }
-        LazyVStack(spacing: 12) {
+        LazyVStack(spacing: 11) {
             ForEach(store.cards) { card in
                 if editing?.id == card.id, let editing {
                     MemoryCardEditor(card: editing, title: "编辑", saveLabel: "保存") { edited in
@@ -235,14 +239,14 @@ struct MemoryView: View {
                         Text(MemoryTaxonomy.filters.first { $0.key == store.filter }?.label ?? "全部")
                         Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
                     }
-                    .font(.system(size: 14))
+                    .font(.system(size: 13))
                     .foregroundStyle(Theme.text)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(Capsule().fill(MemoryStyle.tag))
                 }
                 TextField("搜索记忆内容", text: $store.query)
-                    .font(.system(size: 15))
+                    .font(.system(size: 14))
                     .submitLabel(.search)
                     .onSubmit { Task { await store.loadCards(reset: true) } }
                 Button {
@@ -275,7 +279,7 @@ struct MemoryView: View {
             Task { await store.loadCards(reset: true) }
         } label: {
             Text(label)
-                .font(.system(size: 13.5))
+                .font(.system(size: 12.5))
                 .foregroundStyle(on ? .white : Theme.text)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
@@ -341,7 +345,7 @@ struct MemoryView: View {
             MemoryEmpty(title: "没有待确认的记忆", text: "每累计 50 条旧消息会自动生成一批；也可以点上面的按钮现在就整理。")
         }
 
-        LazyVStack(spacing: 12) {
+        LazyVStack(spacing: 11) {
             ForEach(store.drafts) { draft in
                 if editingDraft?.id == draft.id, let editingDraft {
                     MemoryCardEditor(card: editingDraft, title: "先修改再采用", saveLabel: "采用") { edited in
@@ -408,17 +412,17 @@ struct MemoryCardView<Actions: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 Text(card.content)
-                    .font(.system(size: 15.5))
+                    .font(.system(size: 13))
                     .lineSpacing(4)
                     .foregroundStyle(Theme.bubbleText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
                 if kind != .used {
                     Text(labels.type(card.memoryType))
-                        .font(.system(size: 13))
+                        .font(.system(size: 11.5))
                         .foregroundStyle(Theme.text)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
                         .background(Capsule().fill(MemoryStyle.badge))
                 }
             }
@@ -426,21 +430,21 @@ struct MemoryCardView<Actions: View>: View {
             if let target {
                 Text(card.action == "split" ? "拆自原卡：\(target.content)"
                      : "原主题：\(target.topics.map(labels.topic).joined(separator: "、"))")
-                    .font(.system(size: 13))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(Theme.dim)
             }
             if kind != .used {
                 if card.hasSource {
                     Button(action: onSource) {
                         Text("\(card.sourceLabel) · 看原文")
-                            .font(.system(size: 13))
+                            .font(.system(size: 11.5))
                             .foregroundStyle(Theme.dim)
                             .underline(color: Theme.dim.opacity(0.4))
                     }
                     .buttonStyle(.plain)
                 } else {
                     Text(card.sourceLabel)
-                        .font(.system(size: 13))
+                        .font(.system(size: 11.5))
                         .foregroundStyle(Theme.dim)
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -448,9 +452,9 @@ struct MemoryCardView<Actions: View>: View {
                 }
             }
         }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(MemoryStyle.card))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(MemoryStyle.border, lineWidth: 1))
+        .padding(15)
+        .background(RoundedRectangle(cornerRadius: 17, style: .continuous).fill(MemoryStyle.card))
+        .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(MemoryStyle.border, lineWidth: 1))
         .opacity(card.isHidden ? 0.6 : 1)
     }
 
@@ -485,11 +489,11 @@ struct MemoryTagFlow: View {
         FlowLayout(spacing: 6) {
             ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
                 Text(tag)
-                    .font(.system(size: 13))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(Theme.dim)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(MemoryStyle.tag))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(MemoryStyle.tag))
             }
         }
     }
@@ -554,7 +558,7 @@ struct MemoryCardEditor: View {
         VStack(alignment: .leading, spacing: 12) {
             label("记忆内容")
             TextEditor(text: $card.content)
-                .font(.system(size: 15.5))
+                .font(.system(size: 14))
                 .frame(minHeight: 96)
                 .scrollContentBackground(.hidden)
                 .padding(8)
@@ -586,7 +590,7 @@ struct MemoryCardEditor: View {
                         }
                     } label: {
                         Text(name)
-                            .font(.system(size: 13.5))
+                            .font(.system(size: 12.5))
                             .foregroundStyle(on ? .white : Theme.text)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
@@ -625,7 +629,7 @@ struct MemoryCardEditor: View {
 
     private func label(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 13.5))
+            .font(.system(size: 12.5))
             .foregroundStyle(Theme.dim)
     }
 
@@ -743,7 +747,7 @@ struct MemoryEmpty: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
+            Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.text)
             Text(text).font(.system(size: 13.5)).foregroundStyle(Theme.dim).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -773,13 +777,13 @@ struct MemoryButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: large ? 15.5 : 15, weight: kind == .normal || kind == .primary ? .semibold : .regular))
+            .font(.system(size: large ? 14 : 13, weight: .bold))
             .foregroundStyle(foreground)
-            .padding(.horizontal, large ? 16 : 14)
-            .padding(.vertical, large ? 12 : 9)
+            .padding(.horizontal, 13)
+            .padding(.vertical, large ? 10 : 7)
             .frame(maxWidth: large ? .infinity : nil)
-            .background(RoundedRectangle(cornerRadius: large ? 16 : 14, style: .continuous).fill(background))
-            .overlay(RoundedRectangle(cornerRadius: large ? 16 : 14, style: .continuous)
+            .background(RoundedRectangle(cornerRadius: large ? 14 : 11, style: .continuous).fill(background))
+            .overlay(RoundedRectangle(cornerRadius: large ? 14 : 11, style: .continuous)
                 .stroke(kind == .primary ? .clear : MemoryStyle.border, lineWidth: 1))
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
@@ -803,15 +807,17 @@ struct MemoryButtonStyle: ButtonStyle {
 }
 
 enum MemoryStyle {
-    static let card = Color(light: Color.white.opacity(0.55), dark: Color(hex: 0x433D41))
-    static let border = Color(light: Color(hex: 0xE9DFE3), dark: Color.white.opacity(0.12))
-    static let tag = Color(light: Color.white.opacity(0.9), dark: Color(hex: 0x4D464B))
-    static let badge = Color(light: Color(hex: 0xF6EFF1), dark: Color(hex: 0x524A50))
+    // 数值量自网页记忆控制台（.mc-card / .mc-tag / .mc-badge / .mc-btn）。
+    static let card = Color(light: Color(hex: 0xF1EDEF), dark: Color(hex: 0x433D41))
+    static let border = Color(light: Color(hex: 0xDFD7DA), dark: Color.white.opacity(0.12))
+    static let tag = Color(light: Color(hex: 0xFFFDFD), dark: Color(hex: 0x4D464B))
+    static let badge = Color(light: Color(hex: 0xFBF4F5), dark: Color(hex: 0x524A50))
+    static let tabBar = Color(light: Color(hex: 0xFCF9FA).opacity(0.9), dark: Color(hex: 0x433D41))
     static let field = Color(light: Color.white.opacity(0.92), dark: Color(hex: 0x3B3639))
-    static let banner = Color(light: Color(hex: 0xF4EEF0).opacity(0.8), dark: Color(hex: 0x433D41))
-    static let buttonFill = Color(light: Color.white, dark: Color(hex: 0x524A50))
-    static let tabSelected = Color(light: Color.white, dark: Color(hex: 0x5A5157))
-    static let countPill = Color(light: Color(hex: 0xEEE4E8), dark: Color(hex: 0x5F555B))
-    static let sage = Color(light: Color(hex: 0x739A6C), dark: Color(hex: 0xA8C0A0))
-    static let danger = Color(light: Color(hex: 0xC2668B), dark: Color(hex: 0xE59AB8))
+    static let banner = Color(light: Color(hex: 0xEBE6E9).opacity(0.72), dark: Color(hex: 0x433D41))
+    static let buttonFill = Color(light: Color(hex: 0xFFFDFD), dark: Color(hex: 0x524A50))
+    static let tabSelected = Color(light: Color(hex: 0xFFFDFD), dark: Color(hex: 0x5A5157))
+    static let countPill = Color(light: Color(hex: 0xEFE4E8), dark: Color(hex: 0x5F555B))
+    static let sage = Color(light: Color(hex: 0x7F9A84), dark: Color(hex: 0xA8C0A0))
+    static let danger = Color(light: Color(hex: 0xBD7187), dark: Color(hex: 0xE59AB8))
 }

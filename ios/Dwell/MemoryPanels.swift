@@ -22,14 +22,14 @@ struct MemorySummaryPanel: View {
                         : "还未生成"))
                         .foregroundStyle(Theme.dim)
                 }
-                .font(.system(size: 14))
+                .font(.system(size: 13))
             }
 
             if summary.hasDraft {
                 section("新摘要（待确认）") {
                     VStack(alignment: .leading, spacing: 12) {
                         TextEditor(text: $draftText)
-                            .font(.system(size: 15))
+                            .font(.system(size: 14))
                             .frame(minHeight: 220)
                             .scrollContentBackground(.hidden)
                             .padding(8)
@@ -50,7 +50,7 @@ struct MemorySummaryPanel: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if editing {
                         TextEditor(text: $draftText)
-                            .font(.system(size: 15))
+                            .font(.system(size: 14))
                             .frame(minHeight: 260)
                             .scrollContentBackground(.hidden)
                             .padding(8)
@@ -68,7 +68,7 @@ struct MemorySummaryPanel: View {
                         }
                     } else if !summary.overview.isEmpty {
                         Text(summary.overview)
-                            .font(.system(size: 15))
+                            .font(.system(size: 13.5))
                             .lineSpacing(5)
                             .foregroundStyle(Theme.bubbleText)
                             .textSelection(.enabled)
@@ -79,16 +79,16 @@ struct MemorySummaryPanel: View {
                         .buttonStyle(MemoryButtonStyle(kind: .normal))
                     } else if !summary.sharedOverview.isEmpty {
                         Text("互通开着，现在用的是「\(summary.sharedFrom)」的公共摘要：")
-                            .font(.system(size: 13.5))
+                            .font(.system(size: 12.5))
                             .foregroundStyle(Theme.dim)
                         Text(summary.sharedOverview)
-                            .font(.system(size: 15))
+                            .font(.system(size: 13.5))
                             .lineSpacing(5)
                             .foregroundStyle(Theme.bubbleText)
                             .textSelection(.enabled)
                     } else {
                         Text("还没有正式摘要。摘要只在你点击时生成。")
-                            .font(.system(size: 14))
+                            .font(.system(size: 13))
                             .foregroundStyle(Theme.dim)
                     }
                 }
@@ -129,7 +129,7 @@ struct MemorySettingsPanel: View {
                 Toggle(isOn: Binding(get: { store.sharedEnabled },
                                      set: { on in Task { await store.setShared(on) } })) {
                     Text("和其他窗口共用同一套记忆卡与摘要。关掉之后，这个窗口只看自己的，自己的也不外流。")
-                        .font(.system(size: 14))
+                        .font(.system(size: 13))
                         .foregroundStyle(Theme.dim)
                 }
                 .tint(Theme.send)
@@ -141,7 +141,7 @@ struct MemorySettingsPanel: View {
                         Text("每次回复只挑最多 5 条真正相关的卡片；不相关时一条也不会带入。")
                         Text("每累计 50 条旧消息会自动生成待确认记忆卡。")
                     }
-                    .font(.system(size: 14))
+                    .font(.system(size: 13))
                     .foregroundStyle(Theme.dim)
                 }
                 .tint(Theme.send)
@@ -176,9 +176,9 @@ struct MemorySettingsPanel: View {
                            empty: String, allowNone: Bool,
                            pick: @escaping (MemoryModelChoice?) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(note).font(.system(size: 14)).foregroundStyle(Theme.dim)
+            Text(note).font(.system(size: 13)).foregroundStyle(Theme.dim)
             if choices.isEmpty {
-                Text(empty).font(.system(size: 13.5)).foregroundStyle(Theme.dim)
+                Text(empty).font(.system(size: 12.5)).foregroundStyle(Theme.dim)
             } else {
                 Menu {
                     if allowNone {
@@ -201,7 +201,7 @@ struct MemorySettingsPanel: View {
                         Spacer()
                         Image(systemName: "chevron.up.chevron.down").font(.system(size: 12))
                     }
-                    .font(.system(size: 14.5))
+                    .font(.system(size: 13.5))
                     .foregroundStyle(Theme.text)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 11)
@@ -216,7 +216,7 @@ struct MemorySettingsPanel: View {
 private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
     VStack(alignment: .leading, spacing: 10) {
         Text(title)
-            .font(.system(size: 15, weight: .semibold))
+            .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(Theme.text)
         content()
     }
