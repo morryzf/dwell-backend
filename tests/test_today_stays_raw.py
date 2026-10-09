@@ -41,7 +41,9 @@ class CutoffTest(unittest.TestCase):
                 os.remove(self.path + suffix)
 
     def _say(self, text, made):
-        row = db.message_add(self.chat["id"], "user", text)
+        # 两边轮流说：同一方连着发的几句只算一条。
+        self.said = getattr(self, "said", 0) + 1
+        row = db.message_add(self.chat["id"], ("assistant", "user")[self.said % 2], text)
         with db.conn() as cx:
             cx.execute("UPDATE messages SET made=? WHERE id=?", (int(made), row["id"]))
         with db.conn() as cx:

@@ -569,10 +569,7 @@ def _stranded_topup_cutoff(chat_id: str, today_first: int) -> int:
         return 0
     # 积压的还在原文窗口里 → 模型看得见，不着急做卡。用不带缓存的那个窗口
     # 作判据：它是两条路里较小的一个，宁可早一点做卡，也不要留着洞。
-    window = db.message_list(
-        chat_id, limit=_history_window(chat_id, CACHE_HISTORY_TARGET_MESSAGES)
-    )
-    if window and int(pending[0]["rowid"]) >= int(window[0]["rowid"]):
+    if int(pending[0]["rowid"]) >= _history_start(chat_id, CACHE_HISTORY_TARGET_MESSAGES):
         return 0
     short_by = MEMORY_CARD_UPDATE_MIN_MESSAGES - len(pending)
     topup = db.chat_memory_source_messages(
@@ -590,9 +587,11 @@ def _memory_cutoff(chat_id: str) -> int:
     两道锁，哪道紧听哪道：最近 MEMORY_TAIL_MESSAGES 条不压；
     今天说过的话也一条都不压，哪怕今天聊超了那个条数。
     「今天」跟待办和提醒用同一个起点（早 6 点）。
+    「条」按 db.turn_start_rowid 的口径算：回复分成几个气泡也只算一条，
+    不然 80 行只够十几轮，刚聊过的话就被拿去做卡了。
     """
-    recent = db.message_list(chat_id, limit=MEMORY_TAIL_MESSAGES)
-    cutoff = 0 if len(recent) < MEMORY_TAIL_MESSAGES else int(recent[0]["rowid"]) - 1
+    tail_start = db.turn_start_rowid(chat_id, MEMORY_TAIL_MESSAGES)
+    cutoff = max(0, tail_start - 1)
     today_first = db.first_message_rowid_since(chat_id, db.day_start_ts())
     if today_first:
         # 借今天最早的几条来凑批，但不能越过上面那道「最近 N 条不动」的锁。
@@ -602,9 +601,9 @@ def _memory_cutoff(chat_id: str) -> int:
     # 只有撞到 MAX_RAW_HISTORY_MESSAGES 那个防爆硬顶时，最早的几条会落到
     # 窗口外——那段必须折成分段，不然既不在上下文里、也不在分段里，
     # 真的没人看得见了。（分段是记忆卡的原料；摘要读的是卡，不读分段。）
-    window = db.message_list(chat_id, limit=MAX_RAW_HISTORY_MESSAGES)
-    if len(window) >= MAX_RAW_HISTORY_MESSAGES:
-        cutoff = max(cutoff, int(window[0]["rowid"]) - 1)
+    hard_start = db.turn_start_rowid(chat_id, MAX_RAW_HISTORY_MESSAGES)
+    if hard_start:
+        cutoff = max(cutoff, hard_start - 1)
     return max(0, cutoff)
 
 
@@ -1347,14 +1346,23 @@ def _chat_history_messages_from_rows(rows: list[dict]) -> list[dict]:
     ]
 
 
-def _history_window(chat_id: str, base: int) -> int:
-    """这一轮要带多少条原文。
+def _history_start(chat_id: str, base: int) -> int:
+    """这一轮的原文从哪一行带起；0 表示从头。
 
     至少 base 条，但今天说过的话一句不落——今天聊得多，窗口就跟着长。
     MAX_RAW_HISTORY_MESSAGES 是防爆的硬顶，正常的一天碰不到。
+    这里的「条」按 db.turn_start_rowid 的口径：同一方连着发的几个气泡算一条。
     """
-    today = db.message_count_since(chat_id, db.day_start_ts())
-    return max(1, min(MAX_RAW_HISTORY_MESSAGES, max(base, today)))
+    start = db.turn_start_rowid(chat_id, base)
+    today_first = db.first_message_rowid_since(chat_id, db.day_start_ts())
+    if today_first:
+        start = min(start, today_first)
+    return max(start, db.turn_start_rowid(chat_id, MAX_RAW_HISTORY_MESSAGES))
+
+
+def _history_window(chat_id: str, base: int) -> int:
+    """这一轮要带多少行原文，给 db.message_list 的 limit 用。"""
+    return max(1, db.message_rows_from(chat_id, _history_start(chat_id, base)))
 
 
 def _chat_history_rows(chat_id: str, cache_friendly: bool) -> list[dict]:
@@ -1364,8 +1372,8 @@ def _chat_history_rows(chat_id: str, cache_friendly: bool) -> list[dict]:
             chat_id, limit=_history_window(chat_id, CACHE_HISTORY_TARGET_MESSAGES)
         )
 
-    window = _history_window(chat_id, CACHE_HISTORY_MAX_MESSAGES)
-    rows = db.message_list(chat_id, limit=window + 1)
+    window_start = _history_start(chat_id, CACHE_HISTORY_MAX_MESSAGES)
+    rows = db.message_list(chat_id, limit=max(1, db.message_rows_from(chat_id, window_start)))
     if not rows:
         return []
     setting_key = f"prompt_cache_history_start:{chat_id}"
@@ -1384,10 +1392,11 @@ def _chat_history_rows(chat_id: str, cache_friendly: bool) -> list[dict]:
     anchor_is_loaded = any(
         int(row.get("rowid") or 0) == start_rowid for row in cacheable_rows
     )
-    if anchor_is_loaded and anchored and len(anchored) <= window:
+    if anchor_is_loaded and anchored and start_rowid >= window_start:
         return anchored
 
-    selected = cacheable_rows[-_history_window(chat_id, CACHE_HISTORY_TARGET_MESSAGES):]
+    target_start = _history_start(chat_id, CACHE_HISTORY_TARGET_MESSAGES)
+    selected = [row for row in cacheable_rows if int(row.get("rowid") or 0) >= target_start]
     if selected:
         db.setting_set(setting_key, str(int(selected[0]["rowid"])))
     return selected

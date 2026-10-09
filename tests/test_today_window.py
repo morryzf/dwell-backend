@@ -28,7 +28,9 @@ class HistoryWindowTest(unittest.TestCase):
                 os.remove(self.path + suffix)
 
     def _say(self, text, made):
-        row = db.message_add(self.chat["id"], "user", text)
+        # 两边轮流说：同一方连着发的几句只算一条。
+        self.said = getattr(self, "said", 0) + 1
+        row = db.message_add(self.chat["id"], ("assistant", "user")[self.said % 2], text)
         with db.conn() as cx:
             cx.execute("UPDATE messages SET made=? WHERE id=?", (int(made), row["id"]))
         return row
@@ -38,6 +40,7 @@ class HistoryWindowTest(unittest.TestCase):
             self._say(f"第 {i} 句", made)
 
     def test_a_quiet_day_keeps_the_ordinary_window(self):
+        self._fill(200, self.day_start - 7200)
         self._fill(5, self.day_start + 60)
         self.assertEqual(
             main._history_window(self.chat["id"], main.CACHE_HISTORY_TARGET_MESSAGES),
@@ -91,6 +94,37 @@ class HistoryWindowTest(unittest.TestCase):
         self.assertLess(cutoff, int(rows[0]["rowid"]),
                         "窗口里的东西不该同时被折走")
         self.assertGreater(cutoff, 0, "昨天那 300 条还是要折")
+
+    def test_split_bubbles_count_as_one(self):
+        """回复自动分条，一段话拆成几个气泡，算一条，不算几条。"""
+        chat = self.chat["id"]
+        for i in range(120):
+            db.message_add(chat, "user", f"第 {i} 轮")
+            for j in range(4):
+                db.message_add(chat, "assistant", f"第 {i} 轮第 {j} 个气泡")
+        with db.conn() as cx:
+            cx.execute("UPDATE messages SET made=? WHERE chat_id=?",
+                       (self.day_start - 86400, chat))
+        rows = main._chat_history_rows(chat, cache_friendly=False)
+        texts = [r["content"] for r in rows]
+        # 100 条 = 50 轮，每轮 5 行
+        self.assertEqual(len(rows), main.CACHE_HISTORY_TARGET_MESSAGES * 5 // 2)
+        self.assertEqual(texts[0], "第 70 轮")
+
+    def test_recent_rounds_are_not_carded_when_replies_are_split(self):
+        """这就是 Morry 碰到的：十几轮之前的话已经被拿去做卡了。"""
+        chat = self.chat["id"]
+        for i in range(60):
+            db.message_add(chat, "user", f"第 {i} 轮")
+            for j in range(5):
+                db.message_add(chat, "assistant", f"第 {i} 轮第 {j} 个气泡")
+        with db.conn() as cx:
+            cx.execute("UPDATE messages SET made=? WHERE chat_id=?",
+                       (self.day_start - 86400, chat))
+        # 60 轮 = 120 条，最近 80 条（40 轮）不做卡
+        cutoff = main._memory_cutoff(chat)
+        first_kept = db.chat_memory_source_messages(chat, cutoff, 10**9, 1)[0]
+        self.assertEqual(first_kept["content"], "第 20 轮")
 
 
 if __name__ == "__main__":

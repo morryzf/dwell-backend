@@ -1753,16 +1753,56 @@ def message_last_made(chat_id: str, role: str = "") -> int:
     return int(row["made"] if row else 0)
 
 
-def message_cache_history_count(chat_id: str, start_rowid: int) -> int:
-    """Count persisted prompt-history messages from a cache anchor."""
+# 「条」和「行」不是一回事：回复会自动分条，一段话拆成三五个气泡，每个气泡
+# 各占一行。按行数算，「最近 80 条」只剩十几轮。窗口和做卡的线都按「条」算——
+# 同一方连着发的几个气泡算一条。空的占位行不算。
+
+def turn_start_rowid(chat_id: str, turns: int) -> int:
+    """倒数第 turns 条从哪一行开始。不够 turns 条返回 0，意思是「从头」。"""
+    if turns <= 0:
+        return 0
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT rowid, role FROM messages WHERE chat_id=? AND content<>'' "
+            "ORDER BY rowid DESC",
+            (chat_id,),
+        )
+        count, last_role, start = 0, None, 0
+        for row in rows:
+            if row["role"] != last_role:
+                if count == turns:
+                    return start
+                count += 1
+                last_role = row["role"]
+            start = int(row["rowid"])
+    return 0
+
+
+def message_rows_from(chat_id: str, start_rowid: int) -> int:
+    """从 start_rowid 到最新一共几行（占位行也算，跟 message_list 的 limit 一个口径）。"""
     with conn() as cx:
         row = cx.execute(
-            "SELECT COUNT(*) AS total FROM messages "
-            "WHERE chat_id=? AND rowid>=? AND role IN ('user','assistant','system') "
-            "AND content<>''",
+            "SELECT COUNT(*) AS n FROM messages WHERE chat_id=? AND rowid>=?",
             (chat_id, max(0, int(start_rowid))),
         ).fetchone()
-    return int(row["total"] if row else 0)
+    return int(row["n"] if row else 0)
+
+
+def message_cache_history_count(chat_id: str, start_rowid: int) -> int:
+    """Count prompt-history turns from a cache anchor (consecutive same-role bubbles = one)."""
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT role FROM messages "
+            "WHERE chat_id=? AND rowid>=? AND role IN ('user','assistant','system') "
+            "AND content<>'' ORDER BY rowid ASC",
+            (chat_id, max(0, int(start_rowid))),
+        )
+        count, last_role = 0, None
+        for row in rows:
+            if row["role"] != last_role:
+                count += 1
+                last_role = row["role"]
+    return count
 
 
 def chat_days(month: str, assistant: str | None = None) -> dict[str, int]:
