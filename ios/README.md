@@ -43,7 +43,8 @@
 | `project.yml` | XcodeGen 工程描述；`.xcodeproj` 不进仓库，CI 上现生成 |
 | `Dwell/API.swift` | 和后端说话：登录、聊天列表、消息、发送、长轮询 |
 | `Dwell/ChatStore.swift` | 聊天页状态；处理 `/api/poll` 的流式事件 |
-| `Dwell/ChatView.swift` | 聊天页和气泡 |
+| `Dwell/ChatView.swift` | 聊天页：气泡、日期分隔、思考过程、长按菜单、编辑 |
+| `Dwell/Images.swift` | 选图压缩（跟网页同样的尺寸）、记录里的图片显示和放大 |
 | `Dwell/ChatListView.swift` | 聊天列表 |
 | `Dwell/LoginView.swift` | 登录 |
 

@@ -112,18 +112,39 @@ final class API {
 
     // MARK: - 消息
 
-    func messages(chatID: String, limit: Int = 200) async throws -> [Message] {
-        let json = try await request("GET", "api/messages",
-                                     query: ["chat_id": chatID, "limit": String(limit)])
-        return (json["msgs"] as? [[String: Any]] ?? []).map(Message.init(json:))
+    /// 最近的一页；传 before 就是比这条更早的一页。
+    func messages(chatID: String, limit: Int = 200, before: Int? = nil) async throws -> (msgs: [Message], more: Bool) {
+        var query = ["chat_id": chatID, "limit": String(limit)]
+        if let before { query["before"] = String(before) }
+        let json = try await request("GET", "api/messages", query: query)
+        let msgs = (json["msgs"] as? [[String: Any]] ?? []).map(Message.init(json:))
+        return (msgs, json["more"] as? Bool ?? false)
     }
 
-    func send(text: String, chatID: String) async throws {
-        _ = try await request("POST", "api/send", body: [
+    func send(text: String, chatID: String, images: [PendingImage] = []) async throws {
+        var body: [String: Any] = [
             "text": text,
             "chat_id": chatID,
             "device_time": Self.deviceTime(),
-        ])
+        ]
+        if !images.isEmpty {
+            body["attachments"] = images.map {
+                ["kind": "image", "media_type": "image/jpeg", "data": $0.data, "preview": $0.preview]
+            }
+        }
+        _ = try await request("POST", "api/send", body: body)
+    }
+
+    func editMessage(_ id: String, content: String) async throws {
+        _ = try await request("PATCH", "api/messages/\(id)", body: ["content": content])
+    }
+
+    func deleteMessage(_ id: String) async throws {
+        _ = try await request("DELETE", "api/messages/\(id)")
+    }
+
+    func regenerate(_ id: String) async throws {
+        _ = try await request("POST", "api/messages/\(id)/regenerate")
     }
 
     func stop() async throws {
