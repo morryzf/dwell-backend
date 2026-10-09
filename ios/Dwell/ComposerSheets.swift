@@ -276,7 +276,7 @@ struct InstructionManager: View {
                     }
                 }
             }
-            Section(editingID.isEmpty ? "添加指令" : "编辑指令") {
+            Section {
                 TextField("名称，例如：OB", text: $name)
                 TextField("写给模型看的规则或背景…", text: $content, axis: .vertical)
                     .lineLimit(6...16)
@@ -288,6 +288,8 @@ struct InstructionManager: View {
                     Button("删除", role: .destructive) { confirmDelete = true }
                     Button("取消编辑") { reset() }.foregroundStyle(Theme.dim)
                 }
+            } header: {
+                Text(editingID.isEmpty ? "添加指令" : "编辑指令")
             } footer: {
                 if !message.isEmpty { Text(message) }
             }

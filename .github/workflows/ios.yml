@@ -30,8 +30,8 @@ jobs:
       - name: Build
         working-directory: ios
         run: |
-          set -o pipefail
-          xcodebuild \
+          # 以 xcodebuild 自己的退出码为准：编译失败时 .app 目录可能已经建了一半，光看目录在不在会被骗。
+          if ! xcodebuild \
             -project Dwell.xcodeproj \
             -scheme Dwell \
             -configuration Release \
@@ -41,8 +41,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build | tee build.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
-          test -d build/Build/Products/Release-iphoneos/Dwell.app
+            build > build.log 2>&1; then
+            grep -E "error:" build.log || tail -60 build.log
+            exit 1
+          fi
+          grep -E "warning:|BUILD SUCCEEDED" build.log || true
+          test -x build/Build/Products/Release-iphoneos/Dwell.app/Dwell
 
       - name: Package IPA
         working-directory: ios
