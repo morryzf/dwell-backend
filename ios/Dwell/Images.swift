@@ -75,10 +75,14 @@ struct MessageImage: View {
 
     var body: some View {
         if let image = DataURLImage.image(url) {
+            // 聊天里只放一张小图，点开再看大的；长边最多 180，横竖图都不会把一屏占掉。
+            let side: CGFloat = 180
+            let ratio = image.size.height > 0 ? image.size.width / image.size.height : 1
             Image(uiImage: image)
                 .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 220, maxHeight: 280)
+                .scaledToFill()
+                .frame(width: ratio >= 1 ? side : side * max(ratio, 0.5),
+                       height: ratio >= 1 ? side / min(ratio, 2) : side)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .onTapGesture { showFull = true }
                 .fullScreenCover(isPresented: $showFull) {

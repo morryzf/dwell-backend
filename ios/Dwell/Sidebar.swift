@@ -232,14 +232,14 @@ struct Sidebar: View {
                 .padding(.vertical, 20)
         }
         // 网页的 .drawer-chat-list：行本身透明，只有正在聊的那一个垫一块浅底。
-        LazyVStack(spacing: 3) {
+        LazyVStack(spacing: 4) {
             ForEach(chats) { chat in
                 let here = chat.id == store.chatID
                 Button {
                     Task { await open(chat) }
                 } label: {
                     HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: 5) {
                             Text(chat.name.isEmpty ? "没名字" : chat.name)
                                 .font(.system(size: 14.5, weight: .medium))
                                 .foregroundStyle(Theme.text)
@@ -255,9 +255,9 @@ struct Sidebar: View {
                             .foregroundStyle(Theme.dim)
                             .padding(.top, 1)
                     }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 8)
-                    .frame(minHeight: 47)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 13)
+                    .frame(minHeight: 64)
                     .background(RoundedRectangle(cornerRadius: 11, style: .continuous)
                         .fill(here ? SidebarStyle.row : .clear))
                     .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
