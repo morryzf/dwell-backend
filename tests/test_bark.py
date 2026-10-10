@@ -28,6 +28,9 @@ class BarkTest(unittest.TestCase):
         self.assertEqual(push_service.parse_bark_address("https://bark.example.com:8443/k1/"),
                          ("https://bark.example.com:8443", "k1"))
         self.assertEqual(push_service.parse_bark_address("  AbCdEf123 "), ("", "AbCdEf123"))
+        self.assertEqual(push_service.parse_bark_address(
+            "curl -X GET https://api.day.app/AbCdEf123/title/body?group=example&ttl=600"),
+            ("https://api.day.app", "AbCdEf123"))
         with self.assertRaises(ValueError):
             push_service.parse_bark_address("https://api.day.app/")
 

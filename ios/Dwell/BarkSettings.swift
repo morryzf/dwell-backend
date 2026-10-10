@@ -55,7 +55,7 @@ struct BarkSettings: View {
             } header: {
                 Text("推送地址")
             } footer: {
-                Text("打开 Bark app，首页「推送地址」那一行点一下就复制好了，整条粘过来就行（只粘 key 也可以）。地址存在你自己的服务器上。")
+                Text("打开 Bark app，首页「使用示例」下面点「复制」，整段粘过来就行（只粘地址或 key 也可以）。地址存在你自己的服务器上。")
             }
 
             if configured {

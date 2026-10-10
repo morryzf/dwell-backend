@@ -34,7 +34,7 @@
 免费签名的 app 收不到苹果的推送，所以通知借 [Bark](https://apps.apple.com/app/id1403753865) 来响：
 
 1. App Store 装 Bark，打开后允许通知
-2. Bark 首页点「推送地址」那一行复制
+2. Bark 首页「使用示例」下面点「复制」
 3. Dwell app → 设置 → Bark 通知，粘进去保存，点「发一条试试」
 
 之后他主动找你时手机会响，点通知回到 Dwell 里那个聊天（`dwell://open?chat=…`）。网页的通知照常，两边互不影响。

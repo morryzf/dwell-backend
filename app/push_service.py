@@ -248,7 +248,11 @@ def parse_bark_address(text: str) -> tuple[str, str]:
     text = text.strip()
     if not text:
         return "", ""
-    if "://" not in text:
+    # Bark 里「复制」默认复制的是一整条 curl 命令，从里面把地址抠出来。
+    found = re.search(r"https?://\S+", text)
+    if found:
+        text = found.group(0)
+    elif "://" not in text:
         return "", text.strip("/")
     parts = urlsplit(text)
     if parts.scheme not in {"http", "https"} or not parts.hostname:
