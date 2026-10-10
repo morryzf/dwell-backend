@@ -231,31 +231,36 @@ struct Sidebar: View {
                 .foregroundStyle(Theme.dim)
                 .padding(.vertical, 20)
         }
-        LazyVStack(spacing: 7) {
+        // 网页的 .drawer-chat-list：行本身透明，只有正在聊的那一个垫一块浅底。
+        LazyVStack(spacing: 3) {
             ForEach(chats) { chat in
+                let here = chat.id == store.chatID
                 Button {
                     Task { await open(chat) }
                 } label: {
                     HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 1) {
                             Text(chat.name.isEmpty ? "没名字" : chat.name)
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.system(size: 14.5, weight: .medium))
                                 .foregroundStyle(Theme.text)
                                 .lineLimit(1)
                             Text(chat.preview.isEmpty ? "还没说过话" : chat.preview)
-                                .font(.system(size: 13))
+                                .font(.system(size: 11.5))
                                 .foregroundStyle(Theme.dim)
                                 .lineLimit(1)
                         }
                         Spacer(minLength: 4)
-                        Text(chat.id == store.chatID ? "在这儿" : Self.ago(chat.last))
-                            .font(.system(size: 12.5))
+                        Text(here ? "在这儿" : Self.ago(chat.last))
+                            .font(.system(size: 11))
                             .foregroundStyle(Theme.dim)
+                            .padding(.top, 1)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(SidebarStyle.row))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(SidebarStyle.rowBorder, lineWidth: 1))
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .frame(minHeight: 47)
+                    .background(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(here ? SidebarStyle.row : .clear))
+                    .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
@@ -349,8 +354,7 @@ enum SidebarStyle {
     static let edge = Color(light: Color.white.opacity(0.72), dark: Color.white.opacity(0.1))
     static let chipOn = Color(light: Color.white.opacity(0.37), dark: Color.white.opacity(0.08))
     static let chipBorder = Color(light: Color.white.opacity(0.48), dark: Color.white.opacity(0.14))
-    static let row = Color(light: Color.white.opacity(0.62), dark: Color.white.opacity(0.07))
-    static let rowBorder = Color(light: Color.white.opacity(0.5), dark: Color.white.opacity(0.1))
+    static let row = Color(light: Color.white.opacity(0.78), dark: Color(red: 1, green: 235/255, blue: 244/255).opacity(0.08))
 }
 
 /// 还没搬进 app 的页面先在网页里打开。用 Safari 的视图，网页那边的登录状态还在。
