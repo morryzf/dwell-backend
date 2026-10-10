@@ -29,6 +29,16 @@
 免费签名 7 天后过期，过期了点开会直接闪退（数据都在服务器上，不会丢）。
 连上电脑用 Sideloadly 把同一个 ipa 再装一遍就续上了。
 
+## 通知（Bark）
+
+免费签名的 app 收不到苹果的推送，所以通知借 [Bark](https://apps.apple.com/app/id1403753865) 来响：
+
+1. App Store 装 Bark，打开后允许通知
+2. Bark 首页「使用示例」下面点「复制」
+3. Dwell app → 设置 → Bark 通知，粘进去保存，点「发一条试试」
+
+之后他主动找你时手机会响，点通知回到 Dwell 里那个聊天（`dwell://open?chat=…`）。网页的通知照常，两边互不影响。
+
 ## 改了代码之后
 
 推送到 GitHub 后，`ios/` 下有改动就会自动编译，几分钟后去 Actions 下载新的 ipa，
@@ -58,6 +68,7 @@
 | `Dwell/CalendarPage.swift` | 日子：月历、那天的事（每年、重要日子）、心情 |
 | `Dwell/UsagePage.swift` | 用量：Claude 订阅额度；OpenRouter 余额、今日 / 本周 / 本月、命中率、柱状图 |
 | `Dwell/SettingsView.swift` | 设置首页 |
+| `Dwell/BarkSettings.swift` | Bark 通知：填推送地址、点通知打开 app 还是网页、提醒方式、铃声、试发 |
 | `Dwell/SettingsPages.swift` | 模型供应商、MCP 工具、重写规则、系统日志、导入 Kelivo |
 | `Dwell/TTSSettings.swift` | 语音服务：两位各自的音色和朗读方式，共用的音色库和 ElevenLabs 连接 |
 | `Dwell/Appearance.swift`、`AppearanceSettings.swift` | 日夜模式、聊天背景、消息玻璃效果（只存在手机上） |

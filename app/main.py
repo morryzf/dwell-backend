@@ -4106,6 +4106,7 @@ def _heartbeat_status_payload(assistant: str = "cloudy") -> dict:
         "last_status": db.setting_get(key("heartbeat_last_status"), "idle"),
         "last_error": db.setting_get(key("heartbeat_last_error"), ""),
         "push_subscriptions": push_service.subscription_count(),
+        "bark": push_service.bark_enabled(),
     }
 
 
@@ -4370,6 +4371,38 @@ async def push_test():
         "detail": "" if result["sent"] else (
             result.get("diagnostic") or "推送服务没有接受这条通知"
         ),
+    }
+
+
+@app.get("/api/bark", dependencies=authed)
+async def bark_get():
+    return {"ok": True, **push_service.bark_public()}
+
+
+@app.post("/api/bark", dependencies=authed)
+async def bark_set(request: Request):
+    """存 Bark 设置。address 可以是 Bark app 里复制的整条推送地址，也可以只是 key；
+    传空 address 就是关掉 Bark。"""
+    payload = await _read_json(request)
+    try:
+        saved = push_service.save_bark(payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True, **push_service.bark_public(saved)}
+
+
+@app.post("/api/bark/test", dependencies=authed)
+async def bark_test():
+    if not push_service.bark_enabled():
+        raise HTTPException(409, "还没有填 Bark 的 key")
+    result = await push_service.send_bark(
+        f"{db.assistant_name(db.current_assistant())} 轻轻敲了下门",
+        "Bark 通了。以后他主动找你，这里会响。",
+        "/?from=push",
+    )
+    return {
+        "ok": bool(result["sent"]), **result,
+        "detail": "" if result["sent"] else (result.get("diagnostic") or "Bark 没有接受这条通知"),
     }
 
 

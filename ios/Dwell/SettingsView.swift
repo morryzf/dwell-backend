@@ -9,6 +9,7 @@ struct SettingsView: View {
 
     @State private var alive = "看看…"
     @State private var ttsStatus = ""
+    @State private var barkStatus = ""
     @State private var confirmLogout = false
 
     var body: some View {
@@ -37,6 +38,11 @@ struct SettingsView: View {
                         TTSSettings()
                     } label: {
                         row("speaker.wave.2", "语音服务", value: ttsStatus)
+                    }
+                    NavigationLink {
+                        BarkSettings()
+                    } label: {
+                        row("bell", "Bark 通知", value: barkStatus)
                     }
                     NavigationLink {
                         ProvidersPage()
@@ -101,6 +107,7 @@ struct SettingsView: View {
             .task {
                 await checkAlive()
                 await loadTTSStatus()
+                await loadBarkStatus()
             }
             .confirmationDialog("退出登录？", isPresented: $confirmLogout, titleVisibility: .visible) {
                 Button("退出登录", role: .destructive) {
@@ -142,5 +149,10 @@ struct SettingsView: View {
         let hasKey = json["has_key"] as? Bool ?? false
         let voices = json["voices"] as? [[String: Any]] ?? []
         ttsStatus = !hasKey ? "未设置" : (voices.isEmpty ? "还没有音色" : "已连接")
+    }
+
+    private func loadBarkStatus() async {
+        guard let json = try? await API.shared.request("GET", "api/bark") else { return }
+        barkStatus = (json["configured"] as? Bool) == true ? "已开" : "未设置"
     }
 }

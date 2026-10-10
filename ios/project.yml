@@ -36,3 +36,8 @@ targets:
         NSCameraUsageDescription: 拍一张照片发给 Cloudy。
         UIAppFonts:
           - Ephesis-Regular.ttf
+        # Bark 通知点开时用 dwell://open?chat=… 回到 app 里那一间。
+        CFBundleURLTypes:
+          - CFBundleURLName: app.dwell.ios
+            CFBundleURLSchemes:
+              - dwell

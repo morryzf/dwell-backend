@@ -44,6 +44,7 @@ class PushDiagnosticsTest(unittest.TestCase):
     def test_missing_subscription_is_written_to_system_log(self):
         with (
             patch.object(push_service, "_subscriptions", return_value=[]),
+            patch.object(push_service, "bark_enabled", return_value=False),
             patch.object(push_service.db, "system_log_start", return_value="log-1"),
             patch.object(push_service.db, "system_log_finish") as finish,
         ):

@@ -200,6 +200,18 @@ final class ChatStore: ObservableObject {
         } catch { handle(error) }
     }
 
+    /// dwell://open?chat=… ——Bark 通知点开时带来的那一间。还没登录好就等一会儿。
+    func openLink(_ url: URL) async {
+        guard url.scheme == "dwell" else { return }
+        let chat = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "chat" }?.value ?? ""
+        for _ in 0..<40 where phase != .ready {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        guard phase == .ready, !chat.isEmpty, chat != chatID else { return }
+        await switchChat(chat)
+    }
+
     func newChat() async {
         do {
             try await api.newChat()

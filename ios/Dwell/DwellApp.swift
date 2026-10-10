@@ -13,6 +13,10 @@ struct DwellApp: App {
                 // 日夜：跟随系统 / 常亮 / 常暗，侧边栏底部和设置里都能切。
                 .preferredColorScheme(appearance.colorScheme)
                 .task { await store.start() }
+                // 点 Bark 通知进来：dwell://open?chat=…
+                .onOpenURL { url in
+                    Task { await store.openLink(url) }
+                }
                 .onChange(of: scenePhase) { _, phase in
                     // 切到后台时 iOS 会掐掉网络；回来时重新问一次现在在哪间、补上漏掉的消息。
                     switch phase {
