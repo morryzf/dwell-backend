@@ -37,3 +37,9 @@ SOFTWARE.
 The iOS app (`ios/Dwell/Fonts/Ephesis-Regular.ttf`) bundles the Ephesis typeface, the same font the web sidebar loads from Google Fonts.
 
 Copyright 2004-2021 The Ephesis Project Authors (https://github.com/googlefonts/ephesis). Licensed under the SIL Open Font License, Version 1.1; the full license text is in `ios/Dwell/Fonts/Ephesis-OFL.txt`.
+
+## Emil Kowalski's skills (Claude Code)
+
+`.claude/skills/` holds eight design and engineering skills (apple-design, animate, break-ui, emil-design-eng, find-animation-opportunities, mobile-native, review-animations, write-swift) copied unchanged from https://github.com/emilkowalski/skills at commit e8a175d.
+
+Copyright (c) 2026 Emil Kowalski. Licensed under the MIT License; the full text is in `.claude/skills/LICENSE-emilkowalski`.
