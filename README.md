@@ -4,7 +4,7 @@
 
 - 前端：`static/index.html`（来自 dwell-on-something，PolyForm Noncommercial）
 - 数据：SQLite，落在 `DWELL_DB` 指定的路径
-- 部署：Zeabur
+- 部署：腾讯云服务器，systemd 跑 `dwell` 和 `dwell-bridge` 两个服务；更新时在服务器的仓库目录里跑 `./deploy.sh`（push 不会自动部署）
 
 ## 环境变量
 
@@ -16,9 +16,9 @@
 | `DWELL_DB` | 数据库文件路径，默认 `./data/dwell.db` |
 | `DWELL_API_TOKEN` | 给 AI 侧调用的令牌，绕过网页登录 |
 | `OMBRE_MCP_URL` | 可选：Ombre Brain 的完整 MCP 地址，例如 `https://ombre.example.com/mcp` |
-| `OMBRE_MCP_TOKEN` | 可选：Ombre Brain 的静态 MCP Token；只设置在 Zeabur 环境变量中 |
+| `OMBRE_MCP_TOKEN` | 可选：Ombre Brain 的静态 MCP Token；只设置在服务器的环境变量中 |
 | `OMBRE_MCP_TIMEOUT` | 可选：读取记忆的超时秒数，默认 `12` |
-| `VAPID_SUBJECT` | 可选：Web Push 联系地址，默认 `mailto:dwell@localhost` |
+| `VAPID_SUBJECT` | 可选：Web Push 联系地址（公网 https 地址或 mailto）。不设就用 `DWELL_PUBLIC_URL`，再不行用内置的默认地址 |
 | `DWELL_PUBLIC_URL` | 可选：Dwell 的外部地址，例如 `https://dwell.example.com`。走 Claude Agent SDK 时，Claude Code 按这个地址回调聊天里的工具（待办、日记、日历、sigillo、网页、外部 MCP）。Dwell 和 Claude Code 在同一台机器上时可以填 `http://127.0.0.1:<端口>`；不设就用她最近一次登录访问的地址 |
 
 当 `OMBRE_MCP_URL` 与 `OMBRE_MCP_TOKEN` 都设置后，dwell 会在每次回复前通过
@@ -40,7 +40,9 @@ ChatGPT 的心跳默认关着；人设用「指令」功能自己写一份，勾
 
 Web Push 的 VAPID 密钥会自动生成并保存在同一个 SQLite 数据库中，不需要手动配置。
 iPhone 需要 iOS 16.4 或更新版本，并先把 Dwell 添加到主屏幕，再从主屏幕图标进入「心跳」开启通知。
-Zeabur 必须为 `DWELL_DB` 所在目录挂载持久化存储；如果数据库被重建，手机需要重新开启一次通知。
+`DWELL_DB` 必须放在不会随部署清空的位置（默认 `./data/dwell.db` 就可以）；如果数据库被重建，手机需要重新开启一次通知。
+
+iOS app 收不到 Web Push，改用 Bark：在 app 的「设置 → Bark 通知」里填上 Bark 的推送地址，所有通知会同时发一份到 Bark，详见 `ios/README.md`。
 
 ## 书房
 

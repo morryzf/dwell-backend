@@ -18,6 +18,12 @@ class PushDiagnosticsTest(unittest.TestCase):
                 "https://dwell-morry.zeabur.app",
             )
 
+    def test_vapid_subject_falls_back_to_public_url(self):
+        with patch.dict("os.environ", {"DWELL_PUBLIC_URL": "https://dwell.example.com/"}, clear=True):
+            self.assertEqual(push_service._vapid_subject(), "https://dwell.example.com")
+        with patch.dict("os.environ", {"DWELL_PUBLIC_URL": "http://127.0.0.1:8000"}, clear=True):
+            self.assertEqual(push_service._vapid_subject(), "https://dwell-morry.zeabur.app")
+
     def test_vapid_subject_accepts_a_public_contact_uri(self):
         with patch.dict("os.environ", {"VAPID_SUBJECT": "mailto:push@example.com"}):
             self.assertEqual(push_service._vapid_subject(), "mailto:push@example.com")

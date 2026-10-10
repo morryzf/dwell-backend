@@ -4,7 +4,7 @@
 - 提供 /api/* 接口
 - 托管 static/index.html 那份前端
 
-这么做是为了只在 Zeabur 上开一个服务：省内存，也不用管跨域。
+这么做是为了只开一个服务：省内存，也不用管跨域。
 """
 
 import asyncio
