@@ -1,7 +1,10 @@
-"""Dwell 原生 Web Push。
+"""Dwell 的手机通知：原生 Web Push，加上可选的 Bark。
 
 VAPID 密钥首次使用时生成并保存在 Dwell 的 settings 表，因此 Zeabur 重启后
 订阅仍然有效。浏览器订阅同样保存在数据库；主动消息只需要调用 send_push。
+
+Bark 是给 iOS app 用的：免费签名的 app 收不到苹果推送，就借 Bark 响一声，
+点通知再用 dwell:// 打开 app。两条线路互不影响，send_push 一次都发。
 """
 
 from __future__ import annotations
@@ -13,13 +16,17 @@ import os
 import re
 import time
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
+
+import httpx
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from pywebpush import WebPushException, webpush
 
 from . import db
+
+DEFAULT_BARK_SERVER = "https://api.day.app"
 
 DEFAULT_VAPID_SUBJECT = "https://dwell-morry.zeabur.app"
 
@@ -203,20 +210,154 @@ def _send_sync(title: str, body: str, url: str) -> dict[str, Any]:
     }
 
 
+# —— Bark ——
+
+def bark_settings() -> dict[str, Any]:
+    raw = db.setting_get("bark", "")
+    try:
+        value = json.loads(raw) if raw else {}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        value = {}
+    if not isinstance(value, dict):
+        value = {}
+    return {
+        "key": str(value.get("key") or ""),
+        "server": str(value.get("server") or DEFAULT_BARK_SERVER),
+        "open": "web" if value.get("open") == "web" else "app",
+        "web_base": str(value.get("web_base") or ""),
+        "sound": str(value.get("sound") or ""),
+        "level": value.get("level") if value.get("level") in {"active", "timeSensitive", "passive"} else "active",
+    }
+
+
+def bark_enabled() -> bool:
+    return bool(bark_settings()["key"])
+
+
+def bark_public(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    """给设置页看的版本：key 只露头尾。"""
+    settings = settings or bark_settings()
+    key = settings["key"]
+    masked = (key[:4] + "…" + key[-3:]) if len(key) > 10 else ("已填写" if key else "")
+    return {**{k: v for k, v in settings.items() if k != "key"}, "configured": bool(key), "key_hint": masked}
+
+
+def parse_bark_address(text: str) -> tuple[str, str]:
+    """Bark app 里复制出来的是 https://api.day.app/KEY/推送内容，
+    也可能只粘了 KEY。返回 (server, key)；server 为空表示沿用原来的。"""
+    text = text.strip()
+    if not text:
+        return "", ""
+    if "://" not in text:
+        return "", text.strip("/")
+    parts = urlsplit(text)
+    if parts.scheme not in {"http", "https"} or not parts.hostname:
+        raise ValueError("Bark 地址看不懂")
+    segments = [seg for seg in parts.path.split("/") if seg]
+    if not segments:
+        raise ValueError("Bark 地址里没有找到 key")
+    port = f":{parts.port}" if parts.port else ""
+    return f"{parts.scheme}://{parts.hostname}{port}", segments[0]
+
+
+def save_bark(payload: dict[str, Any]) -> dict[str, Any]:
+    current = bark_settings()
+    if "address" in payload:
+        server, key = parse_bark_address(str(payload.get("address") or ""))
+        current["key"] = key
+        if server:
+            current["server"] = server
+    if payload.get("server") is not None:
+        server = str(payload["server"]).strip().rstrip("/") or DEFAULT_BARK_SERVER
+        if not server.startswith(("https://", "http://")):
+            raise ValueError("Bark 服务器要以 https:// 开头")
+        current["server"] = server
+    if payload.get("open") in {"app", "web"}:
+        current["open"] = payload["open"]
+    if payload.get("web_base") is not None:
+        base = str(payload["web_base"]).strip().rstrip("/")
+        if base and not base.startswith(("https://", "http://")):
+            raise ValueError("网页地址要以 https:// 开头")
+        current["web_base"] = base
+    if payload.get("sound") is not None:
+        current["sound"] = re.sub(r"[^A-Za-z0-9_.-]", "", str(payload["sound"]))[:40]
+    if payload.get("level") in {"active", "timeSensitive", "passive"}:
+        current["level"] = payload["level"]
+    db.setting_set("bark", json.dumps(current, ensure_ascii=False))
+    return current
+
+
+def _bark_click_url(url: str, settings: dict[str, Any]) -> str:
+    """网页通知里的 /?chat=xxx 换成点 Bark 通知后要打开的地址。"""
+    if settings["open"] == "web":
+        return settings["web_base"] + (url or "/") if settings["web_base"] else ""
+    query = parse_qs(urlsplit(url or "/").query)
+    chat = (query.get("chat") or [""])[0]
+    return "dwell://open" + (f"?chat={chat}" if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", chat) else "")
+
+
+async def send_bark(title: str, body: str, url: str) -> dict[str, Any]:
+    settings = bark_settings()
+    if not settings["key"]:
+        return {"sent": 0, "failed": 0, "subscriptions": 0, "diagnostic": "", "status_code": None}
+    payload: dict[str, Any] = {
+        "device_key": settings["key"],
+        "title": title[:80] or "Cloudy",
+        "body": body[:240],
+        "group": "Dwell",
+        "level": settings["level"],
+    }
+    click = _bark_click_url(url, settings)
+    if click:
+        payload["url"] = click
+    if settings["web_base"]:
+        payload["icon"] = settings["web_base"] + "/icons/dwell-bunny-180.png"
+    if settings["sound"]:
+        payload["sound"] = settings["sound"]
+    host = urlsplit(settings["server"]).hostname or "Bark"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=6.0)) as client:
+            response = await client.post(settings["server"].rstrip("/") + "/push", json=payload)
+        data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+        if response.status_code == 200 and data.get("code", 200) == 200:
+            return {"sent": 1, "failed": 0, "subscriptions": 1, "diagnostic": "", "status_code": None}
+        reason = str(data.get("message") or response.text or "")
+        reason = re.sub(r"[A-Za-z0-9_-]{16,}", "[令牌已隐藏]", reason)[:120]
+        return {"sent": 0, "failed": 1, "subscriptions": 1,
+                "diagnostic": f"Bark {host} · HTTP {response.status_code} · {reason}".strip(" ·"),
+                "status_code": response.status_code}
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"sent": 0, "failed": 1, "subscriptions": 1,
+                "diagnostic": f"Bark {host} · {type(exc).__name__}", "status_code": None}
+
+
 async def send_push(title: str, body: str, url: str = "/") -> dict[str, Any]:
-    """Send without blocking FastAPI's event loop."""
+    """Web Push 和 Bark 一起发；不阻塞 FastAPI 的事件循环。"""
     started = time.perf_counter()
     try:
         log_id = db.system_log_start("push_delivery", "push_delivery")
     except Exception:
         log_id = ""
-    if not _subscriptions():
+    if not _subscriptions() and not bark_enabled():
         result = {
             "sent": 0, "failed": 0, "subscriptions": 0,
             "diagnostic": "服务端没有已保存的手机订阅", "status_code": None,
         }
     else:
-        result = await asyncio.to_thread(_send_sync, title, body, url)
+        async def web() -> dict[str, Any]:
+            if not _subscriptions():
+                return {"sent": 0, "failed": 0, "subscriptions": 0, "diagnostic": "", "status_code": None}
+            return await asyncio.to_thread(_send_sync, title, body, url)
+
+        web_result, bark_result = await asyncio.gather(web(), send_bark(title, body, url))
+        result = {
+            "sent": web_result["sent"] + bark_result["sent"],
+            "failed": web_result["failed"] + bark_result["failed"],
+            "subscriptions": web_result["subscriptions"] + bark_result["subscriptions"],
+            "diagnostic": "；".join(d for d in (web_result["diagnostic"], bark_result["diagnostic"]) if d),
+            "status_code": web_result["status_code"] or bark_result["status_code"],
+            "bark": bool(bark_result["sent"]),
+        }
     if log_id:
         try:
             db.system_log_finish(
