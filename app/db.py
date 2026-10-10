@@ -504,6 +504,26 @@ CREATE TABLE IF NOT EXISTS sigillo_reviews (
 );
 CREATE INDEX IF NOT EXISTS ix_sigillo_chat
 ON sigillo_reviews(chat_id, status, submitted_at DESC);
+
+-- 专注的正计时（YPT 那种）：她自己建的科目，和每一段计时。
+-- ended 为空就是正在计时的那一段；同一时间最多一段。读写都在 focus_log.py。
+CREATE TABLE IF NOT EXISTS focus_subjects (
+    id       TEXT PRIMARY KEY,
+    name     TEXT NOT NULL,
+    color    TEXT NOT NULL DEFAULT '#D9A7B7',
+    sort     INTEGER NOT NULL DEFAULT 0,
+    archived INTEGER NOT NULL DEFAULT 0,
+    made     INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS focus_sessions (
+    id         TEXT PRIMARY KEY,
+    subject_id TEXT NOT NULL,
+    started    INTEGER NOT NULL,
+    ended      INTEGER,
+    source     TEXT NOT NULL DEFAULT 'stopwatch',
+    FOREIGN KEY (subject_id) REFERENCES focus_subjects(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_focus_sessions_started ON focus_sessions(started);
 """
 
 

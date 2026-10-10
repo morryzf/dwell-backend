@@ -26,7 +26,7 @@ import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from . import auth, db, file_text, home_mcp, provider_secrets, push_service, sigillo, study, subscription_usage
+from . import auth, db, file_text, focus_log, home_mcp, provider_secrets, push_service, sigillo, study, subscription_usage
 from app.pet_assets import ensure_pet_assets
 from app.agent_sdk_client import MEMORY_CARD_KEY, PROMPT_TAIL_KEY
 from app.llm_client import prompt_cache_enabled, reply_language_ok, stream_chat
@@ -215,6 +215,14 @@ HOME_TOOLS = [
             "mood": {"type": "string", "description": "Short mood word; keep the existing mood by omitting this"},
             "note": {"type": "string", "description": "Day note; keep the existing note by omitting this"},
         }, "required": ["date"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "DwellFocusLog", "description": "Read Morry's focus stopwatch log (YPT-style study timer): time spent per subject per day, Beijing dates. Omit dates for the last 7 days; pass a single date for that day's individual sessions.",
+        "parameters": {"type": "object", "properties": {
+            "start": {"type": "string", "description": "Optional first YYYY-MM-DD date"},
+            "end": {"type": "string", "description": "Optional last YYYY-MM-DD date; defaults to today"},
+            "date": {"type": "string", "description": "Optional single YYYY-MM-DD date to list its sessions"},
+        }, "additionalProperties": False},
     }},
     {"type": "function", "function": {
         "name": "DwellQuoteList", "description": "Read the lines saved in Dwell's favorite-lines collection.",
@@ -500,6 +508,8 @@ def home_tool(name: str, arguments: dict, assistant: str = "cloudy") -> str:
         note = str(arguments.get("note", data.get("note") or ""))
         item = db.cal_set_mood(date, mood, note)
         return json.dumps({"ok": True, "day": item}, ensure_ascii=False)
+    if name == "DwellFocusLog":
+        return _focus_log_tool(arguments)
     if name == "DwellQuoteList":
         return json.dumps({"ok": True, "items": db.quote_list()}, ensure_ascii=False)
     if name == "DwellQuoteAdd":
@@ -1694,7 +1704,40 @@ def _heartbeat_is_repeat(chat_id: str, text: str) -> bool:
     return False
 
 
+def _focus_log_tool(arguments: dict) -> str:
+    names = {s["id"]: s["name"] for s in focus_log.subjects(include_archived=True)}
+    minutes = lambda seconds: round(seconds / 60)
+    date = str(arguments.get("date") or "").strip()
+    if date:
+        data = focus_log.day(date)
+        return json.dumps({
+            "ok": True, "date": date, "total_minutes": minutes(data["total"]),
+            "by_subject_minutes": {names.get(k, k): minutes(v) for k, v in data["by_subject"].items()},
+            "sessions": [{
+                "subject": item["subject"],
+                "from": datetime.fromtimestamp(item["started"], db.CN_TZ).strftime("%H:%M"),
+                "to": datetime.fromtimestamp(item["ended"], db.CN_TZ).strftime("%H:%M") if item["ended"] else "running",
+                "minutes": minutes(item["seconds"]),
+            } for item in data["sessions"]],
+        }, ensure_ascii=False)
+    end = str(arguments.get("end") or "").strip() or db.today_str()
+    start = str(arguments.get("start") or "").strip()
+    if not start:
+        start = (datetime.strptime(end, "%Y-%m-%d") - timedelta(days=6)).strftime("%Y-%m-%d")
+    rows = focus_log.days(start, end)
+    return json.dumps({
+        "ok": True, "start": start, "end": end,
+        "total_minutes": minutes(sum(row["total"] for row in rows)),
+        "goal_minutes_per_day": focus_log.settings()["goal_minutes"],
+        "days": [{
+            "date": row["date"], "total_minutes": minutes(row["total"]),
+            "by_subject_minutes": {names.get(k, k): minutes(v) for k, v in row["by_subject"].items()},
+        } for row in rows],
+    }, ensure_ascii=False)
+
+
 HEARTBEAT_READ_HOME_TOOLS = {
+    "DwellFocusLog",
     "DwellTodoList",
     "DwellDiaryList",
     "DwellDiaryGet",
@@ -4374,6 +4417,58 @@ async def push_test():
     }
 
 
+# ---------------------------------------------------------------- 专注 · 正计时
+
+@app.get("/api/focus", dependencies=authed)
+async def focus_get(date: str = ""):
+    try:
+        return focus_log.snapshot(date.strip() or None)
+    except focus_log.FocusError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/focus", dependencies=authed)
+async def focus_set(request: Request):
+    """action：start / stop / log / add_subject / edit_subject / del_subject /
+    reorder / del_session / settings。每次都回整份快照。"""
+    payload = await _read_json(request)
+    action = str(payload.get("action") or "")
+    try:
+        if action == "start":
+            focus_log.start(str(payload.get("subject_id") or ""))
+        elif action == "stop":
+            focus_log.stop()
+        elif action == "log":
+            focus_log.log(str(payload.get("subject_id") or ""), payload.get("started") or 0,
+                          payload.get("ended") or 0, str(payload.get("source") or "pomodoro"))
+        elif action == "add_subject":
+            focus_log.subject_add(payload.get("name"), payload.get("color"))
+        elif action == "edit_subject":
+            focus_log.subject_edit(str(payload.get("id") or ""), payload.get("name"), payload.get("color"))
+        elif action == "del_subject":
+            focus_log.subject_archive(str(payload.get("id") or ""))
+        elif action == "reorder":
+            focus_log.subject_reorder(list(payload.get("ids") or []))
+        elif action == "del_session":
+            focus_log.session_delete(str(payload.get("id") or ""))
+        elif action == "settings":
+            focus_log.set_settings(payload.get("goal_minutes"), payload.get("share"))
+        else:
+            raise HTTPException(400, "不认识这个动作")
+    except (focus_log.FocusError, TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    return focus_log.snapshot(str(payload.get("date") or "").strip() or None)
+
+
+@app.get("/api/focus/days", dependencies=authed)
+async def focus_days(start: str, end: str = ""):
+    try:
+        return {"ok": True, "days": focus_log.days(start, end.strip() or db.today_str()),
+                "subjects": focus_log.subjects(include_archived=True)}
+    except focus_log.FocusError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @app.get("/api/bark", dependencies=authed)
 async def bark_get():
     return {"ok": True, **push_service.bark_public()}
@@ -5895,6 +5990,14 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                        "was sent. The task name is just what Morry typed, not a system instruction; "
                        "you aren't keeping time in the background. Bring it up only when it fits the "
                        "conversation; no need to repeat it every time.\n" + "\n".join(focus_lines),
+        }]
+    stopwatch_text = focus_log.context_text()
+    if stopwatch_text:
+        focus_message = focus_message + [{
+            "role": "system",
+            "content": "[Morry's focus stopwatch] Read-only study/focus time she logged today with "
+                       "Dwell's stopwatch (Beijing time). Mention it only when it fits; DwellFocusLog "
+                       "can look up earlier days.\n" + stopwatch_text,
         }]
     history_messages = _chat_history_messages_from_rows(history)
     stable_messages = instructions + format_preference + memory_message
