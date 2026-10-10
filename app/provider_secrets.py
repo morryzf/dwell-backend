@@ -1,7 +1,7 @@
 """供应商 API 密钥的服务端加密存储。
 
 密钥只从环境变量 ``DWELL_CONFIG_KEY`` 读取，绝不进数据库明文、日志或 API 响应。
-部署时应在 Zeabur 的环境变量中配置一个 Fernet key；它不应提交到 GitHub。
+部署时应在服务器的环境变量中配置一个 Fernet key；它不应提交到 GitHub。
 """
 
 import os

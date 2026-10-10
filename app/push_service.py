@@ -1,6 +1,6 @@
 """Dwell 的手机通知：原生 Web Push，加上可选的 Bark。
 
-VAPID 密钥首次使用时生成并保存在 Dwell 的 settings 表，因此 Zeabur 重启后
+VAPID 密钥首次使用时生成并保存在 Dwell 的 settings 表，因此服务重启、重新部署后
 订阅仍然有效。浏览器订阅同样保存在数据库；主动消息只需要调用 send_push。
 
 Bark 是给 iOS app 用的：免费签名的 app 收不到苹果推送，就借 Bark 响一声，
@@ -28,6 +28,8 @@ from . import db
 
 DEFAULT_BARK_SERVER = "https://api.day.app"
 
+# 搬去腾讯云之前的地址。VAPID subject 只是给推送服务看的联系方式，不必能打开；
+# 没设 VAPID_SUBJECT 和 DWELL_PUBLIC_URL 时才会用到它。
 DEFAULT_VAPID_SUBJECT = "https://dwell-morry.zeabur.app"
 
 
@@ -73,6 +75,11 @@ def _vapid_subject() -> str:
             domain = parsed.path.rsplit("@", 1)[-1].lower()
             if domain and domain != "localhost" and "." in domain:
                 return configured
+    public = os.environ.get("DWELL_PUBLIC_URL", "").strip().rstrip("/")
+    parsed = urlsplit(public)
+    if parsed.scheme == "https" and parsed.hostname and parsed.hostname != "localhost" \
+            and "." in parsed.hostname:
+        return public
     return DEFAULT_VAPID_SUBJECT
 
 
