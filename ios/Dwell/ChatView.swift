@@ -7,7 +7,10 @@ struct ChatView: View {
 
     @State private var draft = ""
     @State private var drawerOpen = false
-    @State private var drawerDrag: CGFloat = 0
+    /// 手指拖着侧边栏时的位移。用 GestureState：手势被打断（比如拖到一半切去别的 app）时会自己归零，
+    /// 不会让侧边栏卡在半路、左边一截被切掉。
+    @GestureState(resetTransaction: Transaction(animation: .easeOut(duration: 0.2)))
+    private var drawerDrag: CGFloat = 0
     @State private var showSettings = false
     @State private var page: NativePage?
     @State private var showMemory = false
@@ -262,14 +265,18 @@ struct ChatView: View {
             }
             .accessibilityLabel("语音回复")
             Button { showModel = true } label: {
+                // 网页的 #modelPill：贴着字的胶囊，13 号字、左右 9、高 34，跟圆按钮同一种玻璃。
                 Text(store.model.displayName)
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.text)
                     .lineLimit(1)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: 120)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 130)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 11)
+                    .frame(height: 34)
                     .background(Capsule().fill(Theme.roundButton))
+                    .glassRim(Capsule())
                     .shadow(color: Theme.composerShadow, radius: 9, y: 6)
             }
             .accessibilityLabel("切换模型")
@@ -459,10 +466,9 @@ struct ChatView: View {
                     .offset(x: min(0, drawerDrag))
                     .gesture(
                         DragGesture(minimumDistance: 12)
-                            .onChanged { drawerDrag = $0.translation.width }
+                            .updating($drawerDrag) { value, state, _ in state = value.translation.width }
                             .onEnded { value in
                                 if value.translation.width < -width * 0.3 { closeDrawer() }
-                                withAnimation(.easeOut(duration: 0.2)) { drawerDrag = 0 }
                             }
                     )
                     .transition(.move(edge: .leading))
