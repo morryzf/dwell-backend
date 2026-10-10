@@ -161,7 +161,7 @@ final class API {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            throw APIError(status: status, message: json?["detail"] as? String ?? "语音没能生成（\(status)）")
+            throw APIError(status: status, message: json?["detail"] as? String ?? "服务器返回了 \(status)")
         }
         return data
     }

@@ -44,7 +44,8 @@ class BarkTest(unittest.TestCase):
     def test_click_opens_the_app_on_that_chat(self):
         settings = push_service.save_bark({"address": "k1", "web_base": "https://dwell.example.com"})
         self.assertEqual(push_service._bark_click_url("/?chat=c_42&from=push", settings), "dwell://open?chat=c_42")
-        self.assertEqual(push_service._bark_click_url("/?study=1", settings), "dwell://open")
+        self.assertEqual(push_service._bark_click_url("/?study=1&from=push", settings), "dwell://open?study=1")
+        self.assertEqual(push_service._bark_click_url("/?from=push", settings), "dwell://open")
         settings = push_service.save_bark({"open": "web"})
         self.assertEqual(push_service._bark_click_url("/?study=1", settings), "https://dwell.example.com/?study=1")
 

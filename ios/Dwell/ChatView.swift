@@ -44,6 +44,11 @@ struct ChatView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView().environmentObject(store)
         }
+        .onChange(of: store.openPage) { _, name in
+            guard let name, let target = NativePage(rawValue: name) else { return }
+            store.openPage = nil
+            page = target
+        }
         // 跟网页一样：从侧边栏点进去的页面，返回时侧边栏还开着。
         .fullScreenCover(item: $page, onDismiss: {
             withAnimation(.easeOut(duration: 0.24)) { drawerOpen = true }
@@ -55,6 +60,7 @@ struct ChatView: View {
                 case .usage: UsagePage()
                 case .heartbeat: HeartbeatPage()
                 case .focus: FocusPage()
+                case .library: LibraryPage()
                 }
             }
             .environmentObject(store)

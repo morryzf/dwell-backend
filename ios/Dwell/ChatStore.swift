@@ -28,6 +28,8 @@ final class ChatStore: ObservableObject {
     @Published var toolsEnabled = false
     @Published var model = ChatModelState()
     /// 刚说完、该自动念一遍的那条语音回复。
+    /// 点通知进来要直接打开的侧栏页面（比如书房），聊天页看到就打开。
+    @Published var openPage: String?
     @Published var autoplayVoiceID: String?
     @Published var messages: [Message] = []
     /// 正在流进来、还没说完的那一段。
@@ -203,10 +205,14 @@ final class ChatStore: ObservableObject {
     /// dwell://open?chat=… ——Bark 通知点开时带来的那一间。还没登录好就等一会儿。
     func openLink(_ url: URL) async {
         guard url.scheme == "dwell" else { return }
-        let chat = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-            .queryItems?.first { $0.name == "chat" }?.value ?? ""
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let chat = items.first { $0.name == "chat" }?.value ?? ""
         for _ in 0..<40 where phase != .ready {
             try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        if items.contains(where: { $0.name == "study" }) {
+            openPage = "Library"
+            return
         }
         guard phase == .ready, !chat.isEmpty, chat != chatID else { return }
         await switchChat(chat)
