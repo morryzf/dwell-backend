@@ -6,6 +6,7 @@ import SwiftUI
 /// - stream_event：回复一个字一个字地来（text_delta）
 /// - assistant_split：开了分条时，一段说完了
 /// - assistant_reset：这次回复作废重来（比如答错语言被打回）
+/// - system/regenerating：某条回复要重新生成，先把旧的几条撤掉
 /// - result：这一轮结束。这时以数据库为准把整页重拉一次，前面拼出来的都只是临时的。
 @MainActor
 final class ChatStore: ObservableObject {
@@ -13,9 +14,29 @@ final class ChatStore: ObservableObject {
 
     @Published var phase: Phase = .checking
     @Published var assistant: AssistantInfo?
+    /// 当前这间聊天的名字，顶栏标题用；没起名时显示助手的名字（跟网页一样）。
+    @Published var chatName = ""
+    /// 记忆面板里有几条新的待确认（三个点上那颗粉点）。
+    @Published var memoryUnseen = 0
+    /// 按需记忆开没开（菜单里那个开关）。
+    @Published var memoryInjection = false
+
+    // 输入框那一排按钮的状态，都按聊天存在服务器上（见 ChatControls.swift）。
+    @Published var voiceMode = false
+    @Published var replyLanguage = "auto"
+    @Published var instructionCount = 0
+    @Published var toolsEnabled = false
+    @Published var model = ChatModelState()
+    /// 刚说完、该自动念一遍的那条语音回复。
+    @Published var autoplayVoiceID: String?
     @Published var messages: [Message] = []
     /// 正在流进来、还没说完的那一段。
     @Published var streamingText = ""
+    /// 正在流进来的思考过程。
+    @Published var streamingThinking = ""
+    /// 更早还有没有消息；有的话顶上显示「更早的消息」。
+    @Published var hasMore = false
+    @Published var loadingOlder = false
     @Published var isReplying = false
     /// 输入框上方那一行小字：在用工具、出错了之类。正常时为空。
     @Published var status = ""
@@ -23,6 +44,8 @@ final class ChatStore: ObservableObject {
     private let api = API.shared
     private var pollTask: Task<Void, Never>?
     private var polledChatID = ""
+    /// messages 现在装的是哪间聊天的。
+    private var loadedChatID = ""
 
     var chatID: String { assistant?.chatID ?? "" }
 
@@ -52,6 +75,7 @@ final class ChatStore: ObservableObject {
         stopPolling()
         await api.logout()
         messages = []
+        loadedChatID = ""
         assistant = nil
         phase = .needsLogin
     }
@@ -65,33 +89,104 @@ final class ChatStore: ObservableObject {
             assistant = try await api.assistant()
             try await reloadMessages()
             startPolling()
+            chatName = (try? await api.chats())?.first { $0.id == chatID }?.name ?? ""
+            await refreshMemoryBadge()
+            await loadControls()
         } catch {
             handle(error)
         }
     }
 
+    /// 重拉最近一页。之前往上翻出来的更早消息留着，不然一轮回复结束，翻好的历史就没了。
     func reloadMessages() async throws {
         guard !chatID.isEmpty else { return }
-        let fresh = try await api.messages(chatID: chatID)
-        messages = fresh.filter { !$0.bubbles.isEmpty }
+        let chat = chatID
+        let page = try await api.messages(chatID: chat)
+        guard chat == chatID else { return }
+        let fresh = page.msgs.filter { !$0.isEmpty }
+        // rowid 是全库共用的，换了聊天就不能留旧的。
+        var older: [Message] = []
+        if loadedChatID == chat, let firstSeq = page.msgs.first?.seq {
+            older = messages.filter { $0.seq > 0 && $0.seq < firstSeq }
+        }
+        if older.isEmpty { hasMore = page.more }
+        loadedChatID = chat
+        messages = older + fresh
         streamingText = ""
+        streamingThinking = ""
+    }
+
+    func refreshMemoryBadge() async {
+        guard let json = try? await api.request("GET", "api/memory/badge") else { return }
+        memoryUnseen = json["unseen"] as? Int ?? 0
+        memoryInjection = json["injection_enabled"] as? Bool ?? false
+    }
+
+    func setMemoryInjection(_ on: Bool) async {
+        guard !chatID.isEmpty else { return }
+        do {
+            let json = try await api.request("PUT", "api/chats/\(chatID)/memory-cards/injection", body: ["enabled": on])
+            memoryInjection = json["enabled"] as? Bool ?? on
+        } catch { handle(error) }
+    }
+
+    func loadOlder() async {
+        guard hasMore, !loadingOlder, !chatID.isEmpty,
+              let oldest = messages.first(where: { $0.seq > 0 })?.seq else { return }
+        loadingOlder = true
+        defer { loadingOlder = false }
+        do {
+            let chat = chatID
+            let page = try await api.messages(chatID: chat, limit: 100, before: oldest)
+            guard chat == chatID else { return }
+            messages = page.msgs.filter { !$0.isEmpty } + messages
+            hasMore = page.more
+        } catch { handle(error) }
     }
 
     // MARK: - 发消息
 
-    func send(_ raw: String) async {
+    func send(_ raw: String, images: [PendingImage] = [], files: [PendingFile] = []) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !chatID.isEmpty else { return }
+        guard !text.isEmpty || !images.isEmpty || !files.isEmpty, !chatID.isEmpty else { return }
         // 先在本地放一条，echo 回来再换成真的。
-        messages.append(Message(id: "local-\(UUID().uuidString)", kind: .me, text: text))
+        let shown = text.isEmpty && images.isEmpty
+            ? "（发来了文件：" + files.map(\.name).joined(separator: "、") + "）" : text
+        messages.append(Message(id: "local-\(UUID().uuidString)", kind: .me, text: shown,
+                                images: images.map(\.previewDataURL)))
         isReplying = true
         status = ""
         do {
-            try await api.send(text: text, chatID: chatID)
+            try await api.send(text: text, chatID: chatID, images: images, files: files,
+                               voice: voiceMode, replyLanguage: replyLanguage)
         } catch {
             isReplying = false
+            messages.removeAll { $0.isLocal }
             handle(error)
         }
+    }
+
+    func regenerate(_ message: Message) async {
+        do {
+            try await api.regenerate(message.id)
+            isReplying = true
+        } catch { handle(error) }
+    }
+
+    func edit(_ message: Message, to content: String) async {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text != message.text else { return }
+        do {
+            try await api.editMessage(message.id, content: text)
+            try await reloadMessages()
+        } catch { handle(error) }
+    }
+
+    func delete(_ message: Message) async {
+        do {
+            try await api.deleteMessage(message.id)
+            messages.removeAll { $0.id == message.id }
+        } catch { handle(error) }
     }
 
     func stop() async {
@@ -158,11 +253,12 @@ final class ChatStore: ObservableObject {
     private func apply(_ event: [String: Any]) async {
         switch event["type"] as? String {
         case "echo":
-            messages.removeAll { $0.id.hasPrefix("local-") }
+            messages.removeAll { $0.isLocal }
             let id = event["message_id"] as? String ?? UUID().uuidString
             if !messages.contains(where: { $0.id == id }) {
                 let at = Date(timeIntervalSince1970: TimeInterval(event["at"] as? Int ?? 0))
-                messages.append(Message(id: id, kind: .me, text: event["text"] as? String ?? "", at: at))
+                messages.append(Message(id: id, kind: .me, text: event["text"] as? String ?? "",
+                                        images: event["images"] as? [String] ?? [], at: at))
             }
             isReplying = true
 
@@ -173,7 +269,7 @@ final class ChatStore: ObservableObject {
                 streamingText += delta?["text"] as? String ?? ""
                 status = ""
             case "thinking_delta":
-                if streamingText.isEmpty { status = "在想…" }
+                streamingThinking += delta?["thinking"] as? String ?? ""
             default:
                 break
             }
@@ -186,6 +282,17 @@ final class ChatStore: ObservableObject {
                 messages.append(Message(id: id, kind: .gu, text: text))
             }
             streamingText = ""
+            streamingThinking = ""
+
+        case "system" where (event["subtype"] as? String) == "voice_reply":
+            autoplayVoiceID = event["message_id"] as? String
+
+        case "system" where (event["subtype"] as? String) == "regenerating":
+            let ids = Set((event["message_ids"] as? [String] ?? []) + [event["message_id"] as? String ?? ""])
+            messages.removeAll { ids.contains($0.id) }
+            streamingText = ""
+            streamingThinking = ""
+            isReplying = true
 
         case "assistant_reset":
             streamingText = ""
