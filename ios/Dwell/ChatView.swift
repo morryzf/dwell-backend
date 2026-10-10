@@ -53,6 +53,7 @@ struct ChatView: View {
                 case .tasks: TasksPage()
                 case .calendar: CalendarPage()
                 case .usage: UsagePage()
+                case .heartbeat: HeartbeatPage()
                 }
             }
             .environmentObject(store)
