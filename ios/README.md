@@ -1,6 +1,6 @@
 # Dwell iOS
 
-原生的聊天页、记忆、设置，加上侧边栏里的清单、日子、用量。其他页面（日记、书房……）暂时还在网页里，侧边栏点了会用网页打开。
+原生的聊天页、记忆、设置，加上侧边栏里的清单、日子、心跳、用量。其他页面（日记、书房……）暂时还在网页里，侧边栏点了会用网页打开。
 
 不需要 Mac，也不需要付费开发者账号：
 
@@ -66,6 +66,7 @@
 | `Dwell/Pages.swift` | 清单 / 日子 / 用量共用的页面架子；按北京时间算的「今天」 |
 | `Dwell/TasksPage.swift` | 清单：Plum 的（勾、删、新增、定时、每天）和助手的活 |
 | `Dwell/CalendarPage.swift` | 日子：月历、那天的事（每年、重要日子）、心情 |
+| `Dwell/HeartbeatPage.swift` | 心跳：开关、通知状态、消息送到哪间、醒来的节奏、现在叫醒一次（跟网页同一份设置） |
 | `Dwell/UsagePage.swift` | 用量：Claude 订阅额度；OpenRouter 余额、今日 / 本周 / 本月、命中率、柱状图 |
 | `Dwell/SettingsView.swift` | 设置首页 |
 | `Dwell/BarkSettings.swift` | Bark 通知：填推送地址、点通知打开 app 还是网页、提醒方式、铃声、试发 |
