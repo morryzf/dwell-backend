@@ -1,6 +1,6 @@
 # Dwell iOS
 
-原生的聊天页、记忆、设置，加上侧边栏里的清单、日子、专注、心跳、用量。其他页面（日记、书房……）暂时还在网页里，侧边栏点了会用网页打开。
+原生的聊天页、记忆、设置，加上侧边栏里的清单、日子、专注、书房、心跳、用量。其他页面（日记、收纳……）暂时还在网页里，侧边栏点了会用网页打开。
 
 不需要 Mac，也不需要付费开发者账号：
 
@@ -68,6 +68,7 @@
 | `Dwell/CalendarPage.swift` | 日子：月历、那天的事（每年、重要日子）、心情 |
 | `Dwell/FocusPage.swift` | 专注 · 正计时（YPT 那种）：分科目计时、今天总时长和目标、每一段、最近 7 天；记录存服务器 |
 | `Dwell/PomodoroPane.swift` | 专注 · 番茄钟：只在手机上计时，到点本地通知；做完一轮可记进某个科目 |
+| `Dwell/LibraryPage.swift`、`LibraryReading.swift`、`LibraryModels.swift` | 书房：暗红屋子里的两层书架、上传 EPUB、收藏、怀表里的阅读安排；他的读书笔记、分享本（回他一句）、翻书（长按选字「划线」「写一句」，点划线看页边笔记） |
 | `Dwell/HeartbeatPage.swift` | 心跳：开关、通知状态、消息送到哪间、醒来的节奏、现在叫醒一次（跟网页同一份设置） |
 | `Dwell/UsagePage.swift` | 用量：Claude 订阅额度；OpenRouter 余额、今日 / 本周 / 本月、命中率、柱状图 |
 | `Dwell/SettingsView.swift` | 设置首页 |

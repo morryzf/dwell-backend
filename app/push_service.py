@@ -303,6 +303,8 @@ def _bark_click_url(url: str, settings: dict[str, Any]) -> str:
     if settings["open"] == "web":
         return settings["web_base"] + (url or "/") if settings["web_base"] else ""
     query = parse_qs(urlsplit(url or "/").query)
+    if query.get("study"):
+        return "dwell://open?study=1"
     chat = (query.get("chat") or [""])[0]
     return "dwell://open" + (f"?chat={chat}" if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", chat) else "")
 
