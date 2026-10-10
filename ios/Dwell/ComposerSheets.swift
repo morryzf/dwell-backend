@@ -872,6 +872,8 @@ struct SheetIntro: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.dim)
         }
+        // 列表的行会把超出行边的笔画切掉（衬线 M 的左脚、「要」的撇），两边留一点。
+        .padding(.horizontal, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
     }

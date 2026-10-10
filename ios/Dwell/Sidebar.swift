@@ -31,7 +31,7 @@ struct Sidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Cloudy Studio")
+            Text("\u{2009}Cloudy Studio\u{2009}")
                 .font(.custom("Ephesis", size: 36))
                 .foregroundStyle(SidebarStyle.brandInk)
                 .padding(.top, 4)
@@ -165,9 +165,12 @@ struct Sidebar: View {
                         }
                     } label: {
                         VStack(alignment: left ? .trailing : .leading, spacing: 2) {
-                            Text(tool.title)
+                            // 手写体的笔画会伸出字框（J 的钩、t 的尾巴），直接画会被切掉一截。
+                            // 两头各垫一个细空格把字框撑大，再用负的边距把位置拉回原处。
+                            Text("\u{2009}\(tool.title)\u{2009}")
                                 .font(.custom("Ephesis", size: 27))
                                 .foregroundStyle(SidebarStyle.brandInk)
+                                .padding(.horizontal, -5)
                             Text(tool.sub)
                                 .font(.system(size: 10.5).italic())
                                 .tracking(0.42)

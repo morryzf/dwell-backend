@@ -28,6 +28,11 @@ enum Theme {
     static let composerShadow = Color(light: Color(red: 86/255, green: 58/255, blue: 71/255).opacity(0.07),
                                       dark: Color.black.opacity(0.19))
     static let roundButton = Color(light: Color.white.opacity(0.25), dark: Color(red: 1, green: 235/255, blue: 244/255).opacity(0.12))
+    // 输入框那排按钮的玻璃边：0.5 的细边，左上和右下各一道高光（网页的 --rim-*）。
+    static let rimBase = Color(light: Color(red: 150/255, green: 110/255, blue: 128/255).opacity(0.2),
+                               dark: Color(red: 1, green: 235/255, blue: 244/255).opacity(0.13))
+    static let rimHi = Color(light: Color.white.opacity(0.8), dark: Color(red: 1, green: 240/255, blue: 247/255).opacity(0.54))
+    static let rimLo = Color(light: Color.white.opacity(0.75), dark: Color(red: 1, green: 240/255, blue: 247/255).opacity(0.5))
 
     // 有身份的颜色：标题两边的花、发送键
     static let accent = Color(light: 0xD9A7B7, dark: 0xD9A7B7)
@@ -131,7 +136,20 @@ struct RoundIcon: View {
             .foregroundStyle(on ? Theme.accent : Theme.text)
             .frame(width: size, height: size)
             .background(Circle().fill(Theme.roundButton))
+            .glassRim(Circle())
             .overlay(Circle().stroke(Theme.accent.opacity(on ? 0.42 : 0), lineWidth: 1))
             .shadow(color: Theme.composerShadow, radius: 9, y: 6)
+    }
+}
+
+extension View {
+    /// 网页 .ctlrow 按钮的那圈玻璃边。浅色模式下白按钮落在白输入框上，全靠它看出轮廓。
+    func glassRim<S: InsettableShape>(_ shape: S) -> some View {
+        self
+            .overlay(shape.strokeBorder(Theme.rimBase, lineWidth: 0.5))
+            .overlay(shape.strokeBorder(LinearGradient(stops: [
+                .init(color: Theme.rimHi, location: 0), .init(color: .clear, location: 0.3),
+                .init(color: .clear, location: 0.64), .init(color: Theme.rimLo, location: 1),
+            ], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.5))
     }
 }
