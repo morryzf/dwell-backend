@@ -97,6 +97,7 @@ struct GlassSettings: View {
 
     @State private var role = "me"
     @State private var mode = "light"
+    @State private var picking: [String: (color: Color, hex: String)] = [:]
 
     private var style: Binding<MessageStyle> {
         Binding(get: { appearance.style(role, mode) },
@@ -183,9 +184,19 @@ struct GlassSettings: View {
         .environment(\.colorScheme, mode == "dark" ? .dark : .light)
     }
 
+    /// 取色器拖动时把它给的颜色原样还给它（只往存储里写 #rrggbb），
+    /// 不然每动一下都要绕一圈「颜色 → 六位码 → 颜色」，三根滑块会互相牵着跑。
     private func colorBinding(_ key: WritableKeyPath<MessageStyle, String>) -> Binding<Color> {
-        Binding(get: { Color(hexString: style.wrappedValue[keyPath: key]) },
-                set: { style.wrappedValue[keyPath: key] = $0.hexString })
+        let slot = "\(role)-\(mode)-\(key.hashValue)"
+        return Binding(get: {
+            let stored = style.wrappedValue[keyPath: key]
+            if let live = picking[slot], live.hex == stored { return live.color }
+            return Color(hexString: stored)
+        }, set: { color in
+            let hex = color.hexString
+            picking[slot] = (color, hex)
+            style.wrappedValue[keyPath: key] = hex
+        })
     }
 
     private func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>,

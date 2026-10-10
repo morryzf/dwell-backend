@@ -163,6 +163,8 @@ struct ChatView: View {
             .defaultScrollAnchor(.bottom)
             // 原生 app 最舒服的一点：往下一拖，键盘跟着手指收回去。
             .scrollDismissesKeyboard(.interactively)
+            // 点一下聊天记录的空白处，键盘也收起来（跟系统信息 app 一样）。
+            .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
             // 只在最底下多了新消息时才滚到底；往上翻出更早的消息时不能把人拽回去。
             .onChange(of: store.messages.last?.id) { _, _ in scrollToBottom(proxy) }
             .onChange(of: store.streamingText) { _, _ in scrollToBottom(proxy, animated: false) }

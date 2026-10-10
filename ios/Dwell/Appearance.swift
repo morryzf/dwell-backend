@@ -134,11 +134,15 @@ extension Color {
     }
 
     /// 取色器给回来的颜色转回 #rrggbb。
+    /// 先换到 sRGB 再四舍五入：取色器给的是广色域的颜色，直接取再截断会差一点点，
+    /// 存回去再读出来就变了色，滑块一动别的滑块也跟着跳。
     var hexString: String {
-        let ui = UIColor(self)
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
-        return String(format: "#%02x%02x%02x", Int(r * 255), Int(g * 255), Int(b * 255))
+        let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+        let cg = UIColor(self).cgColor.converted(to: srgb, intent: .defaultIntent, options: nil)
+        let parts = (cg?.components ?? [0, 0, 0]).map { min(1, max(0, $0)) }
+        let rgb = (parts.count >= 3 ? Array(parts.prefix(3)) : [parts[0], parts[0], parts[0]])
+            .map { Int(($0 * 255).rounded()) }
+        return String(format: "#%02x%02x%02x", rgb[0], rgb[1], rgb[2])
     }
 }
 
