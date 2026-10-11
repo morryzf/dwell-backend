@@ -8,7 +8,7 @@
 ## iOS constraints
 
 - Stay in **Swift 5 language mode** with an **iOS 17** deployment target. Don't migrate to Swift 6 or use APIs newer than iOS 17 without a version check. This overrides `write-swift`'s Swift 6 advice.
-- The app copies the web look: measure web computed styles and reuse the tokens in `ios/Dwell/Theme.swift`.
+- The app starts from the web look (measure web computed styles, reuse the tokens in `ios/Dwell/Theme.swift`), but it doesn't have to match the web exactly. Where iOS can't do what the web does, or does it better, adapt to what the app supports (e.g. glass blur is five levels on system materials, not pixel sliders).
 
 ## Design skills
 
