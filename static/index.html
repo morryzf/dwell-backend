@@ -3198,8 +3198,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     background: var(--msg-me-bg, rgba(248,242,245,.46)) !important;
     border: var(--msg-me-border-width, 1px) solid var(--msg-me-border, rgba(255,255,255,.42)) !important;
     border-radius: var(--msg-me-radius, 18px) !important;
-    -webkit-backdrop-filter: blur(var(--msg-me-blur, 16px)) saturate(1.45);
-    backdrop-filter: blur(var(--msg-me-blur, 16px)) saturate(1.45);
+    -webkit-backdrop-filter: blur(var(--msg-me-blur, 10px)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-me-blur, 10px)) saturate(1.45);
     box-shadow: 0 6px 20px rgba(72,54,64,.075) !important;
   }
   #log .gu,
@@ -3208,8 +3208,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     background: var(--msg-cloudy-bg, rgba(248,242,245,.46)) !important;
     border: var(--msg-cloudy-border-width, 1px) solid var(--msg-cloudy-border, rgba(255,255,255,.42)) !important;
     border-radius: var(--msg-cloudy-radius, 18px) !important;
-    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
-    backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
+    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur, 10px)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-cloudy-blur, 10px)) saturate(1.45);
     box-shadow: 0 6px 20px rgba(72,54,64,.075) !important;
   }
   @media (prefers-color-scheme: dark) {
@@ -3243,8 +3243,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     background: var(--msg-cloudy-bg, rgba(248,242,245,.46));
     border: var(--msg-cloudy-border-width, 1px) solid var(--msg-cloudy-border, rgba(255,255,255,.42));
     border-radius: var(--msg-cloudy-radius, 18px);
-    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
-    backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
+    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur, 10px)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-cloudy-blur, 10px)) saturate(1.45);
     box-shadow: 0 6px 20px rgba(72,54,64,.075);
     cursor: pointer; -webkit-tap-highlight-color: transparent;
     transition: border-radius 220ms ease;
@@ -3346,8 +3346,8 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     background: var(--msg-cloudy-bg, rgba(248,242,245,.46));
     border: var(--msg-cloudy-border-width, 1px) solid var(--msg-cloudy-border, rgba(255,255,255,.42));
     border-radius: var(--msg-cloudy-radius, 18px);
-    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
-    backdrop-filter: blur(var(--msg-cloudy-blur, 16px)) saturate(1.45);
+    -webkit-backdrop-filter: blur(var(--msg-cloudy-blur, 10px)) saturate(1.45);
+    backdrop-filter: blur(var(--msg-cloudy-blur, 10px)) saturate(1.45);
     box-shadow: 0 5px 16px rgba(72,54,64,.06);
   }
   #log .row:not(.me) > .toolline .lbl,
@@ -3662,13 +3662,13 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   /* User-tunable glass surfaces. Defaults preserve the existing Dwell material. */
   :root {
     --interface-composer-bg: rgba(255,253,254,.47);
-    --interface-composer-blur: 34px;
+    --interface-composer-blur: 10px;
     --interface-drawer-bg: rgba(247,236,241,.51);
     --interface-drawer-blur: 10px;
     --interface-page-sheet-bg: rgba(255,253,254,.39);
-    --interface-page-sheet-blur: 36px;
+    --interface-page-sheet-blur: 10px;
     --interface-tts-bg: color-mix(in srgb, var(--card) 88%, transparent);
-    --interface-tts-blur: 18px;
+    --interface-tts-blur: 10px;
   }
   html[data-theme="dark"] {
     --interface-composer-bg: rgba(92,82,89,.58);
@@ -11799,21 +11799,21 @@ const MESSAGE_STYLE_ROLES = ['me', 'cloudy', 'chatgpt'];
 const MESSAGE_STYLE_MODES = ['light', 'dark'];
 const MESSAGE_STYLE_DEFAULTS = {
   me: {
-    light: { blur: 16, background: '#f6e8ee', backgroundOpacity: 48, border: '#ffffff', borderOpacity: 38, borderWidth: 1, text: '#514a4f', radius: 18 },
-    dark: { blur: 16, background: '#4f4148', backgroundOpacity: 62, border: '#f2c9dc', borderOpacity: 18, borderWidth: 1, text: '#f7edf2', radius: 18 }
+    light: { blur: 10, background: '#f6e8ee', backgroundOpacity: 48, border: '#ffffff', borderOpacity: 38, borderWidth: 1, text: '#514a4f', radius: 18 },
+    dark: { blur: 10, background: '#4f4148', backgroundOpacity: 62, border: '#f2c9dc', borderOpacity: 18, borderWidth: 1, text: '#f7edf2', radius: 18 }
   },
   cloudy: {
-    light: { blur: 16, background: '#f6e8ee', backgroundOpacity: 48, border: '#ffffff', borderOpacity: 38, borderWidth: 1, text: '#514a4f', radius: 18 },
-    dark: { blur: 16, background: '#4f4148', backgroundOpacity: 62, border: '#f2c9dc', borderOpacity: 18, borderWidth: 1, text: '#f7edf2', radius: 18 }
+    light: { blur: 10, background: '#f6e8ee', backgroundOpacity: 48, border: '#ffffff', borderOpacity: 38, borderWidth: 1, text: '#514a4f', radius: 18 },
+    dark: { blur: 10, background: '#4f4148', backgroundOpacity: 62, border: '#f2c9dc', borderOpacity: 18, borderWidth: 1, text: '#f7edf2', radius: 18 }
   },
   chatgpt: {
-    light: { blur: 16, background: '#f6e8ee', backgroundOpacity: 48, border: '#ffffff', borderOpacity: 38, borderWidth: 1, text: '#514a4f', radius: 18 },
-    dark: { blur: 16, background: '#4f4148', backgroundOpacity: 62, border: '#f2c9dc', borderOpacity: 18, borderWidth: 1, text: '#f7edf2', radius: 18 }
+    light: { blur: 10, background: '#f6e8ee', backgroundOpacity: 48, border: '#ffffff', borderOpacity: 38, borderWidth: 1, text: '#514a4f', radius: 18 },
+    dark: { blur: 10, background: '#4f4148', backgroundOpacity: 62, border: '#f2c9dc', borderOpacity: 18, borderWidth: 1, text: '#f7edf2', radius: 18 }
   }
 };
 const MESSAGE_STYLE_ROLE_NAMES = { me: 'Me', cloudy: 'Cloudy', chatgpt: 'GPT' };
 const MESSAGE_STYLE_LIMITS = {
-  blur: [0, 30], backgroundOpacity: [0, 100], borderOpacity: [0, 100], borderWidth: [0, 3], radius: [4, 32]
+  blur: [0, 20], backgroundOpacity: [0, 100], borderOpacity: [0, 100], borderWidth: [0, 3], radius: [4, 32]
 };
 let messageStyleRole = 'me';
 let messageStyleTab = 'light';
@@ -11821,16 +11821,16 @@ let messageStyleTab = 'light';
 const INTERFACE_GLASS_KEY = 'dwellInterfaceGlass';
 const INTERFACE_GLASS_DEFAULTS = {
   light: {
-    composer: { opacity: 47, blur: 34 },
+    composer: { opacity: 47, blur: 10 },
     drawer: { opacity: 51, blur: 10 },
-    pageSheet: { opacity: 39, blur: 36 },
-    ttsPlayer: { opacity: 88, blur: 18 }
+    pageSheet: { opacity: 39, blur: 10 },
+    ttsPlayer: { opacity: 88, blur: 10 }
   },
   dark: {
-    composer: { opacity: 58, blur: 34 },
+    composer: { opacity: 58, blur: 10 },
     drawer: { opacity: 60, blur: 10 },
-    pageSheet: { opacity: 56, blur: 36 },
-    ttsPlayer: { opacity: 88, blur: 18 }
+    pageSheet: { opacity: 56, blur: 10 },
+    ttsPlayer: { opacity: 88, blur: 10 }
   }
 };
 const INTERFACE_GLASS_SURFACES = [
@@ -11847,7 +11847,7 @@ function normalizeInterfaceGlass(raw, base) {
   const opacity = Number(raw.opacity), blur = Number(raw.blur);
   return {
     opacity: Number.isFinite(opacity) ? Math.min(100, Math.max(0, opacity)) : base.opacity,
-    blur: Number.isFinite(blur) ? Math.min(40, Math.max(0, blur)) : base.blur
+    blur: Number.isFinite(blur) ? Math.min(20, Math.max(0, blur)) : base.blur
   };
 }
 function readInterfaceGlass() {
@@ -11904,7 +11904,7 @@ function renderInterfaceGlassControls() {
     head.append(title, reset); section.appendChild(head);
     [
       { key: 'opacity', label: '不透明度', min: 0, max: 100, suffix: '%' },
-      { key: 'blur', label: '模糊强度', min: 0, max: 40, suffix: ' px' }
+      { key: 'blur', label: '模糊强度', min: 0, max: 20, suffix: ' px' }
     ].forEach(spec => {
       const wrap = document.createElement('div'); wrap.className = 'msg-style-control';
       const controlHead = document.createElement('div'); controlHead.className = 'msg-style-control-head';
@@ -12009,7 +12009,7 @@ function messageStyleValue(key, value) {
   return value + '%';
 }
 const MESSAGE_STYLE_CONTROLS = [
-  { key: 'blur', label: '模糊强度', type: 'range', min: 0, max: 30, step: 1 },
+  { key: 'blur', label: '模糊强度', type: 'range', min: 0, max: 20, step: 1 },
   { key: 'background', label: '背景颜色', type: 'color' },
   { key: 'backgroundOpacity', label: '背景不透明度', type: 'range', min: 0, max: 100, step: 1 },
   { key: 'border', label: '边框颜色', type: 'color' },

@@ -21,15 +21,15 @@ enum GlassSurface: String, CaseIterable, Identifiable {
         }
     }
 
-    /// 网页 INTERFACE_GLASS_DEFAULTS。
+    /// 默认都是「轻」：平时最多也就调到这一档。
     func defaults(_ mode: String) -> GlassValue {
         switch (self, mode) {
-        case (.composer, "dark"): return GlassValue(opacity: 58, blur: 34)
-        case (.composer, _): return GlassValue(opacity: 47, blur: 34)
+        case (.composer, "dark"): return GlassValue(opacity: 58, blur: 10)
+        case (.composer, _): return GlassValue(opacity: 47, blur: 10)
         case (.drawer, "dark"): return GlassValue(opacity: 60, blur: 10)
         case (.drawer, _): return GlassValue(opacity: 51, blur: 10)
-        case (.pageSheet, "dark"): return GlassValue(opacity: 56, blur: 36)
-        case (.pageSheet, _): return GlassValue(opacity: 39, blur: 36)
+        case (.pageSheet, "dark"): return GlassValue(opacity: 56, blur: 10)
+        case (.pageSheet, _): return GlassValue(opacity: 39, blur: 10)
         }
     }
 
@@ -55,7 +55,7 @@ extension Appearance {
     func setGlass(_ value: GlassValue, _ surface: GlassSurface, _ mode: String) {
         var all = interfaceGlass
         all[mode, default: [:]][surface.rawValue] = GlassValue(opacity: min(100, max(0, value.opacity.rounded())),
-                                                              blur: min(40, max(0, value.blur.rounded())))
+                                                              blur: min(28, max(0, value.blur.rounded())))
         interfaceGlass = all
     }
 
@@ -82,23 +82,40 @@ struct GlassBackground<S: Shape>: View {
     }
 }
 
-/// 网页 backdrop-filter: blur(Npx) 的原生版。
-/// 之前试过 UIKit 里可调半径的那种模糊，在新系统上它不报错、但根本不模糊（只剩一层透明的色）。
-/// 现在用系统的毛玻璃材质：半径越大换越厚的一档；很小的半径就把最薄那档调淡，模糊也跟着变弱。
+/// 模糊分五档。app 里模糊用的是系统毛玻璃，没法像网页那样一像素一像素地调，
+/// 所以设置里直接给档位；存的时候还是写一个像素数（每档一个代表值），跟以前存下的数也对得上。
+enum BlurLevel: Int, CaseIterable, Identifiable {
+    case off, faint, light, medium, heavy
+
+    var id: Int { rawValue }
+
+    var label: String { ["关", "很轻", "轻", "中", "重"][rawValue] }
+
+    /// 每档存成的像素数。
+    var px: Double { [0, 4, 10, 18, 28][rawValue] }
+
+    static func of(_ px: Double) -> BlurLevel {
+        switch px {
+        case ..<1: return .off
+        case ..<6: return .faint
+        case ..<14: return .light
+        case ..<24: return .medium
+        default: return .heavy
+        }
+    }
+}
+
+/// 按档位铺一层系统毛玻璃。「很轻」是把最薄那层调淡一半，模糊也跟着变弱。
 struct BackdropBlur: View {
     let radius: Double
 
     var body: some View {
-        if radius <= 0 {
-            Color.clear
-        } else if radius < 6 {
-            Rectangle().fill(.ultraThinMaterial).opacity(radius / 6)
-        } else if radius < 16 {
-            Rectangle().fill(.ultraThinMaterial)
-        } else if radius < 28 {
-            Rectangle().fill(.thinMaterial)
-        } else {
-            Rectangle().fill(.regularMaterial)
+        switch BlurLevel.of(radius) {
+        case .off: Color.clear
+        case .faint: Rectangle().fill(.ultraThinMaterial).opacity(0.5)
+        case .light: Rectangle().fill(.ultraThinMaterial)
+        case .medium: Rectangle().fill(.thinMaterial)
+        case .heavy: Rectangle().fill(.regularMaterial)
         }
     }
 }
