@@ -82,42 +82,24 @@ struct GlassBackground<S: Shape>: View {
     }
 }
 
-/// 网页 backdrop-filter: blur(Npx) 的原生版：只模糊、不加系统毛玻璃那层白。
-/// 用的是 UIKit 里可调半径的模糊；万一这台系统上没有，就退回系统的超薄材质。
-struct BackdropBlur: UIViewRepresentable {
+/// 网页 backdrop-filter: blur(Npx) 的原生版。
+/// 之前试过 UIKit 里可调半径的那种模糊，在新系统上它不报错、但根本不模糊（只剩一层透明的色）。
+/// 现在用系统的毛玻璃材质：半径越大换越厚的一档；很小的半径就把最薄那档调淡，模糊也跟着变弱。
+struct BackdropBlur: View {
     let radius: Double
 
-    func makeUIView(context: Context) -> UIVisualEffectView {
-        UIVisualEffectView(effect: Self.effect(radius))
-    }
-
-    func updateUIView(_ view: UIVisualEffectView, context: Context) {
-        if context.coordinator.radius != radius {
-            context.coordinator.radius = radius
-            view.effect = Self.effect(radius)
+    var body: some View {
+        if radius <= 0 {
+            Color.clear
+        } else if radius < 6 {
+            Rectangle().fill(.ultraThinMaterial).opacity(radius / 6)
+        } else if radius < 16 {
+            Rectangle().fill(.ultraThinMaterial)
+        } else if radius < 28 {
+            Rectangle().fill(.thinMaterial)
+        } else {
+            Rectangle().fill(.regularMaterial)
         }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(radius: radius) }
-
-    final class Coordinator {
-        var radius: Double
-        init(radius: Double) { self.radius = radius }
-    }
-
-    private static func effect(_ radius: Double) -> UIVisualEffect {
-        // 每个键都先问一句「你认不认」，系统哪天改了也只会退回材质，不会闪退。
-        let keys = ["setBlurRadius:", "setScale:", "setColorTint:", "setColorTintAlpha:"]
-        if let type = NSClassFromString("_UICustomBlurEffect") as? UIBlurEffect.Type,
-           case let effect = type.init(),
-           keys.allSatisfy({ effect.responds(to: NSSelectorFromString($0)) }) {
-            effect.setValue(radius, forKey: "blurRadius")
-            effect.setValue(1.0, forKey: "scale")
-            effect.setValue(UIColor.clear, forKey: "colorTint")
-            effect.setValue(0.0, forKey: "colorTintAlpha")
-            return effect
-        }
-        return UIBlurEffect(style: .systemUltraThinMaterial)
     }
 }
 
