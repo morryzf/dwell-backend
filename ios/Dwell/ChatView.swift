@@ -44,7 +44,8 @@ struct ChatView: View {
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .overlay { drawer }
-        .sheet(isPresented: $showSettings) {
+        // 设置一点开就是整屏，不会往下一划就整页关掉；右上角的叉关。
+        .fullScreenCover(isPresented: $showSettings) {
             SettingsView().environmentObject(store).glassSheet()
         }
         .onChange(of: store.openPage) { _, name in

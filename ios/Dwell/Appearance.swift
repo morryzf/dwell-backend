@@ -194,6 +194,8 @@ struct ChatBackground: View {
                     )
             }
             .ignoresSafeArea()
+            // 铺满裁掉的那部分图也会接手指，挡住上面的东西；背景本来就不用点。
+            .allowsHitTesting(false)
         } else {
             PaperBackground()
         }
