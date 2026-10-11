@@ -53,11 +53,14 @@ struct Sidebar: View {
         .background {
             GlassBackground(surface: .drawer,
                             shape: UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28, style: .continuous))
-                .overlay(
-                    UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28, style: .continuous)
-                        .stroke(SidebarStyle.edge, lineWidth: 1)
-                )
-                .shadow(color: Color(red: 72/255, green: 52/255, blue: 62/255).opacity(0.18), radius: 18, x: 14)
+                .frostedOnly { view in
+                    view
+                        .overlay(
+                            UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28, style: .continuous)
+                                .stroke(SidebarStyle.edge, lineWidth: 1)
+                        )
+                        .shadow(color: Color(red: 72/255, green: 52/255, blue: 62/255).opacity(0.18), radius: 18, x: 14)
+                }
                 .ignoresSafeArea()
         }
         .task(id: scope) { await load() }

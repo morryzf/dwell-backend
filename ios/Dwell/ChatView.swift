@@ -116,12 +116,15 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showInstructions) {
             InstructionsSheet().environmentObject(store)
+                .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showTools) {
             ToolsSheet().environmentObject(store)
+                .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showModel) {
             ModelSheet().environmentObject(store)
+                .presentationDetents([.medium, .large])
         }
         // 一轮说完：新的语音回复自动念一遍（跟网页一样）。
         .onChange(of: store.isReplying) { _, replying in
@@ -238,8 +241,11 @@ struct ChatView: View {
             .padding(.horizontal, 14)
             .padding(.bottom, 7)
             .background(GlassBackground(surface: .composer, shape: RoundedRectangle(cornerRadius: 22, style: .continuous)))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.composerBorder, lineWidth: 1))
-            .shadow(color: Theme.composerShadow, radius: 11, y: 8)
+            .frostedOnly { view in
+                view
+                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.composerBorder, lineWidth: 1))
+                    .shadow(color: Theme.composerShadow, radius: 11, y: 8)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -277,7 +283,7 @@ struct ChatView: View {
                     .padding(.horizontal, 11)
                     .frame(height: 34)
                     .buttonGlass(Capsule())
-                    .shadow(color: Theme.composerShadow, radius: 9, y: 6)
+                    .frostedOnly { $0.shadow(color: Theme.composerShadow, radius: 9, y: 6) }
             }
             .accessibilityLabel("切换模型")
             Spacer(minLength: 4)
@@ -367,7 +373,7 @@ struct ChatView: View {
             .foregroundStyle(.white)
             .frame(width: 38, height: 38)
             .buttonGlass(Circle(), tint: Theme.send, fallback: Theme.send)
-            .shadow(color: Theme.sendShadow, radius: 6, y: 5)
+            .frostedOnly { $0.shadow(color: Theme.sendShadow, radius: 6, y: 5) }
     }
 
     private func takePicked(_ items: [PhotosPickerItem]) async {
@@ -741,8 +747,11 @@ struct Bubble: View {
                     }
                 }
             }
-            .overlay(shape.stroke(style.borderColor, lineWidth: style.borderWidth))
-            .shadow(color: Theme.bubbleShadow, radius: 10, y: 6)
+            .frostedOnly { view in
+                view
+                    .overlay(shape.stroke(style.borderColor, lineWidth: style.borderWidth))
+                    .shadow(color: Theme.bubbleShadow, radius: 10, y: 6)
+            }
             // 自己说的靠右：这个框占满 85% 宽，气泡贴着框的右边。
             .frame(maxWidth: maxWidth, alignment: isMe ? .trailing : .leading)
             .fixedSize(horizontal: false, vertical: true)

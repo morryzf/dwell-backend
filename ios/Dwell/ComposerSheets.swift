@@ -621,20 +621,19 @@ struct ModelSheet: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     // thinking 开关在右上角，跟网页一样。
-                    Toggle(isOn: Binding(
-                        get: { store.model.showThinking },
-                        set: { on in
-                            Task {
-                                if await store.saveModel(["show_thinking": on]) {
-                                    try? await store.reloadMessages()
-                                }
+                    // 一颗灯泡：亮着（粉）= 显示思考过程，灭着 = 不显示。比开关在顶栏里清楚。
+                    Button {
+                        let on = !store.model.showThinking
+                        Task {
+                            if await store.saveModel(["show_thinking": on]) {
+                                try? await store.reloadMessages()
                             }
                         }
-                    )) {
-                        Image(systemName: "lightbulb")
+                    } label: {
+                        Image(systemName: store.model.showThinking ? "lightbulb.fill" : "lightbulb")
+                            .foregroundStyle(store.model.showThinking ? Theme.accent : Theme.dim)
                     }
-                    .toggleStyle(.switch)
-                    .tint(Theme.send)
+                    .accessibilityLabel(store.model.showThinking ? "显示思考过程：开" : "显示思考过程：关")
                 }
             }
             .tint(Theme.text)

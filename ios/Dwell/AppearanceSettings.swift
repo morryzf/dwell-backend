@@ -92,6 +92,7 @@ struct BackgroundSettings: View {
 
 /// 「玻璃效果」：照网页的 #messageStyleSheet。我的消息、Cloudy、ChatGPT 各一套，浅色深色各一套。
 struct GlassSettings: View {
+    @EnvironmentObject private var store: ChatStore
     @ObservedObject private var appearance = Appearance.shared
     @Environment(\.colorScheme) private var scheme
 
@@ -161,12 +162,6 @@ struct GlassSettings: View {
                      : "液态玻璃要 iOS 26 才有，这台手机上用的是磨砂玻璃。")
             }
 
-            Section {
-                preview
-            }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
-
             Section("气泡") {
                 ColorPicker("底色", selection: colorBinding(\.background), supportsOpacity: false)
                 slider("底色不透明度", value: style.backgroundOpacity, range: 0...100, unit: "%")
@@ -201,37 +196,47 @@ struct GlassSettings: View {
             }
         }
         .modifier(SheetListStyle())
+        .safeAreaInset(edge: .top, spacing: 0) { preview }
         .navigationTitle("玻璃效果")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { mode = scheme == .dark ? "dark" : "light" }
     }
 
     /// 预览按正在编辑的那一套画，不管现在手机是浅色还是深色。
+    /// 预览：用聊天页同一个背景、同一种气泡和输入框，按正在编辑的那一套（浅色或深色）画；
+    /// 钉在页面顶上，往下翻着调也一直看得见。
     private var preview: some View {
-        let s = appearance.style(role, mode)
-        let shape = RoundedRectangle(cornerRadius: s.radius, style: .continuous)
-        return ZStack {
-            PaperBackground()
-            Text(role == "me" ? "妈妈做的卤肉饭" : "卤肉饭，好。妈妈做的手艺。\n\n吃饱了吗？")
-                .font(Theme.bubbleFont)
-                .lineSpacing(Theme.bubbleLineSpacing)
-                .foregroundStyle(s.textColor)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background {
-                    ZStack {
-                        if s.blur > 0 { BackdropBlur(radius: s.blur).clipShape(shape) }
-                        shape.fill(s.backgroundColor)
-                    }
+        let who = role == "chatgpt" ? "chatgpt" : (role == "cloudy" ? "cloudy" : (store.assistant?.id ?? "cloudy"))
+        return ZStack(alignment: .bottom) {
+            ChatBackground(assistant: who)
+            VStack(spacing: 10) {
+                Bubble(text: "卤肉饭，好。妈妈做的手艺。吃饱了吗？")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Bubble(text: "妈妈做的卤肉饭", isMe: true)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                HStack {
+                    Text("说点什么…").font(.system(size: 14)).foregroundStyle(Theme.dim)
+                    Spacer()
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 26, height: 26)
+                        .buttonGlass(Circle(), tint: Theme.send, fallback: Theme.send)
                 }
-                .overlay(shape.stroke(s.borderColor, lineWidth: s.borderWidth))
-                .shadow(color: Theme.bubbleShadow, radius: 10, y: 6)
-                .frame(maxWidth: .infinity, alignment: role == "me" ? .trailing : .leading)
-                .padding(18)
+                .padding(.horizontal, 14)
+                .frame(height: 40)
+                .background(GlassBackground(surface: .composer, shape: RoundedRectangle(cornerRadius: 18, style: .continuous)))
+            }
+            .environment(\.bubbleMaxWidth, 230)
+            .environment(\.assistantID, who)
+            .padding(14)
         }
-        .frame(height: 170)
+        .frame(height: 210)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .environment(\.colorScheme, mode == "dark" ? .dark : .light)
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 8)
     }
 
     /// 取色器拖动时把它给的颜色原样还给它（只往存储里写 #rrggbb），

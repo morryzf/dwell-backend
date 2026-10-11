@@ -111,7 +111,8 @@ struct LiquidPane<S: Shape>: View {
     }
 }
 
-/// 输入框那排按钮：Liquid Glass 开着时是会跟手发光的玻璃按钮，不然是原来的半透明圆 + 细边。
+/// 输入框那排按钮：Liquid Glass 开着时是玻璃按钮，不然是原来的半透明圆 + 细边。
+/// 不用 .interactive()：它会把手指按下去的那一下吃掉，按钮就点不开了。
 struct ButtonGlass<S: InsettableShape>: ViewModifier {
     let shape: S
     var tint: Color? = nil
@@ -120,7 +121,7 @@ struct ButtonGlass<S: InsettableShape>: ViewModifier {
 
     func body(content: Content) -> some View {
         if appearance.usesLiquidGlass, #available(iOS 26.0, *) {
-            content.glassEffect(LiquidGlass.make(tint: tint, interactive: true), in: shape)
+            content.glassEffect(LiquidGlass.make(tint: tint), in: shape)
         } else {
             content
                 .background(shape.fill(fallback))
@@ -192,5 +193,25 @@ extension View {
             .presentationBackground {
                 GlassBackground(surface: .pageSheet, shape: Rectangle()).ignoresSafeArea()
             }
+    }
+}
+
+/// 磨砂玻璃时才要的那些「假高光」：细边、亮边、投影。Liquid Glass 自己有边和光，再叠一层就脏了。
+struct FrostedOnly<Effect: View>: ViewModifier {
+    @ObservedObject private var appearance = Appearance.shared
+    let effect: (AnyView) -> Effect
+
+    func body(content: Content) -> some View {
+        if appearance.usesLiquidGlass {
+            content
+        } else {
+            effect(AnyView(content))
+        }
+    }
+}
+
+extension View {
+    func frostedOnly<Effect: View>(@ViewBuilder _ effect: @escaping (AnyView) -> Effect) -> some View {
+        modifier(FrostedOnly(effect: effect))
     }
 }
