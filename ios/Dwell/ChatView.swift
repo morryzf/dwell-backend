@@ -26,6 +26,9 @@ struct ChatView: View {
     @State private var showTools = false
     @State private var showModel = false
     @State private var editing: Message?
+    /// 点了哪条消息，它下面那排按钮（编辑、朗读、重新生成、删除、更多、时间）就亮出来；一次只开一条。
+    @State private var actionsFor: String?
+    @State private var versionsFor: Message?
     @State private var deleting: Message?
     @FocusState private var inputFocused: Bool
 
@@ -74,6 +77,10 @@ struct ChatView: View {
             Task { await store.refreshMemoryBadge() }
         }) {
             MemoryView(chatID: store.chatID, chatTitle: headerTitle).glassSheet()
+        }
+        .sheet(item: $versionsFor) { message in
+            VersionsSheet(message: message)
+                .presentationDetents([.medium, .large])
         }
         .sheet(item: $editing) { message in
             EditMessageSheet(message: message) { text in
@@ -140,20 +147,33 @@ struct ChatView: View {
     private var chatScroll: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if store.hasMore {
                         olderButton(proxy)
                     }
                     ForEach(Array(store.messages.enumerated()), id: \.element.id) { index, message in
-                        if index == 0 || !Calendar.current.isDate(message.at, inSameDayAs: store.messages[index - 1].at) {
-                            DaySeparator(date: message.at)
+                        let newDay = index == 0 || !Calendar.current.isDate(message.at, inSameDayAs: store.messages[index - 1].at)
+                        if newDay {
+                            DaySeparator(date: message.at).padding(.vertical, 8)
                         }
+                        // 同一个人连着说：气泡之间 6；换人说话：空 22，一眼分得出谁是谁。
+                        let sameSpeaker = index > 0 && store.messages[index - 1].kind == message.kind
                         MessageRow(message: message,
+                                   actionsOpen: actionsFor == message.id,
+                                   onToggleActions: {
+                                       withAnimation(.easeOut(duration: 0.18)) {
+                                           actionsFor = actionsFor == message.id ? nil : message.id
+                                       }
+                                   },
                                    onEdit: { editing = $0 },
-                                   onDelete: { deleting = $0 })
+                                   onDelete: { deleting = $0 },
+                                   onVersions: { versionsFor = $0 })
+                            .padding(.top, newDay || index == 0 ? 0 : (sameSpeaker ? 6 : 22))
                     }
+                    Color.clear.frame(height: 16)
                     if !store.streamingThinking.isEmpty {
                         ThinkingView(text: store.streamingThinking, live: store.streamingText.isEmpty)
+                            .padding(.bottom, 6)
                     }
                     if !store.streamingText.isEmpty && store.voiceMode {
                         // 语音回复还在说：先给一条「正在说」的语音条，说完再念。
@@ -173,6 +193,17 @@ struct ChatView: View {
             .scrollDismissesKeyboard(.interactively)
             // 点一下聊天记录的空白处，键盘也收起来（跟系统信息 app 一样）。
             .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
+            // 在聊天记录上任何地方往右一划，侧边栏就出来（不用非得从屏幕最边上划）。
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 24)
+                    .onEnded { value in
+                        let dx = value.translation.width, dy = value.translation.height
+                        if !drawerOpen && dx > 70 && abs(dy) < dx * 0.6 {
+                            inputFocused = false
+                            withAnimation(.easeOut(duration: 0.24)) { drawerOpen = true }
+                        }
+                    }
+            )
             // 只在最底下多了新消息时才滚到底；往上翻出更早的消息时不能把人拽回去。
             .onChange(of: store.messages.last?.id) { _, _ in scrollToBottom(proxy) }
             .onChange(of: store.streamingText) { _, _ in scrollToBottom(proxy, animated: false) }
@@ -628,10 +659,16 @@ extension EnvironmentValues {
 
 struct MessageRow: View {
     @EnvironmentObject private var store: ChatStore
+    @ObservedObject private var voice = VoicePlayer.shared
 
     let message: Message
+    let actionsOpen: Bool
+    let onToggleActions: () -> Void
     let onEdit: (Message) -> Void
     let onDelete: (Message) -> Void
+    let onVersions: (Message) -> Void
+
+    @State private var showUsage = false
 
     var body: some View {
         switch message.kind {
@@ -643,6 +680,10 @@ struct MessageRow: View {
         case .me, .gu:
             let isMe = message.kind == .me
             VStack(alignment: isMe ? .trailing : .leading, spacing: 6) {
+                if message.fromHeartbeat && !isMe {
+                    Divider(text: "\(store.assistant?.name ?? "Cloudy") 主动发了一条消息")
+                        .padding(.bottom, 4)
+                }
                 if !message.thinking.isEmpty || !message.tools.isEmpty {
                     HStack(spacing: 6) {
                         if !message.thinking.isEmpty {
@@ -661,26 +702,132 @@ struct MessageRow: View {
                         bubbleList(isMe: isMe)
                     }
                     .contextMenu { menu(copying: message.text) }
+                    .onTapGesture { onToggleActions() }
                 } else {
                     bubbleList(isMe: isMe)
                 }
-                if message.fromHeartbeat && !isMe {
-                    Text("主动找你的")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.dim)
-                        .padding(.leading, 4)
+                footer(isMe: isMe)
+                if message.usage.cacheCheckpoint {
+                    Divider(text: "已达50条缓存点，下一条将重新缓存").padding(.top, 4)
                 }
             }
             .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
         }
     }
 
-    /// 一条消息的文字气泡（分条的话是好几个）。
+    /// 一条消息的文字气泡（分条的话是好几个）。最后一个带小尖角：他的在左下，我的在右下。
     @ViewBuilder
     private func bubbleList(isMe: Bool) -> some View {
-        ForEach(Array(message.bubbles.enumerated()), id: \.offset) { _, text in
-            Bubble(text: text, isMe: isMe)
+        let parts = message.bubbles
+        ForEach(Array(parts.enumerated()), id: \.offset) { index, text in
+            Bubble(text: text, isMe: isMe, tail: index == parts.count - 1)
+                .contentShape(Rectangle())
+                .onTapGesture { onToggleActions() }
                 .contextMenu { menu(copying: text) }
+        }
+    }
+
+    /// 气泡下面那一行：点开消息时左边是一排按钮和时间，他的回复右边一直挂着这轮用了多少 token。
+    @ViewBuilder
+    private func footer(isMe: Bool) -> some View {
+        let tokens = !isMe ? message.usage.shown : 0
+        if (actionsOpen && !message.isLocal) || tokens > 0 {
+            HStack(spacing: 14) {
+                if isMe { Spacer(minLength: 0) }
+                if actionsOpen && !message.isLocal {
+                    actions(isMe: isMe)
+                        .transition(.opacity)
+                }
+                if !isMe {
+                    Spacer(minLength: 0)
+                    if tokens > 0 {
+                        Button { showUsage.toggle() } label: {
+                            Text("\(tokens.formatted()) tokens")
+                                .font(.system(size: 10.5).monospacedDigit())
+                                .foregroundStyle(Theme.dim.opacity(0.66))
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showUsage) {
+                            UsageDetail(usage: message.usage)
+                                .presentationCompactAdaptation(.popover)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func actions(isMe: Bool) -> some View {
+        HStack(spacing: 14) {
+            iconButton("pencil", "编辑消息") { onEdit(message) }
+            if !isMe {
+                let playing = voice.currentID == message.id && voice.state != .idle
+                iconButton(playing ? "stop.fill" : "speaker.wave.2", playing ? "停止朗读" : "播放整轮回复") {
+                    voice.toggle(message.id)
+                }
+                iconButton("arrow.clockwise", "重新生成") {
+                    Task { await store.regenerate(message) }
+                }
+                .disabled(store.isReplying)
+            }
+            iconButton("trash", "删除消息") { onDelete(message) }
+            Menu {
+                Button {
+                    Task { await quote() }
+                } label: { Label("摘进最喜欢的话", systemImage: "quote.bubble") }
+                if !isMe {
+                    Button { onVersions(message) } label: { Label("查看版本", systemImage: "clock.arrow.circlepath") }
+                }
+                Button {
+                    Task { await branch() }
+                } label: { Label("从这里创建分支", systemImage: "arrow.triangle.branch") }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Theme.dim)
+                    .frame(width: 22, height: 22)
+            }
+            .accessibilityLabel("更多消息操作")
+            Text(message.at.formatted(date: .omitted, time: .shortened))
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(Theme.dim)
+        }
+    }
+
+    private func iconButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 15))
+                .foregroundStyle(Theme.dim)
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private func quote() async {
+        let day = HomeClock.day(message.at)
+        do {
+            _ = try await API.shared.request("POST", "api/quotes", body: ["quote": message.text, "date": day])
+            store.flash("收进最喜欢的话了")
+        } catch {
+            store.flash("没收进去，再试一次")
+        }
+    }
+
+    private func branch() async {
+        do {
+            let json = try await API.shared.request("POST", "api/messages/\(message.id)/branch")
+            if let chat = (json["chat"] as? [String: Any])?["id"] as? String {
+                await store.switchChat(chat)
+                store.flash("开了一个新分支")
+            } else {
+                await store.refresh()
+            }
+        } catch {
+            store.flash("分支没开成")
         }
     }
 
@@ -713,6 +860,115 @@ struct MessageRow: View {
             }
         }
     }
+
+    /// 网页的那种居中细线 + 小字（主动消息、缓存点）。
+    private struct Divider: View {
+        let text: String
+
+        var body: some View {
+            HStack(spacing: 10) {
+                LinearGradient(colors: [.clear, Theme.dim.opacity(0.35)], startPoint: .leading, endPoint: .trailing)
+                    .frame(height: 1)
+                Text(text).font(.system(size: 11)).tracking(0.6).foregroundStyle(Theme.dim).fixedSize()
+                LinearGradient(colors: [Theme.dim.opacity(0.35), .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(height: 1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+    }
+}
+
+/// 点 token 数弹出来的明细，跟网页的 .msg-usage-pop 一样几行。
+struct UsageDetail: View {
+    let usage: MessageUsage
+
+    var body: some View {
+        let cacheUsed = usage.cached > 0 || usage.cacheWrite > 0
+        VStack(alignment: .leading, spacing: 6) {
+            row("↑", "\(usage.input.formatted()) " + (cacheUsed ? "未缓存输入" : "输入"))
+            if usage.cached > 0 { row("↳", "\(usage.cached.formatted()) 缓存读取") }
+            if usage.cacheWrite > 0 { row("↟", "\(usage.cacheWrite.formatted()) 缓存写入") }
+            row("↓", "\(usage.output.formatted()) 输出")
+            if usage.tokensPerSecond > 0 { row("ϟ", String(format: "%.1f tokens/s", usage.tokensPerSecond)) }
+            if usage.durationMS > 0 {
+                let seconds = Double(usage.durationMS) / 1000
+                row("◷", seconds < 10 ? String(format: "%.1f 秒", seconds) : "\(Int(seconds.rounded())) 秒")
+            }
+        }
+        .font(.system(size: 12).monospacedDigit())
+        .foregroundStyle(Theme.text)
+        .padding(14)
+        .frame(minWidth: 170, alignment: .leading)
+    }
+
+    private func row(_ mark: String, _ text: String) -> some View {
+        HStack(spacing: 6) {
+            Text(mark).foregroundStyle(Theme.dim).frame(width: 16)
+            Text(text)
+        }
+    }
+}
+
+/// 「查看版本」：重新生成、编辑之前的旧版本都在这里。
+struct VersionsSheet: View {
+    let message: Message
+    @Environment(\.dismiss) private var dismiss
+    @State private var current = ""
+    @State private var versions: [(text: String, title: String)] = []
+    @State private var loaded = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    card("当前版本", current.isEmpty ? message.text : current)
+                    ForEach(Array(versions.enumerated()), id: \.offset) { _, item in
+                        card(item.title, item.text)
+                    }
+                    if loaded && versions.isEmpty {
+                        Text("这条回复还没有旧版本。").font(.system(size: 13)).foregroundStyle(Theme.dim)
+                    }
+                }
+                .padding(18)
+            }
+            .background(PaperBackground())
+            .navigationTitle("版本")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("好") { dismiss() } }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func card(_ title: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 12)).foregroundStyle(Theme.dim)
+            Text(text).font(.system(size: 14.5)).lineSpacing(5).foregroundStyle(Theme.text).textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.bubble))
+    }
+
+    private func load() async {
+        guard let json = try? await API.shared.request("GET", "api/messages/\(message.id)/versions") else {
+            loaded = true
+            return
+        }
+        current = (json["current"] as? [String: Any])?["content"] as? String ?? (json["current"] as? String ?? "")
+        let items = json["versions"] as? [[String: Any]] ?? []
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日 HH:mm"
+        versions = items.enumerated().map { index, item in
+            let reason = (item["reason"] as? String) == "regenerated" ? "重新生成前" : "编辑前"
+            let made = (item["made"] as? NSNumber).map { " · " + formatter.string(from: Date(timeIntervalSince1970: $0.doubleValue)) } ?? ""
+            return (text: item["content"] as? String ?? "", title: "旧版本 \(index + 1)（\(reason)）" + made)
+        }
+        loaded = true
+    }
 }
 
 /// 网页的气泡：圆角、淡粉毛玻璃、很浅的影子。样子跟「设置 → 玻璃效果」走：
@@ -720,6 +976,8 @@ struct MessageRow: View {
 struct Bubble: View {
     let text: String
     var isMe = false
+    /// 最后一个气泡带个小尖角：他的在左下，我的在右下。
+    var tail = false
     @Environment(\.bubbleMaxWidth) private var maxWidth
     @Environment(\.colorScheme) private var scheme
     @Environment(\.assistantID) private var assistant
@@ -727,7 +985,14 @@ struct Bubble: View {
 
     var body: some View {
         let style = appearance.style(isMe ? "me" : assistant, scheme == .dark ? "dark" : "light")
-        let shape = RoundedRectangle(cornerRadius: style.radius, style: .continuous)
+        let r = style.radius
+        let tip: CGFloat = min(5, r)
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: r,
+            bottomLeadingRadius: tail && !isMe ? tip : r,
+            bottomTrailingRadius: tail && isMe ? tip : r,
+            topTrailingRadius: r,
+            style: .continuous)
         Text(Self.render(text))
             .font(Theme.bubbleFont)
             .lineSpacing(Theme.bubbleLineSpacing)

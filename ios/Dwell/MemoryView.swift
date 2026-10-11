@@ -367,6 +367,9 @@ struct MemoryView: View {
                     } onSource: {
                         sourceOf = (draft, true)
                     }
+                    // 忽略：往右滑出去、淡掉。
+                    .transition(.asymmetric(insertion: .opacity,
+                                            removal: .move(edge: .trailing).combined(with: .opacity)))
                 }
             }
         }
