@@ -233,6 +233,8 @@ struct GlassSettings: View {
         }
         .frame(height: 210)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        // 预览只给人看：背景图铺满时会超出这块框，不关掉它接手指，就会把下面的按钮挡住。
+        .allowsHitTesting(false)
         .environment(\.colorScheme, mode == "dark" ? .dark : .light)
         .padding(.horizontal, 16)
         .padding(.top, 6)

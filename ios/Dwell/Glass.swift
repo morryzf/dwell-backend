@@ -107,7 +107,10 @@ struct LiquidPane<S: Shape>: View {
     let glass: Glass
 
     var body: some View {
-        shape.fill(Color.clear).glassEffect(glass, in: shape)
+        shape.fill(Color.clear)
+            .glassEffect(glass, in: shape)
+            // 玻璃只是背景，不能接手指：不然它会挡在按钮前面，点了只弹一下却打不开。
+            .allowsHitTesting(false)
     }
 }
 
@@ -121,7 +124,10 @@ struct ButtonGlass<S: InsettableShape>: ViewModifier {
 
     func body(content: Content) -> some View {
         if appearance.usesLiquidGlass, #available(iOS 26.0, *) {
-            content.glassEffect(LiquidGlass.make(tint: tint), in: shape)
+            // 玻璃垫在按钮下面当背景，而不是把按钮本身变成玻璃：按钮自己接点击，玻璃不碰手指。
+            content
+                .background(LiquidPane(shape: shape, glass: LiquidGlass.make(tint: tint)))
+                .contentShape(shape)
         } else {
             content
                 .background(shape.fill(fallback))
