@@ -130,9 +130,9 @@ struct MessageStyle: Codable, Equatable {
 
     static func defaults(_ mode: String) -> MessageStyle {
         mode == "dark"
-            ? MessageStyle(blur: 16, background: "#4f4148", backgroundOpacity: 62, border: "#f2c9dc",
+            ? MessageStyle(blur: 10, background: "#4f4148", backgroundOpacity: 62, border: "#f2c9dc",
                            borderOpacity: 18, borderWidth: 1, text: "#f7edf2", radius: 18)
-            : MessageStyle(blur: 16, background: "#f6e8ee", backgroundOpacity: 48, border: "#ffffff",
+            : MessageStyle(blur: 10, background: "#f6e8ee", backgroundOpacity: 48, border: "#ffffff",
                            borderOpacity: 38, borderWidth: 1, text: "#514a4f", radius: 18)
     }
 

@@ -100,6 +100,18 @@ struct GlassSettings: View {
     @State private var picking: [String: (color: Color, hex: String)] = [:]
     @State private var surface: GlassSurface = .composer
 
+    /// 模糊只给五档（关 / 很轻 / 轻 / 中 / 重），系统毛玻璃就这么几层厚度。
+    private func blurPicker(_ value: Binding<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("模糊")
+            Picker("模糊", selection: Binding(get: { BlurLevel.of(value.wrappedValue) },
+                                             set: { value.wrappedValue = $0.px })) {
+                ForEach(BlurLevel.allCases) { level in Text(level.label).tag(level) }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
     private func glassBinding(_ key: WritableKeyPath<GlassValue, Double>) -> Binding<Double> {
         Binding(get: { appearance.glass(surface, mode)[keyPath: key] },
                 set: { value in
@@ -143,7 +155,7 @@ struct GlassSettings: View {
             Section("气泡") {
                 ColorPicker("底色", selection: colorBinding(\.background), supportsOpacity: false)
                 slider("底色不透明度", value: style.backgroundOpacity, range: 0...100, unit: "%")
-                slider("模糊", value: style.blur, range: 0...30, unit: "")
+                blurPicker(style.blur)
                 slider("圆角", value: style.radius, range: 4...32, unit: "")
             }
             Section("边框") {
@@ -165,7 +177,7 @@ struct GlassSettings: View {
                 }
                 .pickerStyle(.segmented)
                 slider("不透明度", value: glassBinding(\.opacity), range: 0...100, unit: "%")
-                slider("模糊强度", value: glassBinding(\.blur), range: 0...40, unit: " px")
+                blurPicker(glassBinding(\.blur))
                 Button("恢复\(surface.label)的默认值") { appearance.resetGlass(surface, mode) }
             } header: {
                 Text("界面")
