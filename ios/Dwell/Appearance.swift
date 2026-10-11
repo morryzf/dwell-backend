@@ -33,6 +33,18 @@ final class Appearance: ObservableObject {
 
     // MARK: 界面玻璃（输入框、侧边栏、整页弹窗；见 Glass.swift）
 
+    /// iOS 26 上用系统的 Liquid Glass；关掉就回到磨砂玻璃。老系统上这个开关不起作用。
+    @Published var liquidGlass: Bool {
+        didSet { UserDefaults.standard.set(liquidGlass, forKey: "dwell.liquidGlass") }
+    }
+
+    /// 现在是不是真的在用 Liquid Glass（开着，而且系统够新）。
+    var usesLiquidGlass: Bool {
+        guard liquidGlass else { return false }
+        if #available(iOS 26.0, *) { return true }
+        return false
+    }
+
     @Published var interfaceGlass: [String: [String: GlassValue]] = [:] {
         didSet {
             if let data = try? JSONEncoder().encode(interfaceGlass) {
@@ -43,6 +55,7 @@ final class Appearance: ObservableObject {
 
     private init() {
         theme = UserDefaults.standard.string(forKey: "dwell.theme") ?? "auto"
+        liquidGlass = UserDefaults.standard.object(forKey: "dwell.liquidGlass") as? Bool ?? true
         for who in ["cloudy", "chatgpt"] {
             if let data = try? Data(contentsOf: Self.backgroundURL(who)), let image = UIImage(data: data) {
                 backgrounds[who] = image

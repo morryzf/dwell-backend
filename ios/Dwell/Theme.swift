@@ -137,8 +137,7 @@ struct RoundIcon: View {
             .font(.system(size: size * 0.45, weight: .medium))
             .foregroundStyle(on ? Theme.accent : Theme.text)
             .frame(width: size, height: size)
-            .background(Circle().fill(Theme.roundButton))
-            .glassRim(Circle())
+            .buttonGlass(Circle())
             .overlay(Circle().stroke(Theme.accent.opacity(on ? 0.42 : 0), lineWidth: 1))
             .shadow(color: Theme.composerShadow, radius: 9, y: 6)
     }

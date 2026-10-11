@@ -100,6 +100,11 @@ struct GlassSettings: View {
     @State private var picking: [String: (color: Color, hex: String)] = [:]
     @State private var surface: GlassSurface = .composer
 
+    private var liquidAvailable: Bool {
+        if #available(iOS 26.0, *) { return true }
+        return false
+    }
+
     /// 模糊只给五档（关 / 很轻 / 轻 / 中 / 重），系统毛玻璃就这么几层厚度。
     private func blurPicker(_ value: Binding<Double>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -145,6 +150,16 @@ struct GlassSettings: View {
             }
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
+
+            Section {
+                Toggle("Liquid Glass", isOn: $appearance.liquidGlass)
+                    .tint(Theme.send)
+                    .disabled(!liquidAvailable)
+            } footer: {
+                Text(liquidAvailable
+                     ? "用 iOS 26 系统的液态玻璃：气泡、输入框、按钮、侧边栏和弹窗都会跟着光线流动。关掉就回到磨砂玻璃。下面的颜色、不透明度和模糊档位两种都管用。"
+                     : "液态玻璃要 iOS 26 才有，这台手机上用的是磨砂玻璃。")
+            }
 
             Section {
                 preview

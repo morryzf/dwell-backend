@@ -276,8 +276,7 @@ struct ChatView: View {
                     .fixedSize(horizontal: true, vertical: false)
                     .padding(.horizontal, 11)
                     .frame(height: 34)
-                    .background(Capsule().fill(Theme.roundButton))
-                    .glassRim(Capsule())
+                    .buttonGlass(Capsule())
                     .shadow(color: Theme.composerShadow, radius: 9, y: 6)
             }
             .accessibilityLabel("切换模型")
@@ -367,7 +366,7 @@ struct ChatView: View {
             .font(.system(size: size, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: 38, height: 38)
-            .background(Circle().fill(Theme.send))
+            .buttonGlass(Circle(), tint: Theme.send, fallback: Theme.send)
             .shadow(color: Theme.sendShadow, radius: 6, y: 5)
     }
 
@@ -729,10 +728,17 @@ struct Bubble: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background {
-                ZStack {
-                    // 跟网页的 backdrop-filter 一样按设置的半径模糊；调到 0 就不模糊。
-                    if style.blur > 0 { BackdropBlur(radius: style.blur).clipShape(shape) }
-                    shape.fill(style.backgroundColor)
+                if appearance.usesLiquidGlass, #available(iOS 26.0, *) {
+                    // Liquid Glass：气泡的底色当作玻璃的染色。
+                    LiquidPane(shape: shape, glass: LiquidGlass.make(
+                        tint: style.backgroundColor,
+                        clear: BlurLevel.of(style.blur).rawValue <= BlurLevel.faint.rawValue))
+                } else {
+                    ZStack {
+                        // 模糊按设置的档位；调到「关」就不模糊。
+                        if style.blur > 0 { BackdropBlur(radius: style.blur).clipShape(shape) }
+                        shape.fill(style.backgroundColor)
+                    }
                 }
             }
             .overlay(shape.stroke(style.borderColor, lineWidth: style.borderWidth))

@@ -75,10 +75,63 @@ struct GlassBackground<S: Shape>: View {
 
     var body: some View {
         let value = appearance.glass(surface, scheme == .dark ? "dark" : "light")
-        ZStack {
-            if value.blur > 0 { BackdropBlur(radius: value.blur).clipShape(shape) }
-            shape.fill(surface.tint.opacity(value.opacity / 100))
+        if appearance.usesLiquidGlass, #available(iOS 26.0, *) {
+            // Liquid Glass：模糊档位决定用清透的还是常规的那种玻璃，不透明度决定染多少底色。
+            LiquidPane(shape: shape,
+                       glass: LiquidGlass.make(tint: surface.tint.opacity(value.opacity / 100 * 0.7),
+                                               clear: BlurLevel.of(value.blur).rawValue <= BlurLevel.faint.rawValue))
+        } else {
+            ZStack {
+                if value.blur > 0 { BackdropBlur(radius: value.blur).clipShape(shape) }
+                shape.fill(surface.tint.opacity(value.opacity / 100))
+            }
         }
+    }
+}
+
+/// iOS 26 的 Liquid Glass。
+@available(iOS 26.0, *)
+enum LiquidGlass {
+    static func make(tint: Color? = nil, clear: Bool = false, interactive: Bool = false) -> Glass {
+        var glass: Glass = clear ? .clear : .regular
+        if let tint { glass = glass.tint(tint) }
+        if interactive { glass = glass.interactive() }
+        return glass
+    }
+}
+
+/// 只有玻璃、没有内容的一块：当背景用。
+@available(iOS 26.0, *)
+struct LiquidPane<S: Shape>: View {
+    let shape: S
+    let glass: Glass
+
+    var body: some View {
+        shape.fill(Color.clear).glassEffect(glass, in: shape)
+    }
+}
+
+/// 输入框那排按钮：Liquid Glass 开着时是会跟手发光的玻璃按钮，不然是原来的半透明圆 + 细边。
+struct ButtonGlass<S: InsettableShape>: ViewModifier {
+    let shape: S
+    var tint: Color? = nil
+    var fallback: Color = Theme.roundButton
+    @ObservedObject private var appearance = Appearance.shared
+
+    func body(content: Content) -> some View {
+        if appearance.usesLiquidGlass, #available(iOS 26.0, *) {
+            content.glassEffect(LiquidGlass.make(tint: tint, interactive: true), in: shape)
+        } else {
+            content
+                .background(shape.fill(fallback))
+                .glassRim(shape)
+        }
+    }
+}
+
+extension View {
+    func buttonGlass<S: InsettableShape>(_ shape: S, tint: Color? = nil, fallback: Color = Theme.roundButton) -> some View {
+        modifier(ButtonGlass(shape: shape, tint: tint, fallback: fallback))
     }
 }
 
