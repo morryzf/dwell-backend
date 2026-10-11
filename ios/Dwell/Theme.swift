@@ -66,6 +66,8 @@ extension Color {
 /// 网页的底：浅色是方格纸（14pt 的点 + 32pt 的粉格线），深色是稀一点的点阵加顶上一团粉光。
 struct PaperBackground: View {
     @Environment(\.colorScheme) private var scheme
+    /// 在玻璃弹窗里：只画格子和点，不铺底色，让后面的玻璃透出来。
+    @Environment(\.onGlass) private var onGlass
 
     var body: some View {
         Canvas { context, size in
@@ -75,7 +77,7 @@ struct PaperBackground: View {
                 drawLight(context, size)
             }
         }
-        .background(Theme.background)
+        .background(onGlass ? Color.clear : Theme.background)
         .ignoresSafeArea()
         .allowsHitTesting(false)
     }

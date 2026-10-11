@@ -45,7 +45,7 @@ struct ChatView: View {
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .overlay { drawer }
         .sheet(isPresented: $showSettings) {
-            SettingsView().environmentObject(store)
+            SettingsView().environmentObject(store).glassSheet()
         }
         .onChange(of: store.openPage) { _, name in
             guard let name, let target = NativePage(rawValue: name) else { return }
@@ -67,11 +67,12 @@ struct ChatView: View {
                 }
             }
             .environmentObject(store)
+            .glassSheet()
         }
         .sheet(isPresented: $showMemory, onDismiss: {
             Task { await store.refreshMemoryBadge() }
         }) {
-            MemoryView(chatID: store.chatID, chatTitle: headerTitle)
+            MemoryView(chatID: store.chatID, chatTitle: headerTitle).glassSheet()
         }
         .sheet(item: $editing) { message in
             EditMessageSheet(message: message) { text in
@@ -236,7 +237,7 @@ struct ChatView: View {
             .padding(.top, 10)
             .padding(.horizontal, 14)
             .padding(.bottom, 7)
-            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Theme.composer))
+            .background(GlassBackground(surface: .composer, shape: RoundedRectangle(cornerRadius: 22, style: .continuous)))
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.composerBorder, lineWidth: 1))
             .shadow(color: Theme.composerShadow, radius: 11, y: 8)
         }
@@ -729,8 +730,8 @@ struct Bubble: View {
             .padding(.vertical, 8)
             .background {
                 ZStack {
-                    // 网页是 backdrop-filter 模糊；这里用系统的毛玻璃材质，模糊调到 0 就不要它。
-                    if style.blur > 0 { shape.fill(.ultraThinMaterial) }
+                    // 跟网页的 backdrop-filter 一样按设置的半径模糊；调到 0 就不模糊。
+                    if style.blur > 0 { BackdropBlur(radius: style.blur).clipShape(shape) }
                     shape.fill(style.backgroundColor)
                 }
             }

@@ -51,12 +51,8 @@ struct Sidebar: View {
         .padding(.top, 16)
         .padding(.bottom, 14)
         .background {
-            UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28, style: .continuous)
-                        .fill(SidebarStyle.tint)
-                )
+            GlassBackground(surface: .drawer,
+                            shape: UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28, style: .continuous))
                 .overlay(
                     UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28, style: .continuous)
                         .stroke(SidebarStyle.edge, lineWidth: 1)

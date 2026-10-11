@@ -31,6 +31,16 @@ final class Appearance: ObservableObject {
 
     @Published private(set) var messageStyles: [String: [String: MessageStyle]] = [:]
 
+    // MARK: 界面玻璃（输入框、侧边栏、整页弹窗；见 Glass.swift）
+
+    @Published var interfaceGlass: [String: [String: GlassValue]] = [:] {
+        didSet {
+            if let data = try? JSONEncoder().encode(interfaceGlass) {
+                UserDefaults.standard.set(data, forKey: "dwell.interfaceGlass")
+            }
+        }
+    }
+
     private init() {
         theme = UserDefaults.standard.string(forKey: "dwell.theme") ?? "auto"
         for who in ["cloudy", "chatgpt"] {
@@ -44,6 +54,10 @@ final class Appearance: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: "dwell.messageStyle"),
            let saved = try? JSONDecoder().decode([String: [String: MessageStyle]].self, from: data) {
             messageStyles = saved
+        }
+        if let data = UserDefaults.standard.data(forKey: "dwell.interfaceGlass"),
+           let saved = try? JSONDecoder().decode([String: [String: GlassValue]].self, from: data) {
+            interfaceGlass = saved
         }
     }
 

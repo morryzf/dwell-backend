@@ -98,6 +98,16 @@ struct GlassSettings: View {
     @State private var role = "me"
     @State private var mode = "light"
     @State private var picking: [String: (color: Color, hex: String)] = [:]
+    @State private var surface: GlassSurface = .composer
+
+    private func glassBinding(_ key: WritableKeyPath<GlassValue, Double>) -> Binding<Double> {
+        Binding(get: { appearance.glass(surface, mode)[keyPath: key] },
+                set: { value in
+                    var glass = appearance.glass(surface, mode)
+                    glass[keyPath: key] = value
+                    appearance.setGlass(glass, surface, mode)
+                })
+    }
 
     private var style: Binding<MessageStyle> {
         Binding(get: { appearance.style(role, mode) },
@@ -107,7 +117,7 @@ struct GlassSettings: View {
     var body: some View {
         List {
             Section {
-                SheetIntro(title: "玻璃效果", subtitle: "调消息气泡的颜色、透明度、边框和圆角。只存在这台手机上。")
+                SheetIntro(title: "玻璃效果", subtitle: "调消息气泡的颜色、透明度、边框和圆角，还有输入框、侧边栏、整页弹窗有多透。只存在这台手机上。")
                 Picker("谁的消息", selection: $role) {
                     Text("Me").tag("me")
                     Text("Cloudy").tag("cloudy")
@@ -145,9 +155,22 @@ struct GlassSettings: View {
                 ColorPicker("文字颜色", selection: colorBinding(\.text), supportsOpacity: false)
             }
             Section {
-                Button("恢复这一套的默认值") { appearance.resetStyle(role: role, mode: mode) }
+                Button("恢复这一套气泡的默认值") { appearance.resetStyle(role: role, mode: mode) }
+            }
+
+            // 网页「玻璃效果」下半截：输入框、侧边栏、整页弹窗的透明度和模糊。
+            Section {
+                Picker("调哪里", selection: $surface) {
+                    ForEach(GlassSurface.allCases) { item in Text(item.label).tag(item) }
+                }
+                .pickerStyle(.segmented)
+                slider("不透明度", value: glassBinding(\.opacity), range: 0...100, unit: "%")
+                slider("模糊强度", value: glassBinding(\.blur), range: 0...40, unit: " px")
+                Button("恢复\(surface.label)的默认值") { appearance.resetGlass(surface, mode) }
+            } header: {
+                Text("界面")
             } footer: {
-                Text("模糊在 app 里用的是系统毛玻璃：大于 0 就开，等于 0 就关。")
+                Text("跟上面的「浅色 / 深色」走：现在调的是\(mode == "dark" ? "深色" : "浅色")模式下的\(surface.label)。")
             }
         }
         .modifier(SheetListStyle())
@@ -170,7 +193,7 @@ struct GlassSettings: View {
                 .padding(.vertical, 8)
                 .background {
                     ZStack {
-                        if s.blur > 0 { shape.fill(.ultraThinMaterial) }
+                        if s.blur > 0 { BackdropBlur(radius: s.blur).clipShape(shape) }
                         shape.fill(s.backgroundColor)
                     }
                 }
