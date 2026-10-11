@@ -243,17 +243,17 @@ struct Sidebar: View {
                     HStack(alignment: .top, spacing: 8) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(chat.name.isEmpty ? "没名字" : chat.name)
-                                .font(.system(size: 14.5, weight: .medium))
+                                .font(.system(size: 13.5, weight: .medium))
                                 .foregroundStyle(Theme.text)
                                 .lineLimit(1)
                             Text(chat.preview.isEmpty ? "还没说过话" : chat.preview)
-                                .font(.system(size: 11.5))
+                                .font(.system(size: 11))
                                 .foregroundStyle(Theme.dim)
                                 .lineLimit(1)
                         }
                         Spacer(minLength: 4)
                         Text(here ? "在这儿" : Self.ago(chat.last))
-                            .font(.system(size: 11))
+                            .font(.system(size: 10.5))
                             .foregroundStyle(Theme.dim)
                             .padding(.top, 1)
                     }

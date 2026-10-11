@@ -220,11 +220,17 @@ final class MemoryStore: ObservableObject {
         } catch { say(error); return false }
     }
 
+    /// 点了就先让卡片往右滑走（不等服务器），下面的卡顺势补上来，眼睛不会丢了位置；
+    /// 万一没删成，再把它放回原处。
     func discard(_ draft: MemoryCard) async {
+        guard let index = drafts.firstIndex(where: { $0.id == draft.id }) else { return }
+        _ = withAnimation(.easeIn(duration: 0.26)) { drafts.remove(at: index) }
         do {
             _ = try await api.request("DELETE", "\(base)/memory-card-drafts/\(draft.id)")
-            drafts.removeAll { $0.id == draft.id }
-        } catch { say(error) }
+        } catch {
+            withAnimation(.easeOut(duration: 0.2)) { drafts.insert(draft, at: min(index, drafts.count)) }
+            say(error)
+        }
     }
 
     func acceptAll() async {

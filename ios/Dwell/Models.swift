@@ -63,6 +63,8 @@ struct Message: Identifiable, Equatable {
     var tools: [String]
     /// 语音回复：画成语音条，文字默认收起。
     var voice: Bool
+    /// 这一轮用了多少 token（只记在一轮回复的最后一条上）。
+    var usage: MessageUsage
 
     init(json: [String: Any]) {
         id = json["id"] as? String ?? UUID().uuidString
@@ -80,6 +82,7 @@ struct Message: Identifiable, Equatable {
         thinking = (json["thinking"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         tools = (json["tools"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
         voice = json["voice"] as? Bool ?? false
+        usage = MessageUsage(json: json["usage"] as? [String: Any] ?? [:])
     }
 
     init(id: String, kind: Kind, text: String, images: [String] = [], at: Date = Date()) {
@@ -94,6 +97,7 @@ struct Message: Identifiable, Equatable {
         self.thinking = ""
         self.tools = []
         self.voice = false
+        self.usage = MessageUsage(json: [:])
     }
 
     var isLocal: Bool { id.hasPrefix("local-") }
@@ -102,10 +106,44 @@ struct Message: Identifiable, Equatable {
     var bubbles: [String] {
         // 只发了图时后端存的是这句占位，图本身已经画出来了，就不再重复。
         if !images.isEmpty && text == "（发来了一张图片）" { return [] }
-        let parts = segments.isEmpty ? [text] : segments
+        // 我的消息：换一行就是一个新气泡（跟发消息时一句一句按回车一样）。
+        let parts = kind == .me ? text.components(separatedBy: "\n") : (segments.isEmpty ? [text] : segments)
         return parts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
 
     /// 什么都没有的空占位（比如回复还没开始写的那条），不画。
     var isEmpty: Bool { bubbles.isEmpty && images.isEmpty }
+}
+
+/// 网页气泡右下角那行「23,726 tokens」，点开是明细。
+struct MessageUsage: Equatable {
+    var input = 0
+    var contextInput = 0
+    var output = 0
+    var total = 0
+    var cached = 0
+    var cacheWrite = 0
+    var tokensPerSecond = 0.0
+    var durationMS = 0
+    var cacheCheckpoint = false
+
+    init(json: [String: Any]) {
+        func int(_ key: String) -> Int { (json[key] as? NSNumber)?.intValue ?? 0 }
+        input = int("input_tokens")
+        contextInput = int("context_input_tokens")
+        output = int("output_tokens")
+        total = int("total_tokens")
+        cached = int("cached_tokens")
+        cacheWrite = int("cache_write_tokens")
+        tokensPerSecond = (json["tokens_per_second"] as? NSNumber)?.doubleValue ?? 0
+        durationMS = int("duration_ms")
+        cacheCheckpoint = json["cache_checkpoint"] as? Bool ?? false
+    }
+
+    /// 跟网页一样：上下文（没缓存的 + 读缓存 + 写缓存）加上输出。
+    var shown: Int {
+        let context = contextInput > 0 ? contextInput : input + cached + cacheWrite
+        let sum = context + output
+        return sum > 0 ? sum : total
+    }
 }
