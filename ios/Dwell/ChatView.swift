@@ -30,6 +30,9 @@ struct ChatView: View {
     @State private var actionsFor: String?
     @State private var versionsFor: Message?
     @State private var showSearch = false
+    /// 多选删除：nil 是没在选；一个集合就是正在选、已经勾了哪些。
+    @State private var selection: Set<String>?
+    @State private var confirmBulkDelete = false
     /// 最底下那条看得见吗。看不见（往上翻了）就在输入框上面放一颗回到底部的箭头。
     @State private var atBottom = true
     @State private var deleting: Message?
@@ -166,17 +169,37 @@ struct ChatView: View {
                         }
                         // 同一个人连着说：气泡之间 6；换人说话：空 22，一眼分得出谁是谁。
                         let sameSpeaker = index > 0 && store.messages[index - 1].kind == message.kind
-                        MessageRow(message: message,
-                                   actionsOpen: actionsFor == message.id,
-                                   onToggleActions: {
-                                       withAnimation(.easeOut(duration: 0.18)) {
-                                           actionsFor = actionsFor == message.id ? nil : message.id
-                                       }
-                                   },
-                                   onEdit: { editing = $0 },
-                                   onDelete: { deleting = $0 },
-                                   onVersions: { versionsFor = $0 })
-                            .padding(.top, newDay || index == 0 ? 0 : (sameSpeaker ? 6 : 22))
+                        HStack(alignment: .center, spacing: 10) {
+                            // 多选模式：每条前面一个小圆圈，点消息就是勾选。
+                            if let selection, message.kind != .system, !message.isLocal {
+                                Image(systemName: selection.contains(message.id) ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(selection.contains(message.id) ? Theme.accent : Theme.dim)
+                                    .onTapGesture { toggleSelected(message.id) }
+                                    .transition(.move(edge: .leading).combined(with: .opacity))
+                            }
+                            MessageRow(message: message,
+                                       actionsOpen: selection == nil && actionsFor == message.id,
+                                       onToggleActions: {
+                                           if selection != nil {
+                                               toggleSelected(message.id)
+                                           } else {
+                                               withAnimation(.easeOut(duration: 0.18)) {
+                                                   actionsFor = actionsFor == message.id ? nil : message.id
+                                               }
+                                           }
+                                       },
+                                       onEdit: { editing = $0 },
+                                       onDelete: { deleting = $0 },
+                                       onVersions: { versionsFor = $0 },
+                                       onSelect: {
+                                           withAnimation(.easeOut(duration: 0.2)) {
+                                               actionsFor = nil
+                                               selection = [message.id]
+                                           }
+                                       })
+                        }
+                        .padding(.top, newDay || index == 0 ? 0 : (sameSpeaker ? 6 : 22))
                     }
                     Color.clear.frame(height: 16)
                     if !store.streamingThinking.isEmpty {
@@ -217,8 +240,13 @@ struct ChatView: View {
             // 只在最底下多了新消息时才滚到底；往上翻出更早的消息时不能把人拽回去。
             .onChange(of: store.messages.last?.id) { _, _ in scrollToBottom(proxy) }
             .onChange(of: store.streamingText) { _, _ in scrollToBottom(proxy, animated: false) }
+            // 点输入框：原来就在最底下的，等键盘升上来再贴底；正往上翻着看的，就别动她的位置。
             .onChange(of: inputFocused) { _, focused in
-                if focused { scrollToBottom(proxy) }
+                guard focused, atBottom else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    scrollToBottom(proxy, animated: false)
+                }
             }
             // 搜索里点开的那句：滚到正中，闪一下就好。
             .onChange(of: store.jumpTarget) { _, target in
@@ -230,7 +258,7 @@ struct ChatView: View {
             .overlay(alignment: .bottom) {
                 if !atBottom {
                     Button {
-                        withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+                        scrollToBottom(proxy)
                     } label: {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 15, weight: .semibold))
@@ -246,7 +274,9 @@ struct ChatView: View {
                 }
             }
             .animation(.easeOut(duration: 0.2), value: atBottom)
-            .safeAreaInset(edge: .bottom, spacing: 0) { inputBar }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if selection != nil { selectionBar } else { inputBar }
+            }
         }
     }
 
@@ -318,10 +348,11 @@ struct ChatView: View {
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .padding(.bottom, 2)
-        // 输入框下面那条：越往下越糊，聊天记录从这儿渐渐隐进去，不是一刀切开。
-        .background(alignment: .bottom) {
+        // 输入框四周到屏幕底：越往下越糊，聊天记录从这儿渐渐隐进去，不是一刀切开。
+        // 从输入框上沿再往上多铺 24，渐变才看得见（下半截被输入框自己挡着）。
+        .background {
             FadingBlur(fadeTo: .bottom)
-                .frame(height: 70)
+                .padding(.top, -24)
                 .ignoresSafeArea(edges: .bottom)
         }
     }
@@ -663,10 +694,61 @@ struct ChatView: View {
         .accessibilityLabel("更多")
     }
 
+    private func toggleSelected(_ id: String) {
+        guard var set = selection else { return }
+        if set.contains(id) { set.remove(id) } else { set.insert(id) }
+        selection = set
+    }
+
+    /// 多选时输入框换成这一条：取消、已选几条、删除。
+    private var selectionBar: some View {
+        let count = selection?.count ?? 0
+        return HStack {
+            Button("取消") {
+                withAnimation(.easeOut(duration: 0.2)) { selection = nil }
+            }
+            .foregroundStyle(Theme.text)
+            Spacer()
+            Text(count == 0 ? "点消息来选" : "已选 \(count) 条")
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.dim)
+            Spacer()
+            Button("删除") { confirmBulkDelete = true }
+                .fontWeight(.semibold)
+                .foregroundStyle(count == 0 ? Theme.dim : MemoryStyle.danger)
+                .disabled(count == 0)
+        }
+        .font(.system(size: 16))
+        .padding(.horizontal, 22)
+        .frame(height: 56)
+        .background(GlassBackground(surface: .composer, shape: RoundedRectangle(cornerRadius: 22, style: .continuous)))
+        .padding(.horizontal, 12)
+        .padding(.bottom, 6)
+        .confirmationDialog("删除这 \(count) 条消息？", isPresented: $confirmBulkDelete, titleVisibility: .visible) {
+            Button("删除", role: .destructive) {
+                let ids = Array(selection ?? [])
+                Task {
+                    await store.bulkDelete(ids)
+                    withAnimation(.easeOut(duration: 0.2)) { selection = nil }
+                }
+            }
+        } message: {
+            Text("删了之后的聊天不会再读到它们，也找不回来。")
+        }
+    }
+
+    /// 聊天记录是懒加载的，滚过去的路上上面的气泡才量出真高度，第一下常常差一截；
+    /// 所以落地后再补两下（不带动画），保证真的到最底。
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
         if animated {
             withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
         } else {
+            proxy.scrollTo(bottomID, anchor: .bottom)
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            proxy.scrollTo(bottomID, anchor: .bottom)
+            try? await Task.sleep(nanoseconds: 350_000_000)
             proxy.scrollTo(bottomID, anchor: .bottom)
         }
     }
@@ -695,6 +777,8 @@ struct MessageRow: View {
     let onEdit: (Message) -> Void
     let onDelete: (Message) -> Void
     let onVersions: (Message) -> Void
+    /// 「⋯」里点「选择消息」：进入多选，先把这条勾上。
+    let onSelect: () -> Void
 
     @State private var showUsage = false
 
@@ -802,6 +886,7 @@ struct MessageRow: View {
             }
             iconButton("trash", "删除消息") { onDelete(message) }
             Menu {
+                Button { onSelect() } label: { Label("选择消息", systemImage: "checkmark.circle") }
                 Button {
                     Task { await quote() }
                 } label: { Label("摘进最喜欢的话", systemImage: "quote.bubble") }
