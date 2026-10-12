@@ -4,6 +4,7 @@ import SwiftUI
 /// 四个页签（记忆卡 / 待确认 / 摘要 / 设置），下面是卡片。
 struct MemoryView: View {
     @StateObject private var store: MemoryStore
+    @State private var leaving: [String: Edge] = [:]
     @Environment(\.dismiss) private var dismiss
 
     let chatTitle: String
@@ -354,7 +355,10 @@ struct MemoryView: View {
                 } else {
                     MemoryCardView(card: draft, labels: store.labels, kind: .draft, currentChatID: store.chatID,
                                    target: draft.targetCardID.flatMap { store.draftTargets[$0] }) {
-                        Button("采用") { Task { _ = await store.accept(draft) } }
+                        Button("采用") {
+                            leaving[draft.id] = .leading
+                            Task { _ = await store.accept(draft) }
+                        }
                             .buttonStyle(MemoryButtonStyle(kind: .primary))
                         Button("先修改") { editingDraft = draft }
                             .buttonStyle(MemoryButtonStyle(kind: .normal))
@@ -362,14 +366,17 @@ struct MemoryView: View {
                             Button("拆开") { Task { await store.splitDraft(draft) } }
                                 .buttonStyle(MemoryButtonStyle(kind: .quiet))
                         }
-                        Button("忽略") { Task { await store.discard(draft) } }
+                        Button("忽略") {
+                            leaving[draft.id] = .trailing
+                            Task { await store.discard(draft) }
+                        }
                             .buttonStyle(MemoryButtonStyle(kind: .quiet))
                     } onSource: {
                         sourceOf = (draft, true)
                     }
-                    // 忽略：往右滑出去、淡掉。
+                    // 采用往左收、忽略往右扔，滑出去的同时淡掉。
                     .transition(.asymmetric(insertion: .opacity,
-                                            removal: .move(edge: .trailing).combined(with: .opacity)))
+                                            removal: .move(edge: leaving[draft.id] ?? .trailing).combined(with: .opacity)))
                 }
             }
         }

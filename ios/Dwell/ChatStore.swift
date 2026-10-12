@@ -184,6 +184,53 @@ final class ChatStore: ObservableObject {
         } catch { handle(error) }
     }
 
+    /// 一整轮回复：他一次说的话可能拆成了好几条消息（中途分条）。
+    /// 先按 tts_turn_id 认；老消息没有的话，就取前后挨着的那几条他的消息。
+    func turn(of message: Message) -> [Message] {
+        guard message.kind == .gu, let index = messages.firstIndex(where: { $0.id == message.id }) else { return [message] }
+        let id = message.usage.turnID
+        if !id.isEmpty {
+            let same = messages.filter { $0.kind == .gu && $0.usage.turnID == id && !$0.isLocal }
+            if same.count > 1 { return same }
+        }
+        var start = index, end = index
+        while start > 0, messages[start - 1].kind == .gu { start -= 1 }
+        while end + 1 < messages.count, messages[end + 1].kind == .gu { end += 1 }
+        return Array(messages[start...end]).filter { !$0.isLocal }
+    }
+
+    /// 改一整轮回复。编辑框里每条消息之间空一行；
+    /// 段数跟原来对得上就各改各的，对不上就把全文放进这一轮的最后一条（用量记在它身上），前面几条删掉。
+    func editTurn(_ parts: [Message], to content: String) async {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let last = parts.last else { return }
+        if parts.count == 1 { return await edit(last, to: text) }
+        let chunks = Self.paragraphs(text)
+        let counts = parts.map { Self.paragraphs($0.text).count }
+        do {
+            if chunks.count == counts.reduce(0, +) {
+                var cursor = 0
+                for (part, count) in zip(parts, counts) {
+                    let piece = chunks[cursor..<(cursor + count)].joined(separator: "\n\n")
+                    cursor += count
+                    if piece != part.text.trimmingCharacters(in: .whitespacesAndNewlines) {
+                        try await api.editMessage(part.id, content: piece)
+                    }
+                }
+            } else {
+                try await api.editMessage(last.id, content: text)
+                for part in parts.dropLast() { try await api.deleteMessage(part.id) }
+            }
+            try await reloadMessages()
+        } catch { handle(error) }
+    }
+
+    private static func paragraphs(_ text: String) -> [String] {
+        text.components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
     func delete(_ message: Message) async {
         do {
             try await api.deleteMessage(message.id)

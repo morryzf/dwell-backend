@@ -83,8 +83,10 @@ struct ChatView: View {
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $editing) { message in
-            EditMessageSheet(message: message) { text in
-                Task { await store.edit(message, to: text) }
+            // 点哪个气泡都打开这一整轮回复（我的消息就是这一整条）。
+            let parts = store.turn(of: message)
+            EditMessageSheet(message: message, parts: parts) { text in
+                Task { await store.editTurn(parts, to: text) }
             }
         }
         .confirmationDialog("删掉这条消息？", isPresented: Binding(
@@ -1132,10 +1134,12 @@ struct EditMessageSheet: View {
     @State private var text: String
     @FocusState private var focused: Bool
 
-    init(message: Message, onSave: @escaping (String) -> Void) {
+    /// parts：要一起改的那几条（他的一整轮回复会拆成好几条），中间空一行连起来。
+    init(message: Message, parts: [Message], onSave: @escaping (String) -> Void) {
         self.message = message
         self.onSave = onSave
-        _text = State(initialValue: message.text)
+        _text = State(initialValue: parts.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .joined(separator: "\n\n"))
     }
 
     var body: some View {
