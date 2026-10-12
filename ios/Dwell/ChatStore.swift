@@ -261,6 +261,16 @@ final class ChatStore: ObservableObject {
         if messages.contains(where: { $0.id == messageID }) { jumpTarget = messageID }
     }
 
+    /// 多选删除：跟网页一样一次发过去。
+    func bulkDelete(_ ids: [String]) async {
+        guard !ids.isEmpty else { return }
+        do {
+            _ = try await api.request("POST", "api/messages/bulk-delete", body: ["ids": ids])
+            let gone = Set(ids)
+            messages.removeAll { gone.contains($0.id) }
+        } catch { handle(error) }
+    }
+
     func delete(_ message: Message) async {
         do {
             try await api.deleteMessage(message.id)
