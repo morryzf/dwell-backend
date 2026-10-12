@@ -29,6 +29,9 @@ struct ChatView: View {
     /// 点了哪条消息，它下面那排按钮（编辑、朗读、重新生成、删除、更多、时间）就亮出来；一次只开一条。
     @State private var actionsFor: String?
     @State private var versionsFor: Message?
+    @State private var showSearch = false
+    /// 最底下那条看得见吗。看不见（往上翻了）就在输入框上面放一颗回到底部的箭头。
+    @State private var atBottom = true
     @State private var deleting: Message?
     @FocusState private var inputFocused: Bool
 
@@ -77,6 +80,9 @@ struct ChatView: View {
             Task { await store.refreshMemoryBadge() }
         }) {
             MemoryView(chatID: store.chatID, chatTitle: headerTitle).glassSheet()
+        }
+        .sheet(isPresented: $showSearch) {
+            SearchSheet().environmentObject(store)
         }
         .sheet(item: $versionsFor) { message in
             VersionsSheet(message: message)
@@ -186,6 +192,8 @@ struct ChatView: View {
                         TypingDots()
                     }
                     Color.clear.frame(height: 1).id(bottomID)
+                        .onAppear { atBottom = true }
+                        .onDisappear { atBottom = false }
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
@@ -212,6 +220,32 @@ struct ChatView: View {
             .onChange(of: inputFocused) { _, focused in
                 if focused { scrollToBottom(proxy) }
             }
+            // 搜索里点开的那句：滚到正中，闪一下就好。
+            .onChange(of: store.jumpTarget) { _, target in
+                guard let target else { return }
+                withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(target, anchor: .center) }
+                store.jumpTarget = nil
+            }
+            // 往上翻了：输入框上面一颗小箭头，点一下回到最新。
+            .overlay(alignment: .bottom) {
+                if !atBottom {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.text)
+                            .frame(width: 38, height: 38)
+                            .buttonGlass(Circle())
+                            .frostedOnly { $0.shadow(color: Theme.composerShadow, radius: 9, y: 6) }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 10)
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    .accessibilityLabel("回到最新的消息")
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: atBottom)
             .safeAreaInset(edge: .bottom, spacing: 0) { inputBar }
         }
     }
@@ -542,10 +576,14 @@ struct ChatView: View {
             Button {
                 withAnimation(.easeOut(duration: 0.24)) { drawerOpen = true }
             } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Theme.text)
-                    .frame(width: 40, height: 40)
+                // 两道横线，上长下短。
+                VStack(alignment: .leading, spacing: 5) {
+                    Capsule().frame(width: 19, height: 2.2)
+                    Capsule().frame(width: 12, height: 2.2)
+                }
+                .foregroundStyle(Theme.text)
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
             }
             .accessibilityLabel("打开侧边栏")
 
@@ -596,31 +634,14 @@ struct ChatView: View {
                 Label("按需记忆", systemImage: "sparkles")
             }
             Button {
+                showSearch = true
+            } label: {
+                Label("搜索", systemImage: "magnifyingglass")
+            }
+            Button {
                 Task { await store.newChat() }
             } label: {
                 Label("新窗口", systemImage: "square.and.pencil")
-            }
-            if let assistant = store.assistant, assistant.all.count > 1 {
-                Section("换一位") {
-                    ForEach(assistant.all) { item in
-                        Button {
-                            Task { await store.switchAssistant(item.id) }
-                        } label: {
-                            if item.id == assistant.id {
-                                Label(item.name, systemImage: "checkmark")
-                            } else {
-                                Text(item.name)
-                            }
-                        }
-                    }
-                }
-            }
-            Section {
-                Button(role: .destructive) {
-                    Task { await store.logout() }
-                } label: {
-                    Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
-                }
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -995,10 +1016,18 @@ struct Bubble: View {
             bottomTrailingRadius: tail && isMe ? tip : r,
             topTrailingRadius: r,
             style: .continuous)
-        Text(Self.render(text))
-            .font(Theme.bubbleFont)
-            .lineSpacing(Theme.bubbleLineSpacing)
-            .foregroundStyle(style.textColor)
+        let rendered = Self.render(text)
+        Group {
+            if Self.hasEmphasis(rendered) {
+                // 有斜体：中文字体没有斜体字形，SwiftUI 画不歪，换 UIKit 把那几个字倾斜着画。
+                SlantedText(text: rendered, color: UIColor(style.textColor))
+            } else {
+                Text(rendered)
+                    .font(Theme.bubbleFont)
+                    .lineSpacing(Theme.bubbleLineSpacing)
+                    .foregroundStyle(style.textColor)
+            }
+        }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background {
@@ -1026,11 +1055,38 @@ struct Bubble: View {
     }
 
     /// 只认行内 Markdown（加粗、斜体、代码、链接），换行原样保留。解析不了就当纯文本。
+    /// 标准 Markdown 对中文里的 *…* 很挑（挨着标点就不认），剩下没认出来的 *…* 再补认成斜体。
     static func render(_ text: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace
         )
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        var attr = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        let plain = String(attr.characters)
+        guard plain.contains("*"),
+              let regex = try? NSRegularExpression(pattern: "(?<!\\*)\\*([^*\\n]+?)\\*(?!\\*)") else { return attr }
+        let ns = plain as NSString
+        // 从后往前改，前面的位置不会被挪动。
+        for match in regex.matches(in: plain, range: NSRange(location: 0, length: ns.length)).reversed() {
+            guard let whole = Range(match.range, in: plain), let inner = Range(match.range(at: 1), in: plain) else { continue }
+            let start = plain.distance(from: plain.startIndex, to: whole.lowerBound)
+            let innerStart = plain.distance(from: plain.startIndex, to: inner.lowerBound)
+            let innerEnd = plain.distance(from: plain.startIndex, to: inner.upperBound)
+            let chars = attr.characters
+            let a = chars.index(chars.startIndex, offsetBy: innerStart)
+            let b = chars.index(chars.startIndex, offsetBy: innerEnd)
+            var intent = attr[a..<b].inlinePresentationIntent ?? []
+            intent.insert(.emphasized)
+            attr[a..<b].inlinePresentationIntent = intent
+            let closing = attr.characters.index(attr.characters.startIndex, offsetBy: innerEnd)
+            attr.characters.remove(at: closing)
+            let opening = attr.characters.index(attr.characters.startIndex, offsetBy: start)
+            attr.characters.remove(at: opening)
+        }
+        return attr
+    }
+
+    static func hasEmphasis(_ attr: AttributedString) -> Bool {
+        attr.runs.contains { $0.inlinePresentationIntent?.contains(.emphasized) == true }
     }
 }
 
@@ -1186,5 +1242,52 @@ struct TypingDots: View {
                 phase = .pi
             }
         }
+    }
+}
+
+/// 带斜体的气泡文字：用 UILabel 画，斜体那几段用 obliqueness 倾斜（中文也会歪）。
+/// 粗体、行内代码、链接照常；字号、行距跟普通气泡一样。
+struct SlantedText: UIViewRepresentable {
+    let text: AttributedString
+    let color: UIColor
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+
+    func updateUIView(_ label: UILabel, context: Context) {
+        label.attributedText = Self.convert(text, color: color)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView label: UILabel, context: Context) -> CGSize? {
+        let width = proposal.width ?? 10_000
+        let size = label.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: min(ceil(size.width), width), height: ceil(size.height))
+    }
+
+    static func convert(_ text: AttributedString, color: UIColor) -> NSAttributedString {
+        let size: CGFloat = 14.5
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = Theme.bubbleLineSpacing
+        let out = NSMutableAttributedString()
+        for run in text.runs {
+            let piece = String(text[run.range].characters)
+            let intent = run.inlinePresentationIntent ?? []
+            // 斜体只靠倾斜，不再换斜体字体：英文本来就有斜体，叠在一起会歪两次。
+            let font: UIFont = intent.contains(.code)
+                ? .monospacedSystemFont(ofSize: size - 1, weight: .regular)
+                : .systemFont(ofSize: size, weight: intent.contains(.stronglyEmphasized) ? .semibold : .regular)
+            var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .paragraphStyle: style]
+            if intent.contains(.emphasized) { attrs[.obliqueness] = 0.2 }
+            if run.link != nil {
+                attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
+            out.append(NSAttributedString(string: piece, attributes: attrs))
+        }
+        return out
     }
 }
