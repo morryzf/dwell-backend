@@ -505,6 +505,38 @@ CREATE TABLE IF NOT EXISTS sigillo_reviews (
 CREATE INDEX IF NOT EXISTS ix_sigillo_chat
 ON sigillo_reviews(chat_id, status, submitted_at DESC);
 
+-- 小荷包：Cloudy 在淘宝挑好、填好订单后开的审批单。Morry 在卡上点确认才算批准，
+-- 批准那一下从当月额度里预占；付款走支付宝 AI 付，还要她手机按指纹。读写都在 shop.py。
+-- 金额一律存「分」的整数。
+CREATE TABLE IF NOT EXISTS shop_requests (
+    id              TEXT PRIMARY KEY,
+    chat_id         TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    merchant        TEXT NOT NULL DEFAULT '',
+    goods           TEXT NOT NULL DEFAULT '',
+    sku             TEXT NOT NULL DEFAULT '',
+    quantity        INTEGER NOT NULL DEFAULT 1,
+    subtotal_minor  INTEGER NOT NULL DEFAULT 0,
+    shipping_minor  INTEGER NOT NULL DEFAULT 0,
+    discount_minor  INTEGER NOT NULL DEFAULT 0,
+    total_minor     INTEGER NOT NULL,
+    address_hint    TEXT NOT NULL DEFAULT '',
+    item_url        TEXT NOT NULL DEFAULT '',
+    note            TEXT NOT NULL DEFAULT '',
+    cashier_url     TEXT NOT NULL DEFAULT '',
+    created_at      INTEGER NOT NULL,
+    expires_at      INTEGER NOT NULL,
+    decided_at      INTEGER,
+    budget_month    TEXT NOT NULL DEFAULT '',
+    submitted_at    INTEGER,
+    paid_at         INTEGER,
+    provider_ref    TEXT NOT NULL DEFAULT '',
+    last_error      TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_shop_month ON shop_requests(budget_month, status);
+CREATE INDEX IF NOT EXISTS ix_shop_chat ON shop_requests(chat_id, created_at DESC);
+
 -- 专注的正计时（YPT 那种）：她自己建的科目，和每一段计时。
 -- ended 为空就是正在计时的那一段；同一时间最多一段。读写都在 focus_log.py。
 CREATE TABLE IF NOT EXISTS focus_subjects (
@@ -2955,6 +2987,15 @@ def sigillo_enabled(chat_id: str) -> bool:
 
 def sigillo_set(chat_id: str, enabled: bool) -> None:
     setting_set(f"sigillo_enabled:{chat_id}", "1" if enabled else "0")
+
+
+def shop_enabled(chat_id: str) -> bool:
+    """小荷包默认关着——只有明确打开的聊天才有购物工具。"""
+    return setting_get(f"shop_enabled:{chat_id}", "0") == "1"
+
+
+def shop_set(chat_id: str, enabled: bool) -> None:
+    setting_set(f"shop_enabled:{chat_id}", "1" if enabled else "0")
 
 
 REWRITE_RULE_MAX = 20
