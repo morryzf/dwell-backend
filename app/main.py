@@ -404,6 +404,8 @@ SHOP_TOOLS = [
         "description": (
             "看小荷包：这个月的额度、已花、预占中、还剩多少，以及最近几单。"
             "挑东西之前先看一眼，别挑超出剩余额度的。"
+            "浏览器里淘宝要登录、弹验证时：停下来，让 Morry 在她电脑上那个 Edge 窗口里弄好，"
+            "这一轮就收尾；等她回话再接着逛。不要反复刷新或截图干等。"
         ),
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     }},

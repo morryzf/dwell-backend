@@ -246,7 +246,7 @@ Claude Code 那边的 MCP 提供。把 Ombre 配进来：
 export MCP_SERVERS_JSON='{"ombre":{"type":"http","url":"https://……/mcp","headers":{"Authorization":"Bearer ……"}}}'
 ```
 
-配好之后 Dwell 侧这条聊天带上工具时会把 `max_turns` 放宽到 8，让 Claude Code
+配好之后 Dwell 侧这条聊天带上工具时会把 `max_turns` 放宽到 40（在淘宝挑一件东西一轮就要几十步），让 Claude Code
 有余量跑完工具再收尾。
 
 > Dwell 自己的工具（待办、日记、日历、sigillo、网页、聊天挂的外部 MCP）不用在这里配：

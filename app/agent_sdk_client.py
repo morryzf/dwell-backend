@@ -20,6 +20,9 @@ from .provider_secrets import SecretConfigurationError, decrypt_api_key
 
 BRIDGE_PATH = "/v1/chat/stream"
 
+# 带工具的一轮最多走几步（见 build_bridge_payload 里的说明）。
+TOOL_MAX_TURNS = 40
+
 # Claude Code 自己记着每个会话，续上就只用递新的那一句，不必每轮重抄整段历史。
 SESSION_SETTING_PREFIX = "agent_sdk_session:"
 
@@ -386,8 +389,10 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
         "system": system,
         "prompt": prompt,
         "include_thinking": bool(thinking_enabled),
-        # 没有工具时一轮就该收尾；留给 MCP 的余量在桥接侧按需要放大。
-        "max_turns": 8 if tools or mcp_servers else 1,
+        # 没有工具时一轮就该收尾。有工具时给足余量：在淘宝挑一件东西
+        # （搜索、翻页、选规格、进确认页）一轮就要几十步，8 步会半路撞上
+        # error_max_turns。平时聊天用不满，不会多花；单轮还有桥接的 15 分钟硬上限兜着。
+        "max_turns": TOOL_MAX_TURNS if tools or mcp_servers else 1,
         "_turns": turns,
         "_system": system,
         "_cards": cards_version,

@@ -127,7 +127,8 @@ class BridgePayloadTest(unittest.TestCase):
             [{"type": "function", "function": {"name": "mcp__ombre__breath"}}],
         )
 
-        self.assertEqual(payload["max_turns"], 8)
+        self.assertEqual(payload["max_turns"], agent_sdk_client.TOOL_MAX_TURNS)
+        self.assertGreaterEqual(payload["max_turns"], 30)
         self.assertNotIn("tools", payload)
 
     def test_disabled_thinking_still_carries_the_effort(self):

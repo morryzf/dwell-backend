@@ -33,12 +33,14 @@ Cloudy 碰不到 alipay-bot（桥接不给他终端），只有你批准过的�
 在 PowerShell 里运行（`<电脑IP>` 换成上面那个 10 开头的地址）：
 
 ```powershell
-$env:PLAYWRIGHT_MCP_PING_TIMEOUT_MS="1800000"; npx @playwright/mcp@latest --port 8931 --host <电脑IP> --browser msedge --user-data-dir "$env:USERPROFILE\dwell-edge"
+$env:PLAYWRIGHT_MCP_PING_TIMEOUT_MS="1800000"; npx @playwright/mcp@latest --port 8931 --host <电脑IP> --browser msedge --user-data-dir "$env:USERPROFILE\dwell-edge" --shared-browser-context
 ```
 
 - Windows 防火墙弹窗问要不要允许，点 **允许**。
 - 第一次会打开一个新的 Edge 窗口：在这个窗口里**手动登录一次淘宝**。登录状态存在 `dwell-edge` 文件夹里，下次不用再登。
 - Cloudy 逛的时候，这个 PowerShell 窗口和 Edge 窗口都要开着。关掉就逛不了。
+- `--shared-browser-context` 让浏览器在两次对话之间一直开着。不加的话，每轮对话结束浏览器就关掉，淘宝的登录也跟着丢，每次都要重新登。
+- 电脑上开着代理（Clash 之类）的话，要用**规则模式**，别用全局模式。全局模式会把淘宝也送出国，淘宝会直接断开连接。
 
 > 这个端口谁连上谁就能操作这个浏览器，所以只开在 ZeroTier 的地址上，不要改成 `0.0.0.0`。
 
