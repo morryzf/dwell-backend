@@ -318,6 +318,12 @@ struct ChatView: View {
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .padding(.bottom, 2)
+        // 输入框下面那条：越往下越糊，聊天记录从这儿渐渐隐进去，不是一刀切开。
+        .background(alignment: .bottom) {
+            FadingBlur(fadeTo: .bottom)
+                .frame(height: 70)
+                .ignoresSafeArea(edges: .bottom)
+        }
     }
 
     /// 网页那一排：＋、指令、工具、语音、模型胶囊，右边发送键。
@@ -604,11 +610,10 @@ struct ChatView: View {
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .padding(.bottom, 12)
+        // 顶栏不再是一整块实色：从上往下渐渐变透明的模糊，下面的聊天隐约透上来。
         .background(
-            Theme.header
-                .opacity(0.92)
-                .background(.ultraThinMaterial)
-                .shadow(color: Theme.headerShadow, radius: 10, y: 7)
+            FadingBlur(fadeTo: .top)
+                .padding(.bottom, -28)
                 .ignoresSafeArea(edges: .top)
         )
     }
@@ -743,7 +748,7 @@ struct MessageRow: View {
     private func bubbleList(isMe: Bool) -> some View {
         let parts = message.bubbles
         ForEach(Array(parts.enumerated()), id: \.offset) { index, text in
-            Bubble(text: text, isMe: isMe, tail: index == parts.count - 1)
+            Bubble(text: text, isMe: isMe, tail: true)
                 .contentShape(Rectangle())
                 .onTapGesture { onToggleActions() }
                 .contextMenu { menu(copying: text) }
@@ -1289,5 +1294,24 @@ struct SlantedText: UIViewRepresentable {
             out.append(NSAttributedString(string: piece, attributes: attrs))
         }
         return out
+    }
+}
+
+/// 渐进模糊：一边是磨砂，往另一边慢慢淡到全透明（iOS 那种顶栏、底栏的感觉）。
+/// fadeTo 是「最糊」的那一边。
+struct FadingBlur: View {
+    let fadeTo: VerticalEdge
+
+    var body: some View {
+        Rectangle()
+            .fill(.ultraThinMaterial)
+            .mask(
+                LinearGradient(stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black.opacity(0.85), location: 0.45),
+                    .init(color: .clear, location: 1),
+                ], startPoint: fadeTo == .top ? .top : .bottom, endPoint: fadeTo == .top ? .bottom : .top)
+            )
+            .allowsHitTesting(false)
     }
 }
