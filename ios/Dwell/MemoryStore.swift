@@ -215,6 +215,8 @@ final class MemoryStore: ObservableObject {
         do {
             _ = try await api.request("POST", "\(base)/memory-card-drafts/\(draft.id)/accept",
                                       body: edited?.payload ?? [:])
+            // 采用了：这张往左收进记忆卡里。
+            _ = withAnimation(.easeIn(duration: 0.26)) { drafts.removeAll { $0.id == draft.id } }
             await loadCards(reset: true)
             return true
         } catch { say(error); return false }

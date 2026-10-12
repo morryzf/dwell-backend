@@ -106,8 +106,10 @@ struct Message: Identifiable, Equatable {
     var bubbles: [String] {
         // 只发了图时后端存的是这句占位，图本身已经画出来了，就不再重复。
         if !images.isEmpty && text == "（发来了一张图片）" { return [] }
-        // 我的消息：换一行就是一个新气泡（跟发消息时一句一句按回车一样）。
-        let parts = kind == .me ? text.components(separatedBy: "\n") : (segments.isEmpty ? [text] : segments)
+        // 我的消息、他主动发来的消息：换一行就是一个新气泡（像一句一句按回车发的）。
+        // 只是画法不同，存着的原文不变；带代码块的不拆，免得把代码切碎。
+        let byLine = kind == .me || (fromHeartbeat && segments.isEmpty && !text.contains("```"))
+        let parts = byLine ? text.components(separatedBy: "\n") : (segments.isEmpty ? [text] : segments)
         return parts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
 
@@ -126,6 +128,8 @@ struct MessageUsage: Equatable {
     var tokensPerSecond = 0.0
     var durationMS = 0
     var cacheCheckpoint = false
+    /// 同一轮回复拆成好几条消息时，它们共用这个 id。
+    var turnID = ""
 
     init(json: [String: Any]) {
         func int(_ key: String) -> Int { (json[key] as? NSNumber)?.intValue ?? 0 }
@@ -138,6 +142,7 @@ struct MessageUsage: Equatable {
         tokensPerSecond = (json["tokens_per_second"] as? NSNumber)?.doubleValue ?? 0
         durationMS = int("duration_ms")
         cacheCheckpoint = json["cache_checkpoint"] as? Bool ?? false
+        turnID = json["tts_turn_id"] as? String ?? ""
     }
 
     /// 跟网页一样：上下文（没缓存的 + 读缓存 + 写缓存）加上输出。
