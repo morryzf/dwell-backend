@@ -180,8 +180,18 @@ final class ChatStore: ObservableObject {
         guard !text.isEmpty, text != message.text else { return }
         do {
             try await api.editMessage(message.id, content: text)
-            try await reloadMessages()
+            replaceText(message.id, with: text)
         } catch { handle(error) }
+    }
+
+    /// 改完只在原地换掉那一条的字，不整页重读——重读会把往上翻过的记录丢掉，屏幕就跳走了。
+    private func replaceText(_ id: String, with text: String) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        var message = messages[index]
+        message.text = text
+        // 原来是分条显示的，按空行重新切一次（跟后端一样的规则）。
+        if !message.segments.isEmpty { message.segments = Self.paragraphs(text) }
+        messages[index] = message
     }
 
     /// 一整轮回复：他一次说的话可能拆成了好几条消息（中途分条）。
@@ -215,13 +225,17 @@ final class ChatStore: ObservableObject {
                     cursor += count
                     if piece != part.text.trimmingCharacters(in: .whitespacesAndNewlines) {
                         try await api.editMessage(part.id, content: piece)
+                        replaceText(part.id, with: piece)
                     }
                 }
             } else {
                 try await api.editMessage(last.id, content: text)
-                for part in parts.dropLast() { try await api.deleteMessage(part.id) }
+                replaceText(last.id, with: text)
+                for part in parts.dropLast() {
+                    try await api.deleteMessage(part.id)
+                    messages.removeAll { $0.id == part.id }
+                }
             }
-            try await reloadMessages()
         } catch { handle(error) }
     }
 
@@ -229,6 +243,22 @@ final class ChatStore: ObservableObject {
         text.components(separatedBy: "\n\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    // MARK: - 搜索里点开一条
+
+    /// 聊天页看到它就滚过去，然后清掉。
+    @Published var jumpTarget: String?
+
+    /// 切到那一间，往上翻到那句为止（最多翻十几页），再让聊天页把它滚到正中。
+    func open(chat chatID: String, message messageID: String) async {
+        if chatID != self.chatID { await switchChat(chatID) }
+        var tries = 0
+        while !messages.contains(where: { $0.id == messageID }) && hasMore && tries < 15 {
+            await loadOlder()
+            tries += 1
+        }
+        if messages.contains(where: { $0.id == messageID }) { jumpTarget = messageID }
     }
 
     func delete(_ message: Message) async {
