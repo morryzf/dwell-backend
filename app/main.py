@@ -26,7 +26,7 @@ import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from . import auth, db, file_text, focus_log, home_mcp, provider_secrets, push_service, sigillo, study, subscription_usage
+from . import auth, db, file_text, focus_log, home_mcp, provider_secrets, push_service, shop, sigillo, study, subscription_usage
 from app.pet_assets import ensure_pet_assets
 from app.agent_sdk_client import MEMORY_CARD_KEY, PROMPT_TAIL_KEY
 from app.llm_client import prompt_cache_enabled, reply_language_ok, stream_chat
@@ -392,6 +392,124 @@ def sigillo_tool(chat_id: str, name: str, arguments: dict) -> str:
             }, ensure_ascii=False)
         raise ValueError(f"未知的 sigillo 工具：{name}")
     except sigillo.SigilloError as exc:
+        return json.dumps({"error": exc.message}, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)[:300]}, ensure_ascii=False)
+
+
+# 小荷包：在淘宝替她挑东西。逛和选规格用浏览器（Playwright MCP），钱只走这四把工具。
+SHOP_TOOLS = [
+    {"type": "function", "function": {
+        "name": "ShopWallet",
+        "description": (
+            "看小荷包：这个月的额度、已花、预占中、还剩多少，以及最近几单。"
+            "挑东西之前先看一眼，别挑超出剩余额度的。"
+        ),
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "ShopRequestApproval",
+        "description": (
+            "在淘宝/天猫的订单确认页填好规格、数量、地址之后，开一张审批单请 Morry 确认。"
+            "所有字段照订单确认页上写的抄，金额用元（如 \"39.90\"），"
+            "subtotal + shipping - discount 必须等于 total，对不上会被打回。"
+            "address_hint 只写脱敏后的地址（如「家 · 上海浦东 · 尾号1234」），不要写全。"
+            "卡片上商品细节默认折着（她想看再展开），总价和地址一直露着。"
+            "开单不等于付钱：她在卡上点确认之前什么都不会发生，也不许点页面上的付款按钮。"
+            "返回的 marker（[[shop:<id>]]）要单独一行原样放进你下一条消息正文里，"
+            "前端会渲染成审批卡；不要改写它，也不要用代码块包起来。"
+            "她点确认或拒绝后系统会唤醒你，那时再按提示去付。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "goods": {"type": "string", "description": "商品名（订单确认页上的）"},
+            "merchant": {"type": "string", "description": "店铺名"},
+            "sku": {"type": "string", "description": "规格，如「黑色 / 1 米」"},
+            "quantity": {"type": "integer", "minimum": 1, "maximum": shop.MAX_QUANTITY},
+            "subtotal": {"type": "string", "description": "商品小计，元"},
+            "shipping": {"type": "string", "description": "运费，元，包邮填 0"},
+            "discount": {"type": "string", "description": "所有优惠加起来，元，没有填 0"},
+            "total": {"type": "string", "description": "实付合计，元"},
+            "address_hint": {"type": "string", "description": "脱敏后的收货地址"},
+            "item_url": {"type": "string", "description": "商品页地址（https 淘宝/天猫）"},
+            "note": {"type": "string", "description": f"可选，为什么挑这个，≤{shop.MAX_NOTE}字；她展开才看得到"},
+        }, "required": ["goods", "subtotal", "total", "address_hint"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "ShopPay",
+        "description": (
+            "Morry 确认之后才能用。点「提交订单/立即支付」后等页面跳到支付宝最终收银台"
+            "（https://…alipay.com/…/cashiermain.htm?orderId=…，中间的 trust_login.do 不算），"
+            "把那个完整地址交过来。后端会交给支付宝 AI 付，她手机上会弹出来让她按指纹。"
+            "每张单只能交一次；交过之后用 ShopPaymentStatus 查，别再交。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "id": {"type": "string", "description": "审批单 id（sp_…）"},
+            "cashier_url": {"type": "string", "description": "支付宝最终收银台的完整地址"},
+        }, "required": ["id", "cashier_url"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "ShopPaymentStatus",
+        "description": (
+            "问支付宝这单付没付。她说按完指纹了再查；支付宝明说成功才算花掉，"
+            "还在等就告诉她，不要自己猜成功。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "id": {"type": "string", "description": "审批单 id（sp_…）"},
+        }, "required": ["id"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "ShopCancel",
+        "description": "撤掉一张还没交给支付宝的单（挑错了、页面变了、价格变了都用它，再重开一张）。",
+        "parameters": {"type": "object", "properties": {
+            "id": {"type": "string", "description": "审批单 id（sp_…）"},
+        }, "required": ["id"], "additionalProperties": False},
+    }},
+]
+
+
+def _shop_brief(request: dict) -> dict:
+    return {key: request.get(key) for key in (
+        "id", "status", "goods", "merchant", "sku", "quantity", "total", "last_error",
+    )}
+
+
+async def shop_tool(chat_id: str, name: str, arguments: dict) -> str:
+    """小荷包工具的处理器。出错返回 {"error": 人话}，模型看得懂就能自己改对。"""
+    try:
+        if name == "ShopWallet":
+            return json.dumps({
+                "wallet": shop.wallet(),
+                "recent": [_shop_brief(r) for r in shop.recent(5)],
+            }, ensure_ascii=False)
+        if name == "ShopRequestApproval":
+            request = shop.create_request(chat_id, arguments)
+            return json.dumps({
+                "id": request["id"],
+                "marker": f"[[shop:{request['id']}]]",
+                "total": request["total"],
+                "expires_in_minutes": shop.APPROVAL_TTL // 60,
+                "usage": "把 marker 单独一行原样放进你下一条消息正文，前端会渲染成审批卡",
+            }, ensure_ascii=False)
+        if name == "ShopPay":
+            result = await shop.submit_payment(
+                str(arguments.get("id") or ""), str(arguments.get("cashier_url") or "")
+            )
+            return json.dumps({
+                "ok": True, "request": _shop_brief(result["request"]),
+                "alipay_output": result["output"],
+                "next": "已交给支付宝 AI 付。告诉 Morry 去手机上确认，她按完再用 ShopPaymentStatus 查",
+            }, ensure_ascii=False)
+        if name == "ShopPaymentStatus":
+            result = await shop.query_payment(str(arguments.get("id") or ""))
+            return json.dumps({
+                "request": _shop_brief(result["request"]),
+                "alipay_output": result["output"],
+            }, ensure_ascii=False)
+        if name == "ShopCancel":
+            request = shop.cancel(str(arguments.get("id") or ""))
+            return json.dumps({"ok": True, "request": _shop_brief(request)}, ensure_ascii=False)
+        raise ValueError(f"未知的小荷包工具：{name}")
+    except shop.ShopError as exc:
         return json.dumps({"error": exc.message}, ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"error": str(exc)[:300]}, ensure_ascii=False)
@@ -1524,6 +1642,10 @@ async def _chat_tools(chat_id: str, list_tools=None) -> tuple[list[dict], dict[s
         tools.extend(SIGILLO_TOOLS)
         for tool in SIGILLO_TOOLS:
             tool_map[tool["function"]["name"]] = "builtin:sigillo"
+    if db.shop_enabled(chat_id):
+        tools.extend(SHOP_TOOLS)
+        for tool in SHOP_TOOLS:
+            tool_map[tool["function"]["name"]] = "builtin:shop"
     for server in db.chat_mcp_servers(chat_id):
         try:
             server_tools = await list_tools(server)
@@ -1556,6 +1678,8 @@ async def _run_chat_tool(chat_id: str, name: str, server: object,
             return home_tool(name, arguments, db.chat_assistant(chat_id)), False
         if server == "builtin:sigillo":
             return sigillo_tool(chat_id, name, arguments), False
+        if server == "builtin:shop":
+            return await shop_tool(chat_id, name, arguments), False
         if not server:
             raise ValueError("模型请求了未启用的 MCP 工具")
         result = await mcp_call_tool(server, name.split("__", 2)[-1], arguments)
@@ -1765,6 +1889,9 @@ def _heartbeat_tool_allowed(tool: dict, server: object) -> bool:
         return True
     if server == "builtin:home":
         return name in HEARTBEAT_READ_HOME_TOOLS
+    if server == "builtin:shop":
+        # 花钱的事只在她在场的对话里做，心跳一把都不给。
+        return False
     return bool(server) and _heartbeat_read_tool(tool)
 
 
@@ -5515,6 +5642,81 @@ async def _sigillo_wake(review: dict):
         _running_tasks[chat_id] = asyncio.create_task(_run_ai_reply(chat_id, reply["id"]))
     except Exception as exc:
         db.setting_set("sigillo_last_error", str(exc)[:500])
+
+
+# ---------------------------------------------------------------- 小荷包
+
+@app.get("/api/chats/{chat_id}/shop", dependencies=authed)
+async def shop_chat_get(chat_id: str):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    return {"ok": True, "enabled": db.shop_enabled(chat_id), "wallet": shop.wallet()}
+
+
+@app.put("/api/chats/{chat_id}/shop", dependencies=authed)
+async def shop_chat_put(chat_id: str, payload: dict = Body(...)):
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    if not isinstance(payload.get("enabled"), bool):
+        raise HTTPException(400, "enabled 必须是 true 或 false")
+    db.shop_set(chat_id, payload["enabled"])
+    return {"ok": True, "enabled": db.shop_enabled(chat_id)}
+
+
+@app.put("/api/shop/wallet", dependencies=authed)
+async def shop_wallet_put(payload: dict = Body(...)):
+    try:
+        shop.set_monthly_limit(shop.to_minor(payload.get("limit"), "limit"))
+    except shop.ShopError as exc:
+        raise HTTPException(400, exc.message) from exc
+    return {"ok": True, "wallet": shop.wallet()}
+
+
+@app.get("/api/shop/{request_id}", dependencies=authed)
+async def shop_get(request_id: str):
+    request = shop.get(request_id)
+    if not request:
+        raise HTTPException(404, "not found")
+    return {"ok": True, "request": request, "wallet": shop.wallet()}
+
+
+async def _shop_decide(request_id: str, approve: bool) -> dict:
+    try:
+        request = shop.decide(request_id, approve)
+    except shop.ShopError as exc:
+        if exc.code == "not_found":
+            raise HTTPException(404, "not found") from exc
+        if exc.code == "conflict":
+            raise HTTPException(409, exc.message) from exc
+        raise HTTPException(400, exc.message) from exc
+    asyncio.create_task(_shop_wake(request))
+    return {"ok": True, "request": request, "wallet": shop.wallet()}
+
+
+@app.post("/api/shop/{request_id}/approve", dependencies=authed)
+async def shop_approve(request_id: str):
+    """确认：预占额度，然后唤醒 Cloudy 去付。"""
+    return await _shop_decide(request_id, True)
+
+
+@app.post("/api/shop/{request_id}/reject", dependencies=authed)
+async def shop_reject(request_id: str):
+    return await _shop_decide(request_id, False)
+
+
+async def _shop_wake(request: dict):
+    """点完卡就唤醒：批准了去付，拒绝了也让他知道。全程不外抛，和 sigillo 一个做法。"""
+    try:
+        chat_id = request.get("chat_id")
+        if not chat_id:
+            return
+        db.message_add(chat_id, "system", shop.build_decision_note(request))
+        reply = db.message_add(chat_id, "assistant", "")
+        _emit(chat_id, {"type": "system", "subtype": "shop_decided",
+                        "message_id": reply["id"], "request_id": request.get("id")})
+        _running_tasks[chat_id] = asyncio.create_task(_run_ai_reply(chat_id, reply["id"]))
+    except Exception as exc:
+        db.setting_set("shop_last_error", str(exc)[:500])
 
 
 # ---------------------------------------------------------------- 聊天：发送 / 停止 / 长轮询
