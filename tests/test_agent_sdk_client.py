@@ -244,7 +244,7 @@ class PlanTurnTest(unittest.TestCase):
             "model": "sonnet",
             "sys": turns_digest([("system", self.system)]),
             "anchor": anchor,
-            "anchor_len": size,
+            "anchor_len": size, "reply": "在",
         }
 
     def _next(self, extra):
@@ -308,7 +308,7 @@ class PlanTurnTest(unittest.TestCase):
         state = {
             "sid": "sess-1", "model": "sonnet",
             "sys": turns_digest([("system", self.system)]),
-            "anchor": anchor, "anchor_len": size,
+            "anchor": anchor, "anchor_len": size, "reply": "在",
         }
         # 下一轮：又说了两句，最旧的两条被挤出窗口
         window_after = window_before[2:] + [("助手", "在"), ("Morry", "再说一句")]
@@ -327,6 +327,36 @@ class PlanTurnTest(unittest.TestCase):
 
         self.assertEqual(sid, "")
         self.assertEqual(outgoing, self.turns)
+
+    def test_a_proactive_message_the_session_never_saw_is_passed_on(self):
+        """主动消息是心跳在另一段会话里写的。早先续会话时它被当成「它自己说过的」跳过了，
+        他就读不到自己主动发过什么，被问起来只会说「我说过吗」。"""
+        turns = self._next([("助手", "在"), ("助手", "今天的任务：睡前捂一下肚子。"),
+                            ("Morry", "捂肚子干什么")])
+
+        sid, outgoing = plan_turn(self.state, "sonnet", self.system, turns)
+
+        self.assertEqual(sid, "sess-1")
+        self.assertEqual(outgoing, [("助手", "今天的任务：睡前捂一下肚子。"), ("Morry", "捂肚子干什么")])
+
+    def test_its_own_reply_split_into_several_messages_is_still_skipped(self):
+        state = {**self.state, "reply": "在的。\n\n刚刚在想你。"}
+        turns = self._next([("助手", "在的。"), ("助手", "刚刚在想你。"), ("Morry", "想我什么")])
+
+        sid, outgoing = plan_turn(state, "sonnet", self.system, turns)
+
+        self.assertEqual(sid, "sess-1")
+        self.assertEqual(outgoing, [("Morry", "想我什么")])
+
+    def test_state_that_does_not_know_its_own_reply_starts_over(self):
+        # 老版本的存档：分不清哪条是它说的，从头讲一遍，漏掉的主动消息也就补上了。
+        state = {key: value for key, value in self.state.items() if key != "reply"}
+        turns = self._next([("助手", "在"), ("Morry", "再说一句")])
+
+        sid, outgoing = plan_turn(state, "sonnet", self.system, turns)
+
+        self.assertEqual(sid, "")
+        self.assertEqual(outgoing, turns)
 
     def test_nothing_new_to_say_starts_from_scratch(self):
         # 重新生成：没有新的用户轮次，续上去会让它对着空气说话。
@@ -408,7 +438,7 @@ class BridgePayloadResumeTest(unittest.TestCase):
             "model": "sonnet",
             "sys": turns_digest([("system", "你是 Cloudy")]),
             "anchor": anchor,
-            "anchor_len": size,
+            "anchor_len": size, "reply": "在",
             "cards": agent_sdk_client.memory_pool_version(),
         }
 
@@ -502,7 +532,7 @@ def _resumable(seen_cards=None):
         "model": "sonnet",
         "sys": turns_digest([("system", "你是 Cloudy")]),
         "anchor": anchor,
-        "anchor_len": size,
+        "anchor_len": size, "reply": "在",
         "cards": agent_sdk_client.memory_pool_version(),
     }
     if seen_cards is not None:
@@ -612,7 +642,8 @@ class CompactionBookkeepingTest(unittest.TestCase):
             for row in bridge_rows:
                 yield row
 
-        def fake_save(chat_key, sid, model_id, system, turns, cards="", seen_cards=None):
+        def fake_save(chat_key, sid, model_id, system, turns, cards="", seen_cards=None, reply=""):
+            saved["reply"] = reply
             saved["sid"] = sid
             saved["seen_cards"] = seen_cards
 
@@ -636,6 +667,7 @@ class CompactionBookkeepingTest(unittest.TestCase):
         ])
         self.assertEqual(events, [{"type": "text", "text": "吃点清淡的"}])
         self.assertEqual(saved["seen_cards"], ["c1", "c2"])
+        self.assertEqual(saved["reply"], "吃点清淡的")
 
     def test_after_compaction_every_card_is_offered_again(self):
         events, saved = self._run_turn([
