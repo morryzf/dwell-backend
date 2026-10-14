@@ -218,7 +218,7 @@ struct BackgroundSettings: View {
                         .clipShape(Circle())
                 }
                 .frame(width: 46, height: 46)
-                .overlay(Circle().stroke(selected ? Theme.send : Theme.bubbleBorder, lineWidth: selected ? 2.5 : 1))
+                .overlay(Circle().stroke(selected ? Theme.send : Theme.dim.opacity(0.25), lineWidth: selected ? 2.5 : 1))
                 Text(preset.name)
                     .font(.system(size: 12))
                     .foregroundStyle(selected ? Theme.text : Theme.dim)
