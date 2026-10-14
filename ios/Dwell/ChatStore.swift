@@ -32,6 +32,8 @@ final class ChatStore: ObservableObject {
     @Published var openPage: String?
     @Published var autoplayVoiceID: String?
     @Published var messages: [Message] = []
+    /// 刚到的消息：id → 第几个出场。气泡按这个顺序一个接一个浮上来，出完场就从这里拿掉。
+    @Published private(set) var entering: [String: Int] = [:]
     /// 正在流进来、还没说完的那一段。
     @Published var streamingText = ""
     /// 正在流进来的思考过程。
@@ -112,10 +114,24 @@ final class ChatStore: ObservableObject {
             older = messages.filter { $0.seq > 0 && $0.seq < firstSeq }
         }
         if older.isEmpty { hasMore = page.more }
+        // 同一间聊天里多出来的（比如他主动发的），算刚到的；换聊天、第一次打开就不演了。
+        if loadedChatID == chat {
+            let known = Set(messages.map(\.id))
+            markEntering(fresh.filter { !known.contains($0.id) && $0.kind == .gu }.map(\.id))
+        }
         loadedChatID = chat
         messages = older + fresh
         streamingText = ""
         streamingThinking = ""
+    }
+
+    private func markEntering(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        for (order, id) in ids.enumerated() { entering[id] = order }
+        Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            for id in ids { entering[id] = nil }
+        }
     }
 
     func refreshMemoryBadge() async {
@@ -154,8 +170,9 @@ final class ChatStore: ObservableObject {
         // 先在本地放一条，echo 回来再换成真的。
         let shown = text.isEmpty && images.isEmpty
             ? "（发来了文件：" + files.map(\.name).joined(separator: "、") + "）" : text
-        messages.append(Message(id: "local-\(UUID().uuidString)", kind: .me, text: shown,
-                                images: images.map(\.previewDataURL)))
+        let localID = "local-\(UUID().uuidString)"
+        messages.append(Message(id: localID, kind: .me, text: shown, images: images.map(\.previewDataURL)))
+        markEntering([localID])
         isReplying = true
         status = ""
         do {
@@ -384,6 +401,8 @@ final class ChatStore: ObservableObject {
             let text = event["text"] as? String ?? streamingText
             let id = event["message_id"] as? String ?? UUID().uuidString
             if !text.isEmpty, !messages.contains(where: { $0.id == id }) {
+                // 一路流着打出来的那段已经在屏幕上了，换成正式消息时不再演一遍；没流出来就整段到的才浮上来。
+                if streamingText.isEmpty { markEntering([id]) }
                 messages.append(Message(id: id, kind: .gu, text: text))
             }
             streamingText = ""
