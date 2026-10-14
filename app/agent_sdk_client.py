@@ -255,19 +255,31 @@ def plan_turn(state: dict | None, model_id: str, system: str,
     size = int(state.get("anchor_len") or 0)
     if not anchor or not 0 < size <= len(turns):
         return "", turns
+    # 它上一轮自己说了什么。老版本没记这个，分不清锚点后面哪条是它说的、哪条是
+    # 别处（主动消息）插进来的，就从头讲一遍。
+    said = state.get("reply")
+    if not isinstance(said, str):
+        return "", turns
+    said = _squash(said)
 
     # 从后往前找锚点：越靠后越可能是它，重复的短句也就不容易认错。
     for end in range(len(turns), size - 1, -1):
         if turns_digest(turns[end - size:end]) != anchor:
             continue
         fresh = turns[end:]
-        # 它自己那条回复它本来就记着，别再抄回去。
-        while fresh and fresh[0][0] == SPEAKER_ASSISTANT:
+        # 它自己那条回复它本来就记着，别再抄回去。但只跳过真是它这段会话里说的：
+        # 主动消息是心跳在另一段会话里写的，这段会话从没见过，跳过去它就读不到自己发过什么。
+        while fresh and fresh[0][0] == SPEAKER_ASSISTANT and _squash(fresh[0][1]) in said:
             fresh = fresh[1:]
         if not fresh:
             return "", turns
         return sid, fresh
     return "", turns
+
+
+def _squash(text: str) -> str:
+    """去掉所有空白再比：回复存进 Dwell 时会按段拆成几条，空行和换行跟流出来的不完全一样。"""
+    return "".join(str(text or "").split())
 
 
 def load_state(chat_key: str) -> dict | None:
@@ -288,7 +300,7 @@ def load_state(chat_key: str) -> dict | None:
 
 def save_state(chat_key: str, sid: str, model_id: str, system: str,
                turns: list[tuple[str, str]], cards: str = "",
-               seen_cards: list[str] | None = None) -> None:
+               seen_cards: list[str] | None = None, reply: str = "") -> None:
     """记下 Claude Code 这次的会话 id，以及它已经听过哪些轮次。
 
     存的是「递出去时」最后几轮的指纹。下一轮按内容找回这个位置，它后面的
@@ -307,6 +319,7 @@ def save_state(chat_key: str, sid: str, model_id: str, system: str,
             "anchor_len": size,
             "cards": cards,
             "seen_cards": sorted(seen_cards or []),
+            "reply": reply,
         }, ensure_ascii=False))
     except Exception:
         pass
@@ -533,6 +546,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
         async with httpx.AsyncClient(timeout=timeout) as client:
             for attempt in range(2):
                 spoke = False
+                said: list[str] = []
                 failed = ""
                 sid = ""
                 compacted = False
@@ -548,6 +562,10 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                         continue
                     if event["type"] in {"text", "thinking"}:
                         spoke = True
+                    if event["type"] == "text":
+                        said.append(str(event.get("text") or ""))
+                    elif event["type"] == "reset":
+                        said = []
                     yield event
 
                 if failed and payload.get("resume") and not spoke and attempt == 0:
@@ -571,6 +589,7 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                         chat_key, sid, str(model_id or ""),
                         payload["_system"], payload["_turns"], payload.get("_cards", ""),
                         seen_cards=[] if compacted else payload.get("_seen_cards", []),
+                        reply="".join(said),
                     )
                 return
     except httpx.RequestError as exc:

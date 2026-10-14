@@ -32,7 +32,7 @@ class MemoryCardBlocksTest(unittest.TestCase):
         state = {
             "sid": "sess-1", "model": "sonnet",
             "sys": turns_digest([("system", "你是 Cloudy")]),
-            "anchor": anchor, "anchor_len": size,
+            "anchor": anchor, "anchor_len": size, "reply": "在",
             "cards": agent_sdk_client.memory_pool_version(),
             "seen_cards": ["c1"],
         }

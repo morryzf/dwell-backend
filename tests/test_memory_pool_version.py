@@ -148,7 +148,7 @@ class ResumeFollowsThePoolTest(unittest.TestCase):
         return {
             "sid": "sess-1", "model": "sonnet",
             "sys": turns_digest([("system", "你是 Cloudy")]),
-            "anchor": anchor, "anchor_len": size,
+            "anchor": anchor, "anchor_len": size, "reply": "在",
             "cards": db.memory_pool_version() if cards is None else cards,
         }
 
