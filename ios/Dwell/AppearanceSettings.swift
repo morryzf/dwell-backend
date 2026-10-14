@@ -177,6 +177,9 @@ struct BackgroundSettings: View {
                 }
                 .pickerStyle(.segmented)
             }
+            Toggle("摇一摇会晃", isOn: Binding(get: { glow.wrappedValue.shakes },
+                                               set: { glow.wrappedValue.shake = $0 }))
+                .tint(Theme.send)
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("浓淡")
@@ -186,7 +189,7 @@ struct BackgroundSettings: View {
                 Slider(value: glow.intensity, in: 10...100, step: 1).tint(Theme.send)
             }
         } footer: {
-            Text("手机开了「减弱动态效果」时光晕不动；app 在后台、或者上面盖着整页时也停着，不费电。")
+            Text("摇手机时光晕像罐子里的棉絮一样软软地晃两下。手机开了「减弱动态效果」时光晕不动；app 在后台、或者上面盖着整页时也停着，不费电。")
         }
 
         Section {

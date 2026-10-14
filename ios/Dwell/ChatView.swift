@@ -207,14 +207,19 @@ struct ChatView: View {
                         ThinkingView(text: store.streamingThinking, live: store.streamingText.isEmpty)
                             .padding(.bottom, 6)
                     }
-                    if !store.streamingText.isEmpty && store.voiceMode {
-                        // 语音回复还在说：先给一条「正在说」的语音条，说完再念。
-                        VoiceBar(messageID: "streaming", text: store.streamingText, pending: true)
-                    } else if !store.streamingText.isEmpty {
-                        Bubble(text: store.streamingText)
-                    } else if store.isReplying && store.streamingThinking.isEmpty {
-                        TypingDots()
+                    // 正在打的那一段一冒头，就从下面轻轻浮上来。
+                    VStack(alignment: .leading, spacing: 0) {
+                        if !store.streamingText.isEmpty && store.voiceMode {
+                            // 语音回复还在说：先给一条「正在说」的语音条，说完再念。
+                            VoiceBar(messageID: "streaming", text: store.streamingText, pending: true)
+                        } else if !store.streamingText.isEmpty {
+                            Bubble(text: store.streamingText)
+                                .transition(BubbleEntrance.insertion(isMe: false))
+                        } else if store.isReplying && store.streamingThinking.isEmpty {
+                            TypingDots()
+                        }
                     }
+                    .animation(.spring(duration: 0.4, bounce: 0.18), value: store.streamingText.isEmpty)
                     Color.clear.frame(height: 1).id(bottomID)
                         .onAppear { atBottom = true }
                         .onDisappear { atBottom = false }
@@ -834,8 +839,10 @@ struct MessageRow: View {
     @ViewBuilder
     private func bubbleList(isMe: Bool) -> some View {
         let parts = message.bubbles
+        let order = store.entering[message.id]
         ForEach(Array(parts.enumerated()), id: \.offset) { index, text in
             Bubble(text: text, isMe: isMe, tail: true)
+                .modifier(BubbleEntrance(delay: order.map { Double($0 * parts.count + index) * 0.16 }, isMe: isMe))
                 .contentShape(Rectangle())
                 .onTapGesture { onToggleActions() }
                 .contextMenu { menu(copying: text) }
@@ -1401,5 +1408,38 @@ struct FadingBlur: View {
                 ], startPoint: fadeTo == .top ? .top : .bottom, endPoint: fadeTo == .top ? .bottom : .top)
             )
             .allowsHitTesting(false)
+    }
+}
+
+/// 气泡出场：从下面一点点浮上来、由淡到实、微微放大，像一句一句说出来的。
+/// 只有刚到的消息才演（delay 不是 nil），翻历史、切聊天时的气泡直接就在。
+struct BubbleEntrance: ViewModifier {
+    let delay: Double?
+    let isMe: Bool
+    @State private var shown: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(delay: Double?, isMe: Bool) {
+        self.delay = delay
+        self.isMe = isMe
+        _shown = State(initialValue: delay == nil)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown || reduceMotion ? 0 : 12)
+            .scaleEffect(shown || reduceMotion ? 1 : 0.94, anchor: isMe ? .bottomTrailing : .bottomLeading)
+            .onAppear {
+                guard !shown, let delay else { return }
+                withAnimation(.spring(duration: 0.42, bounce: 0.18).delay(delay)) { shown = true }
+            }
+    }
+
+    static func insertion(isMe: Bool) -> AnyTransition {
+        .asymmetric(insertion: .opacity
+                        .combined(with: .offset(y: 12))
+                        .combined(with: .scale(scale: 0.94, anchor: isMe ? .bottomTrailing : .bottomLeading)),
+                    removal: .identity)
     }
 }
