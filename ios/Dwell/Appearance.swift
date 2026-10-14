@@ -26,6 +26,9 @@ final class Appearance: ObservableObject {
 
     @Published private(set) var backgrounds: [String: UIImage] = [:]
     @Published private(set) var overlays: [String: Double] = [:]
+    /// paper / image / glow；没设过就看有没有背景图。
+    @Published private(set) var backgroundKinds: [String: String] = [:]
+    @Published private(set) var glows: [String: Glow] = [:]
 
     // MARK: 消息玻璃
 
@@ -63,10 +66,15 @@ final class Appearance: ObservableObject {
             if let value = UserDefaults.standard.object(forKey: "dwell.backgroundOverlay.\(who)") as? Double {
                 overlays[who] = value
             }
+            backgroundKinds[who] = UserDefaults.standard.string(forKey: "dwell.backgroundKind.\(who)")
         }
         if let data = UserDefaults.standard.data(forKey: "dwell.messageStyle"),
            let saved = try? JSONDecoder().decode([String: [String: MessageStyle]].self, from: data) {
             messageStyles = saved
+        }
+        if let data = UserDefaults.standard.data(forKey: "dwell.glow"),
+           let saved = try? JSONDecoder().decode([String: Glow].self, from: data) {
+            glows = saved
         }
         if let data = UserDefaults.standard.data(forKey: "dwell.interfaceGlass"),
            let saved = try? JSONDecoder().decode([String: [String: GlassValue]].self, from: data) {
@@ -92,6 +100,7 @@ final class Appearance: ObservableObject {
         guard let image else {
             backgrounds[who] = nil
             try? FileManager.default.removeItem(at: url)
+            if backgroundKinds[who] == "image" { setBackgroundKind("paper", for: who) }
             return
         }
         let small = PendingImage.resize(image, maxSide: 1440)
@@ -99,6 +108,44 @@ final class Appearance: ObservableObject {
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
         backgrounds[who] = small
+        setBackgroundKind("image", for: who)
+    }
+
+    /// 现在铺的是哪种：选了图片却没有图，就还是方格纸。
+    func backgroundKind(_ who: String) -> String {
+        let hasImage = backgrounds[who] != nil
+        switch backgroundKinds[who] {
+        case "glow": return "glow"
+        case "paper": return "paper"
+        default: return hasImage ? "image" : "paper"
+        }
+    }
+
+    func setBackgroundKind(_ kind: String, for who: String) {
+        backgroundKinds[who] = kind
+        UserDefaults.standard.set(kind, forKey: "dwell.backgroundKind.\(who)")
+    }
+
+    // MARK: 光晕
+
+    func glow(_ who: String) -> Glow { glows[who] ?? .defaults }
+
+    func setGlow(_ glow: Glow, for who: String) {
+        var value = glow
+        value.intensity = min(100, max(0, value.intensity.rounded()))
+        glows[who] = value
+        saveGlows()
+    }
+
+    func resetGlow(for who: String) {
+        glows[who] = nil
+        saveGlows()
+    }
+
+    private func saveGlows() {
+        if let data = try? JSONEncoder().encode(glows) {
+            UserDefaults.standard.set(data, forKey: "dwell.glow")
+        }
     }
 
     private static func backgroundURL(_ who: String) -> URL {
@@ -173,13 +220,17 @@ extension Color {
     }
 }
 
-/// 聊天页的底：有自己的背景图就铺图，上面盖一层渐变遮罩（越往下越浓，跟网页一样）；没有就是方格纸。
+/// 聊天页的底：会动的光晕；或者自己的背景图，上面盖一层渐变遮罩（越往下越浓，跟网页一样）；或者方格纸。
 struct ChatBackground: View {
     let assistant: String
+    /// 上面盖着整页（设置、侧栏里的页面）时，光晕停住不画。
+    var paused = false
     @ObservedObject private var appearance = Appearance.shared
 
     var body: some View {
-        if let image = appearance.background(assistant) {
+        if appearance.backgroundKind(assistant) == "glow" {
+            GlowBackground(glow: appearance.glow(assistant), paused: paused)
+        } else if appearance.backgroundKind(assistant) == "image", let image = appearance.background(assistant) {
             let overlay = appearance.overlay(assistant) / 100
             GeometryReader { geo in
                 Image(uiImage: image)

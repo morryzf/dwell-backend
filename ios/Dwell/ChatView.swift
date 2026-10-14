@@ -48,7 +48,8 @@ struct ChatView: View {
                 // 网页上气泡最宽占这一行的 85%。
                 .environment(\.bubbleMaxWidth, (geo.size.width - 36) * 0.85)
         }
-        .background(ChatBackground(assistant: store.assistant?.id ?? "cloudy"))
+        .background(ChatBackground(assistant: store.assistant?.id ?? "cloudy",
+                                   paused: showSettings || page != nil || showCamera))
         .environment(\.assistantID, store.assistant?.id ?? "cloudy")
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) { header }
