@@ -575,6 +575,8 @@ struct ChatView: View {
                     })
                     .environmentObject(store)
                     .frame(width: width)
+                    // 侧栏的玻璃不接手指，空白处会点穿到后面的遮罩上把侧栏关掉；整块都算侧栏。
+                    .contentShape(Rectangle())
                     .offset(x: min(0, drawerDrag))
                     .gesture(
                         DragGesture(minimumDistance: 12)

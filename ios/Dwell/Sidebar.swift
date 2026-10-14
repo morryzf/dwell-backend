@@ -310,6 +310,8 @@ struct Sidebar: View {
                     .font(.system(size: 18))
                     .foregroundStyle(Theme.text)
                     .frame(width: 44, height: 44)
+                    // 图标外面一圈是透明的，不圈上就只有笔画那几像素能点，其余的点穿下去把侧栏关了。
+                    .contentShape(Circle())
             }
             .accessibilityLabel(scheme == .dark ? "切换日间模式" : "切换夜间模式")
         }
