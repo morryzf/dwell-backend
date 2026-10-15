@@ -83,6 +83,7 @@ struct ChatView: View {
                 case .heartbeat: HeartbeatPage()
                 case .focus: FocusPage()
                 case .library: LibraryPage()
+                case .journal: JournalPage()
                 }
             }
             .environmentObject(store)
@@ -960,11 +961,17 @@ struct MessageRow: View {
         .accessibilityLabel(label)
     }
 
+    /// 摘进最喜欢的话：点的是哪个气泡都一样，摘的是这一轮完整的回复（自己的话就是这一条）。
     private func quote() async {
-        let day = HomeClock.day(message.at)
+        let turn = message.kind == .gu ? store.turn(of: message) : [message]
+        let text = turn.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        guard !text.isEmpty else { return store.flash("这条没有可以摘的文字") }
+        let day = HomeClock.day(turn.first?.at ?? message.at)
         do {
-            _ = try await API.shared.request("POST", "api/quotes", body: ["quote": message.text, "date": day])
-            store.flash("收进最喜欢的话了")
+            _ = try await API.shared.request("POST", "api/quotes", body: ["quote": text, "date": day])
+            store.flash("收进 Journal 了，可以去那句下面写为什么喜欢")
         } catch {
             store.flash("没收进去，再试一次")
         }

@@ -139,15 +139,6 @@ extension ChatStore {
             return false
         }
     }
-
-    /// 输入框上方那行小字说一句，几秒后自己消失。
-    func flash(_ text: String) {
-        status = text
-        Task {
-            try? await Task.sleep(for: .seconds(3))
-            if status == text { status = "" }
-        }
-    }
 }
 
 /// 语音回复的播放器。全局只有一个声音在响。

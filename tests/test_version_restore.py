@@ -59,3 +59,27 @@ class VersionRestoreTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QuoteNoteTest(unittest.TestCase):
+    def setUp(self):
+        self.previous_path = db.DB_PATH
+        self.path = os.path.abspath(f"quote-note-test-{uuid.uuid4().hex}.sqlite3")
+        db.DB_PATH = self.path
+        db.init_db()
+
+    def tearDown(self):
+        db.DB_PATH = self.previous_path
+        for suffix in ("", "-wal", "-shm"):
+            if os.path.exists(self.path + suffix):
+                os.remove(self.path + suffix)
+
+    def test_a_whole_reply_fits_and_a_note_can_be_written_under_it(self):
+        reply = "第一段。\n\n" + "很长的一轮回复" * 200
+        item = db.quote_add(reply, date="2026-10-15")
+        self.assertEqual(item["quote"], reply.strip())
+
+        updated = db.quote_note_set(item["id"], "  因为他记得我说过的话  ")
+
+        self.assertEqual(updated["note"], "因为他记得我说过的话")
+        self.assertIsNone(db.quote_note_set("nope", "x"))

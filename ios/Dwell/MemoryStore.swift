@@ -288,6 +288,17 @@ final class MemoryStore: ObservableObject {
                 "overview": text, "accept_draft": acceptDraft,
             ]))
             toast = acceptDraft ? "摘要已采用" : "摘要已保存"
+            // 保存的回包里没有历史，再拿一次，刚替下来的那版才会出现在历史里。
+            if let json = try? await api.request("GET", "\(base)/long-context") { summary = MemorySummary(json: json) }
+        } catch { say(error) }
+    }
+
+    /// 换回历史里的一版；现在这版也会进历史，不会丢。
+    func restoreSummary(_ id: String) async {
+        do {
+            summary = MemorySummary(json: try await api.request("POST", "\(base)/long-context/restore",
+                                                                body: ["version_id": id]))
+            toast = "已换回这一版"
         } catch { say(error) }
     }
 

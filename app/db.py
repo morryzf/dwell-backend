@@ -861,7 +861,8 @@ def quote_add(quote: str, note: str = "", date: str = "") -> dict:
     row = {
         "id": new_id(),
         "date": date or today_str(),
-        "quote": quote.strip()[:500],
+        # 一整轮回复也摘得下。
+        "quote": quote.strip()[:8000],
         "note": note.strip()[:1000],
         "made": int(time.time()),
     }
@@ -880,6 +881,13 @@ def quote_list() -> list:
             "SELECT * FROM quotes ORDER BY date DESC, made DESC"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def quote_note_set(item_id: str, note: str) -> dict | None:
+    with conn() as cx:
+        cx.execute("UPDATE quotes SET note=? WHERE id=?", (note.strip()[:2000], item_id))
+        row = cx.execute("SELECT * FROM quotes WHERE id=?", (item_id,)).fetchone()
+    return dict(row) if row else None
 
 
 def quote_del(item_id: str) -> bool:
