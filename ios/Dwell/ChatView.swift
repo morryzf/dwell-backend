@@ -180,38 +180,38 @@ struct ChatView: View {
                         let sameSpeaker = index > 0 && store.messages[index - 1].kind == message.kind
                         // 他的消息排着队、一个气泡都还没露的，先不占位置。
                         if store.shown[message.id] != 0 {
-                        HStack(alignment: .center, spacing: 10) {
-                            // 多选模式：每条前面一个小圆圈，点消息就是勾选。
-                            if let selection, message.kind != .system, !message.isLocal {
-                                Image(systemName: selection.contains(message.id) ? "checkmark.circle.fill" : "circle")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(selection.contains(message.id) ? Theme.accent : Theme.dim)
-                                    .onTapGesture { toggleSelected(message.id) }
-                                    .transition(.move(edge: .leading).combined(with: .opacity))
-                            }
-                            MessageRow(message: message,
-                                       actionsOpen: selection == nil && actionsFor == message.id,
-                                       onToggleActions: {
-                                           if selection != nil {
-                                               toggleSelected(message.id)
-                                           } else {
-                                               withAnimation(.easeOut(duration: 0.18)) {
-                                                   actionsFor = actionsFor == message.id ? nil : message.id
+                            HStack(alignment: .center, spacing: 10) {
+                                // 多选模式：每条前面一个小圆圈，点消息就是勾选。
+                                if let selection, message.kind != .system, !message.isLocal {
+                                    Image(systemName: selection.contains(message.id) ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(selection.contains(message.id) ? Theme.accent : Theme.dim)
+                                        .onTapGesture { toggleSelected(message.id) }
+                                        .transition(.move(edge: .leading).combined(with: .opacity))
+                                }
+                                MessageRow(message: message,
+                                           actionsOpen: selection == nil && actionsFor == message.id,
+                                           onToggleActions: {
+                                               if selection != nil {
+                                                   toggleSelected(message.id)
+                                               } else {
+                                                   withAnimation(.easeOut(duration: 0.18)) {
+                                                       actionsFor = actionsFor == message.id ? nil : message.id
+                                                   }
                                                }
-                                           }
-                                       },
-                                       onEdit: { editing = $0 },
-                                       onDelete: { deleting = $0 },
-                                       onVersions: { versionsFor = $0 },
-                                       onSelect: {
-                                           withAnimation(.easeOut(duration: 0.2)) {
-                                               actionsFor = nil
-                                               selection = [message.id]
-                                           }
-                                       })
-                        }
-                        .padding(.top, newDay || index == 0 ? 0 : (sameSpeaker ? 6 : 22))
-                        .transition(BubbleEntrance.insertion(isMe: message.kind == .me))
+                                           },
+                                           onEdit: { editing = $0 },
+                                           onDelete: { deleting = $0 },
+                                           onVersions: { versionsFor = $0 },
+                                           onSelect: {
+                                               withAnimation(.easeOut(duration: 0.2)) {
+                                                   actionsFor = nil
+                                                   selection = [message.id]
+                                               }
+                                           })
+                            }
+                            .padding(.top, newDay || index == 0 ? 0 : (sameSpeaker ? 6 : 22))
+                            .transition(BubbleEntrance.insertion(isMe: message.kind == .me))
                         }
                     }
                     Color.clear.frame(height: 16)
