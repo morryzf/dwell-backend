@@ -167,6 +167,15 @@ final class VoicePlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var panelID: String?
     @Published private(set) var rate: Float = 1
     static let rates: [Float] = [1, 1.25, 1.5, 2, 0.75]
+    /// 这间聊天里已经生成过、存在服务器上的语音，按聊天顺序。上一条 / 下一条在这里面走。
+    @Published private(set) var queue: [(id: String, label: String)] = []
+    /// 播完一条接着放下一条缓存（网页的「连续播放」）；关着就是「播完暂停」。
+    @Published var continuous: Bool = UserDefaults.standard.bool(forKey: "dwell.ttsContinuous") {
+        didSet { UserDefaults.standard.set(continuous, forKey: "dwell.ttsContinuous") }
+    }
+
+    var queueIndex: Int? { queue.firstIndex { $0.id == panelID } }
+    var label: String { queue.first { $0.id == panelID }?.label ?? "" }
 
     private var player: AVAudioPlayer?
     private var ticker: Timer?
@@ -187,6 +196,22 @@ final class VoicePlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     func close() {
         stop()
         panelID = nil
+    }
+
+    /// 上一条 / 下一条：只在已经缓存的语音里走，不现生成。
+    func step(_ delta: Int) {
+        guard let index = queueIndex, queue.indices.contains(index + delta) else { return }
+        let id = queue[index + delta].id
+        panelID = id
+        Task { await play(id, cachedOnly: true) }
+    }
+
+    private func loadQueue() async {
+        guard let json = try? await API.shared.request("GET", "api/tts/cache/messages") else { return }
+        queue = (json["items"] as? [[String: Any]] ?? []).compactMap { item in
+            guard let id = item["message_id"] as? String, !id.isEmpty else { return nil }
+            return (id, item["label"] as? String ?? "")
+        }
     }
 
     func cycleRate() {
@@ -223,7 +248,7 @@ final class VoicePlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         Task { await play(id) }
     }
 
-    func play(_ id: String) async {
+    func play(_ id: String, cachedOnly: Bool = false) async {
         stop()
         currentID = id
         state = .loading
@@ -232,9 +257,13 @@ final class VoicePlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             if let hit = cache[id] {
                 data = hit
             } else {
-                data = try await API.shared.data("api/tts/messages/\(id)")
+                data = try await API.shared.data("api/tts/messages/\(id)",
+                                                 query: cachedOnly ? ["cached_only": "true"] : [:])
                 cache[id] = data
             }
+            guard currentID == id else { return }
+            // 刚生成的这条也进了缓存，顺手刷新一下上一条 / 下一条能走到哪。
+            if panelID == id { await loadQueue() }
             guard currentID == id else { return }
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
             try AVAudioSession.sharedInstance().setActive(true)
@@ -281,18 +310,25 @@ final class VoicePlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
+            let finished = self.currentID
             self.stopTicker()
             self.progress = 0
             self.elapsed = 0
             self.state = .idle
             self.currentID = nil
             self.player = nil
+            // 连续播放：播完的是面板上这条，就接着放下一条缓存。
+            if self.continuous, finished != nil, finished == self.panelID,
+               let index = self.queueIndex, self.queue.indices.contains(index + 1) {
+                self.step(1)
+            }
         }
     }
 }
 
-/// 点「朗读」后浮在输入框上面的播放器（照网页的 #ttsPlayer）：谁的声音、现在在干什么、
-/// 暂停继续、进度可拖、倍速、叉掉。播完不自己消失，想再听一遍点播放就行。
+/// 点「朗读」后浮在顶栏下面的播放器（照网页的 #ttsPlayer）：谁的声音、在读哪句、
+/// 上一条 / 暂停继续 / 下一条（在已缓存的语音里走）、进度可拖、倍速、「播完暂停 / 连续播放」、叉掉。
+/// 播完不自己消失，想再听一遍点播放就行。
 struct VoicePlayerPanel: View {
     @ObservedObject private var voice = VoicePlayer.shared
     let name: String
@@ -301,43 +337,49 @@ struct VoicePlayerPanel: View {
         if let id = voice.panelID {
             let state = voice.state(for: id)
             let duration = voice.durations[id] ?? 0
-            VStack(spacing: 6) {
-                HStack(spacing: 10) {
+            let index = voice.queueIndex
+            VStack(spacing: 4) {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(name).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Theme.text)
+                        Text(status(state)).font(.system(size: 11)).foregroundStyle(Theme.dim).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Button { voice.cycleRate() } label: {
+                        Text(rateLabel)
+                            .font(.system(size: 12, weight: .bold).monospacedDigit())
+                            .foregroundStyle(Theme.text)
+                            .frame(minWidth: 38, minHeight: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("播放速度")
+                    Button { withAnimation(.spring(duration: 0.3, bounce: 0.1)) { voice.close() } } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.dim)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("关闭播放器")
+                }
+                HStack(spacing: 26) {
+                    transport("backward.fill", "上一条已缓存语音", enabled: (index ?? 0) > 0) { voice.step(-1) }
                     Button { voice.toggle(id) } label: {
                         Group {
                             if state == .loading {
                                 ProgressView().tint(Theme.accent)
                             } else {
                                 Image(systemName: state == .playing ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 17))
+                                    .font(.system(size: 24))
                                     .foregroundStyle(Theme.accent)
                             }
                         }
-                        .frame(width: 36, height: 36)
-                        .contentShape(Circle())
+                        .frame(width: 44, height: 36)
+                        .contentShape(Rectangle())
                     }
                     .accessibilityLabel(state == .playing ? "暂停" : "播放")
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(name).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.text)
-                        Text(status(state)).font(.system(size: 11.5)).foregroundStyle(Theme.dim).lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                    Button { voice.cycleRate() } label: {
-                        Text(rateLabel)
-                            .font(.system(size: 12.5, weight: .bold).monospacedDigit())
-                            .foregroundStyle(Theme.text)
-                            .frame(minWidth: 40, minHeight: 32)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("播放速度")
-                    Button { voice.close() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Theme.dim)
-                            .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("关闭播放器")
+                    transport("forward.fill", "下一条已缓存语音",
+                              enabled: index.map { $0 < voice.queue.count - 1 } ?? false) { voice.step(1) }
                 }
                 HStack(spacing: 8) {
                     Text(clock(voice.currentID == id ? voice.elapsed : 0))
@@ -349,13 +391,39 @@ struct VoicePlayerPanel: View {
                 }
                 .font(.system(size: 10.5).monospacedDigit())
                 .foregroundStyle(Theme.dim)
+                HStack(spacing: 8) {
+                    Text(voice.queue.isEmpty ? "暂无缓存"
+                         : "已缓存 " + (index.map { "\($0 + 1) / " } ?? "") + "\(voice.queue.count)")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(Theme.dim)
+                    Spacer(minLength: 0)
+                    Picker("播放模式", selection: $voice.continuous) {
+                        Text("播完暂停").tag(false)
+                        Text("连续播放").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .controlSize(.mini)
+                    .fixedSize()
+                }
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(GlassBackground(surface: .composer, shape: RoundedRectangle(cornerRadius: 18, style: .continuous)))
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
+    }
+
+    private func transport(_ icon: String, _ label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundStyle(enabled ? Theme.text : Theme.dim.opacity(0.4))
+                .frame(width: 40, height: 36)
+                .contentShape(Rectangle())
+        }
+        .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 
     private var rateLabel: String {
@@ -366,8 +434,9 @@ struct VoicePlayerPanel: View {
     private func status(_ state: VoicePlayer.State) -> String {
         switch state {
         case .loading: return "正在生成或读取语音…"
-        case .playing: return "正在朗读这一条"
-        case .paused: return "已暂停"
+        case .playing, .paused:
+            let label = voice.label
+            return label.isEmpty ? (state == .playing ? "正在朗读完整回复" : "已暂停") : label
         case .error(let message): return "没能播放：" + message
         case .idle: return "播放完成"
         }

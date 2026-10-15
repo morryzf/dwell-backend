@@ -32,19 +32,30 @@ final class ChatStore: ObservableObject {
     @Published var openPage: String?
     @Published var autoplayVoiceID: String?
     @Published var messages: [Message] = []
-    /// 刚到的消息：id → 第几个出场。气泡按这个顺序一个接一个浮上来，出完场就从这里拿掉。
-    @Published private(set) var entering: [String: Entrance] = [:]
-
-    struct Entrance {
-        /// 第几条出场。
-        let order: Int
-        /// 前面几个气泡已经在打字的时候冒过了，不再演。
-        let skip: Int
-    }
+    /// 我刚发出去的那条：浮上来一下。
+    @Published private(set) var entering: Set<String> = []
 
     /// 正在打的这段里已经说完的几句（后面空了一行的）。像人发消息：凑够一个气泡才冒出来，
     /// 最后那句还在打，就先只给三个点。
     var streamParagraphs: [String] { Array(Self.paragraphs(streamingText).dropLast()) }
+
+    // MARK: 一个一个冒
+
+    /// 他的气泡一次只冒一个，两个之间至少隔这么久。回得快的时候几句一起到，也排着队一句一句出来。
+    static let revealGap: TimeInterval = 1.5
+    /// 他的消息还没冒完的：id → 已经露出几个气泡。不在这里的就是全露了。
+    @Published private(set) var shown: [String: Int] = [:]
+    /// 正在打的这段里已经露出的几句。
+    @Published private(set) var streamShown = 0
+    /// 每冒一个就加一，聊天页跟着滚到底。
+    @Published private(set) var revealTick = 0
+    private var revealTask: Task<Void, Never>?
+    private var lastReveal = Date.distantPast
+
+    /// 正在打的这段里露出来的那几句。
+    var streamVisible: [String] { Array(streamParagraphs.prefix(streamShown)) }
+    /// 还有气泡排着队没冒出来：三个点要一直在。
+    var revealing: Bool { !shown.isEmpty || streamShown < streamParagraphs.count }
     /// 正在流进来、还没说完的那一段。
     @Published var streamingText = ""
     /// 正在流进来的思考过程。
@@ -129,22 +140,75 @@ final class ChatStore: ObservableObject {
         // 同一间聊天里多出来的（比如他主动发的），算刚到的；换聊天、第一次打开就不演了。
         if loadedChatID == chat {
             let known = Set(messages.map(\.id))
-            markEntering(fresh.filter { !known.contains($0.id) && $0.kind == .gu }.map(\.id),
-                         skip: streamParagraphs.count)
+            hold(fresh.filter { !known.contains($0.id) && $0.kind == .gu }, carried: streamShown)
+        } else {
+            shown = [:]
         }
         loadedChatID = chat
         messages = older + fresh
+        let ids = Set(messages.map(\.id))
+        shown = shown.filter { ids.contains($0.key) }
         streamingText = ""
         streamingThinking = ""
+        streamShown = 0
+        pump()
     }
 
-    /// skip 只算在第一条上：那是刚才正在打的那段，前面几句已经冒过了。
-    private func markEntering(_ ids: [String], skip: Int = 0) {
-        guard !ids.isEmpty else { return }
-        for (order, id) in ids.enumerated() { entering[id] = Entrance(order: order, skip: order == 0 ? skip : 0) }
+    private func markEntering(_ id: String) {
+        entering.insert(id)
         Task {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
-            for id in ids { entering[id] = nil }
+            entering.remove(id)
+        }
+    }
+
+    /// 新到的他的消息先藏起来，排队冒。carried：第一条是刚才正在打的那段，打字时已经露出的几句接着露着。
+    private func hold(_ fresh: [Message], carried: Int) {
+        guard !voiceMode else { return }
+        for (index, message) in fresh.enumerated() where !message.voice {
+            let visible = index == 0 ? carried : 0
+            if visible < message.bubbles.count { shown[message.id] = visible }
+        }
+    }
+
+    /// 有排队的就一个一个放出来，每个之间隔 revealGap。
+    private func pump() {
+        guard revealTask == nil, revealing else { return }
+        revealTask = Task { [weak self] in
+            while let store = self, store.revealing, !Task.isCancelled {
+                let wait = store.lastReveal.addingTimeInterval(Self.revealGap).timeIntervalSinceNow
+                if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+                self?.revealOne()
+            }
+            self?.revealTask = nil
+        }
+    }
+
+    private func revealOne() {
+        withAnimation(.spring(duration: 0.42, bounce: 0.18)) {
+            // 先把已经存好的消息冒完，再轮到正在打的这段。
+            if let message = messages.first(where: { shown[$0.id] != nil }), let count = shown[message.id] {
+                shown[message.id] = count + 1 >= message.bubbles.count ? nil : count + 1
+            } else if streamShown < streamParagraphs.count {
+                streamShown += 1
+            } else {
+                return
+            }
+            lastReveal = Date()
+            revealTick += 1
+        }
+    }
+
+    /// 报错、提示这种一行字：过一会儿自己消失，不用等下一条消息才把它冲掉。
+    private var statusClear: Task<Void, Never>?
+
+    private func flash(_ text: String, for seconds: Double = 4) {
+        status = text
+        statusClear?.cancel()
+        statusClear = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled, self?.status == text else { return }
+            withAnimation(.easeOut(duration: 0.25)) { self?.status = "" }
         }
     }
 
@@ -186,7 +250,7 @@ final class ChatStore: ObservableObject {
             ? "（发来了文件：" + files.map(\.name).joined(separator: "、") + "）" : text
         let localID = "local-\(UUID().uuidString)"
         messages.append(Message(id: localID, kind: .me, text: shown, images: images.map(\.previewDataURL)))
-        markEntering([localID])
+        markEntering(localID)
         isReplying = true
         status = ""
         do {
@@ -421,6 +485,7 @@ final class ChatStore: ObservableObject {
             case "text_delta":
                 streamingText += delta?["text"] as? String ?? ""
                 status = ""
+                pump()
             case "thinking_delta":
                 streamingThinking += delta?["thinking"] as? String ?? ""
             default:
@@ -432,12 +497,15 @@ final class ChatStore: ObservableObject {
             let text = event["text"] as? String ?? streamingText
             let id = event["message_id"] as? String ?? UUID().uuidString
             if !text.isEmpty, !messages.contains(where: { $0.id == id }) {
-                // 打字时已经冒出来的那几句不再演，剩下的（最后那句）这会儿才浮上来。
-                markEntering([id], skip: streamParagraphs.count)
-                messages.append(Message(id: id, kind: .gu, text: text))
+                // 打字时已经冒出来的那几句接着露着，剩下的排队冒。
+                let message = Message(id: id, kind: .gu, text: text)
+                hold([message], carried: streamShown)
+                messages.append(message)
             }
             streamingText = ""
             streamingThinking = ""
+            streamShown = 0
+            pump()
 
         case "system" where (event["subtype"] as? String) == "voice_reply":
             autoplayVoiceID = event["message_id"] as? String
@@ -446,11 +514,13 @@ final class ChatStore: ObservableObject {
             let ids = Set((event["message_ids"] as? [String] ?? []) + [event["message_id"] as? String ?? ""])
             messages.removeAll { ids.contains($0.id) }
             streamingText = ""
+            streamShown = 0
             streamingThinking = ""
             isReplying = true
 
         case "assistant_reset":
             streamingText = ""
+            streamShown = 0
 
         case "tool_call":
             let tool = event["tool"] as? [String: Any]
@@ -459,7 +529,7 @@ final class ChatStore: ObservableObject {
 
         case "result":
             isReplying = false
-            status = (event["is_error"] as? Bool) == true ? "这次回复出错了" : ""
+            if (event["is_error"] as? Bool) == true { flash("这次回复出错了", for: 6) } else { status = "" }
             try? await reloadMessages()
 
         default:
@@ -473,6 +543,6 @@ final class ChatStore: ObservableObject {
             phase = .needsLogin
             return
         }
-        status = error.localizedDescription
+        flash(error.localizedDescription)
     }
 }
