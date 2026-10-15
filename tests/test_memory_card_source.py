@@ -79,6 +79,19 @@ class MemoryCardSourceTest(unittest.TestCase):
         self.assertIn("围巾", own)
         self.assertNotIn("我妈下周三生日", own)
 
+    def test_the_card_model_sees_the_chat_summary_as_reference(self):
+        db.chat_memory_save_overview(self.chat, "她最近在练游泳，每周去两次。")
+        sent = self._stage([])
+        summary, own = sent["user"].split("【这一段原文：从这里出卡】")
+        self.assertIn("【已有的长期摘要：只作参照，不要从这里出卡】", summary)
+        self.assertIn("她最近在练游泳，每周去两次。", summary)
+        self.assertIn("我妈下周三生日", own)
+
+    def test_no_summary_means_no_summary_section(self):
+        sent = self._stage([])
+        self.assertNotIn("已有的长期摘要", sent["user"])
+        self.assertTrue(sent["user"].startswith("【这一段原文：从这里出卡】"))
+
     def test_source_shows_the_cited_messages_with_context(self):
         self._stage([{**self.CARD, "evidence": [self.rowids[2]]}])
         draft = db.memory_card_draft_list(self.chat)[0]
