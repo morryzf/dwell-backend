@@ -208,18 +208,22 @@ struct ChatView: View {
                             .padding(.bottom, 6)
                     }
                     // 正在打的那一段一冒头，就从下面轻轻浮上来。
-                    VStack(alignment: .leading, spacing: 0) {
+                    // 像人发消息：一句说完（后面空了一行）才冒出一个气泡，还在打的那句只给三个点。
+                    VStack(alignment: .leading, spacing: 6) {
                         if !store.streamingText.isEmpty && store.voiceMode {
                             // 语音回复还在说：先给一条「正在说」的语音条，说完再念。
                             VoiceBar(messageID: "streaming", text: store.streamingText, pending: true)
-                        } else if !store.streamingText.isEmpty {
-                            Bubble(text: store.streamingText)
-                                .transition(BubbleEntrance.insertion(isMe: false))
-                        } else if store.isReplying && store.streamingThinking.isEmpty {
-                            TypingDots()
+                        } else {
+                            ForEach(Array(store.streamParagraphs.enumerated()), id: \.offset) { _, text in
+                                Bubble(text: text, tail: true)
+                                    .transition(BubbleEntrance.insertion(isMe: false))
+                            }
+                            if !store.streamingText.isEmpty || (store.isReplying && store.streamingThinking.isEmpty) {
+                                TypingDots()
+                            }
                         }
                     }
-                    .animation(.spring(duration: 0.4, bounce: 0.18), value: store.streamingText.isEmpty)
+                    .animation(.spring(duration: 0.4, bounce: 0.18), value: store.streamParagraphs.count)
                     Color.clear.frame(height: 1).id(bottomID)
                         .onAppear { atBottom = true }
                         .onDisappear { atBottom = false }
@@ -316,6 +320,7 @@ struct ChatView: View {
     /// 网页的 composer：一张浮在方格纸上的圆角卡，上面是输入框，下面一排圆按钮和粉色发送键。
     private var inputBar: some View {
         VStack(spacing: 6) {
+            VoicePlayerPanel(name: store.assistant?.name ?? "Cloudy")
             if !store.status.isEmpty {
                 Text(store.status)
                     .font(.system(size: 13))
@@ -839,10 +844,12 @@ struct MessageRow: View {
     @ViewBuilder
     private func bubbleList(isMe: Bool) -> some View {
         let parts = message.bubbles
-        let order = store.entering[message.id]
+        let entrance = store.entering[message.id]
         ForEach(Array(parts.enumerated()), id: \.offset) { index, text in
             Bubble(text: text, isMe: isMe, tail: true)
-                .modifier(BubbleEntrance(delay: order.map { Double($0 * parts.count + index) * 0.16 }, isMe: isMe))
+                .modifier(BubbleEntrance(delay: entrance.flatMap { e in
+                    index < e.skip ? nil : Double(e.order * parts.count + index - e.skip) * 0.16
+                }, isMe: isMe))
                 .contentShape(Rectangle())
                 .onTapGesture { onToggleActions() }
                 .contextMenu { menu(copying: text) }
@@ -887,7 +894,7 @@ struct MessageRow: View {
             if !isMe {
                 let playing = voice.currentID == message.id && voice.state != .idle
                 iconButton(playing ? "stop.fill" : "speaker.wave.2", playing ? "停止朗读" : "播放整轮回复") {
-                    voice.toggle(message.id)
+                    withAnimation(.spring(duration: 0.35, bounce: 0.15)) { voice.readAloud(message.id) }
                 }
                 iconButton("arrow.clockwise", "重新生成") {
                     Task { await store.regenerate(message) }

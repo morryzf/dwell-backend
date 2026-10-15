@@ -33,7 +33,18 @@ final class ChatStore: ObservableObject {
     @Published var autoplayVoiceID: String?
     @Published var messages: [Message] = []
     /// 刚到的消息：id → 第几个出场。气泡按这个顺序一个接一个浮上来，出完场就从这里拿掉。
-    @Published private(set) var entering: [String: Int] = [:]
+    @Published private(set) var entering: [String: Entrance] = [:]
+
+    struct Entrance {
+        /// 第几条出场。
+        let order: Int
+        /// 前面几个气泡已经在打字的时候冒过了，不再演。
+        let skip: Int
+    }
+
+    /// 正在打的这段里已经说完的几句（后面空了一行的）。像人发消息：凑够一个气泡才冒出来，
+    /// 最后那句还在打，就先只给三个点。
+    var streamParagraphs: [String] { Array(Self.paragraphs(streamingText).dropLast()) }
     /// 正在流进来、还没说完的那一段。
     @Published var streamingText = ""
     /// 正在流进来的思考过程。
@@ -93,6 +104,7 @@ final class ChatStore: ObservableObject {
             assistant = try await api.assistant()
             try await reloadMessages()
             startPolling()
+            await syncReplying()
             chatName = (try? await api.chats())?.first { $0.id == chatID }?.name ?? ""
             await refreshMemoryBadge()
             await loadControls()
@@ -117,7 +129,8 @@ final class ChatStore: ObservableObject {
         // 同一间聊天里多出来的（比如他主动发的），算刚到的；换聊天、第一次打开就不演了。
         if loadedChatID == chat {
             let known = Set(messages.map(\.id))
-            markEntering(fresh.filter { !known.contains($0.id) && $0.kind == .gu }.map(\.id))
+            markEntering(fresh.filter { !known.contains($0.id) && $0.kind == .gu }.map(\.id),
+                         skip: streamParagraphs.count)
         }
         loadedChatID = chat
         messages = older + fresh
@@ -125,9 +138,10 @@ final class ChatStore: ObservableObject {
         streamingThinking = ""
     }
 
-    private func markEntering(_ ids: [String]) {
+    /// skip 只算在第一条上：那是刚才正在打的那段，前面几句已经冒过了。
+    private func markEntering(_ ids: [String], skip: Int = 0) {
         guard !ids.isEmpty else { return }
-        for (order, id) in ids.enumerated() { entering[id] = order }
+        for (order, id) in ids.enumerated() { entering[id] = Entrance(order: order, skip: order == 0 ? skip : 0) }
         Task {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             for id in ids { entering[id] = nil }
@@ -353,6 +367,8 @@ final class ChatStore: ObservableObject {
                     let (next, events) = try await API.shared.poll(chatID: chat, since: cursor)
                     cursor = next
                     for event in events { await self?.apply(event) }
+                    // 等了一整轮都没动静、却还显示着「在回」：多半是收尾那一下漏了，问一次后端。
+                    if events.isEmpty, self?.isReplying == true { await self?.syncReplying() }
                 } catch {
                     if Task.isCancelled { break }
                     if let apiError = error as? APIError, apiError.isUnauthorized {
@@ -363,6 +379,21 @@ final class ChatStore: ObservableObject {
                     try? await Task.sleep(for: .seconds(2))
                 }
             }
+        }
+    }
+
+    /// 回复收尾的那个事件只在长轮询里发一次。app 在后台时轮询是断的，回来再从「现在」接着听，
+    /// 那一下就错过了：三个点一直在、发送键一直是「生成中」。所以回到前台、或者久等没动静时，
+    /// 直接问后端这间聊天还在不在回。
+    func syncReplying() async {
+        guard let json = try? await api.request("GET", "api/status") else { return }
+        let busy = json["busy"] as? Bool ?? false
+        if busy {
+            isReplying = true
+        } else if isReplying {
+            isReplying = false
+            status = ""
+            try? await reloadMessages()
         }
     }
 
@@ -401,8 +432,8 @@ final class ChatStore: ObservableObject {
             let text = event["text"] as? String ?? streamingText
             let id = event["message_id"] as? String ?? UUID().uuidString
             if !text.isEmpty, !messages.contains(where: { $0.id == id }) {
-                // 一路流着打出来的那段已经在屏幕上了，换成正式消息时不再演一遍；没流出来就整段到的才浮上来。
-                if streamingText.isEmpty { markEntering([id]) }
+                // 打字时已经冒出来的那几句不再演，剩下的（最后那句）这会儿才浮上来。
+                markEntering([id], skip: streamParagraphs.count)
                 messages.append(Message(id: id, kind: .gu, text: text))
             }
             streamingText = ""

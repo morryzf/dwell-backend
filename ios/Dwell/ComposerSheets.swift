@@ -161,15 +161,11 @@ struct InstructionsSheet: View {
         NavigationStack {
             List {
                 Section {
-                    SheetIntro(title: "当前聊天的指令", subtitle: "勾选后，下一条消息开始会一起发给模型。")
-                }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
-
-                Section("回复方式") {
                     CheckRow(title: "分条回复", detail: "按自然空行自动拆开", on: splitReplies) {
                         Task { await setSplit(!splitReplies) }
                     }
+                } header: {
+                    Text("回复方式")
                 }
                 Section {
                     if items.isEmpty && loaded {
@@ -182,6 +178,8 @@ struct InstructionsSheet: View {
                             Task { await save() }
                         }
                     }
+                } header: {
+                    Text("勾上的从下一条消息起一起发给模型")
                 } footer: {
                     if !message.isEmpty { Text(message) }
                 }
@@ -189,10 +187,11 @@ struct InstructionsSheet: View {
                     NavigationLink("管理指令") {
                         InstructionManager { Task { await load() } }
                     }
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 14.5, weight: .semibold))
                 }
             }
             .modifier(SheetListStyle())
+            .modifier(CompactSheetStyle())
             .navigationTitle("这间聊天的指令")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -368,30 +367,20 @@ struct ToolsSheet: View {
         NavigationStack {
             List {
                 Section {
-                    SheetIntro(title: "当前聊天的工具", subtitle: "模型会自己决定是否调用已启用的工具。")
-                }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
-
-                Section("内置网页工具") {
-                    Text("网页搜索和读取网页链接已启用；它们只会访问公共 http(s) 地址。")
-                        .font(.system(size: 14)).foregroundStyle(Theme.dim)
-                }
-                Section {
                     CheckRow(title: "允许 \(store.assistant?.name ?? "Cloudy") 使用待办、日记和日历", detail: "",
                              on: homeEnabled) {
                         homeEnabled.toggle()
                         Task { await save() }
                     }
-                    Text("可以查看和修改这三个页面；这是当前聊天单独的授权，每一次调用都会显示在聊天记录里。")
-                        .font(.system(size: 14)).foregroundStyle(Theme.dim)
                 } header: {
                     Text("家里的功能")
+                } footer: {
+                    Text("能查看和修改这三页；只对这间聊天有效，每次调用都会记在聊天里。")
                 }
                 Section {
                     if servers.isEmpty && loaded {
                         Text("还没有 MCP 服务器，先去网页设置里的 MCP 工具添加。")
-                            .font(.system(size: 14)).foregroundStyle(Theme.dim)
+                            .font(.system(size: 13)).foregroundStyle(Theme.dim)
                     }
                     ForEach($servers) { $server in
                         CheckRow(title: server.name, detail: server.transport == "sse" ? "SSE" : "HTTP",
@@ -403,10 +392,11 @@ struct ToolsSheet: View {
                 } header: {
                     Text("MCP 服务器")
                 } footer: {
-                    if !message.isEmpty { Text(message) }
+                    Text(message.isEmpty ? "网页搜索和读网页一直开着，只访问公开网址。模型自己决定用不用。" : message)
                 }
             }
             .modifier(SheetListStyle())
+            .modifier(CompactSheetStyle())
             .navigationTitle("这间聊天的工具")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -583,7 +573,7 @@ struct ModelSheet: View {
                 Section {
                     if split.top.isEmpty {
                         Text("还没有常用模型。在「More models → 浏览模型库」里把模型加入常用。")
-                            .font(.system(size: 14)).foregroundStyle(Theme.dim)
+                            .font(.system(size: 13)).foregroundStyle(Theme.dim)
                     }
                     ForEach(split.top) { item in
                         modelRow(item)
@@ -613,6 +603,7 @@ struct ModelSheet: View {
                 }
             }
             .modifier(SheetListStyle())
+            .modifier(CompactSheetStyle())
             .navigationTitle("切换模型")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -889,11 +880,11 @@ struct CheckRow: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Text(title)
-                    .font(.system(size: 16))
+                    .font(.system(size: 14.5))
                     .foregroundStyle(Theme.text)
                 if !detail.isEmpty {
                     Text(detail)
-                        .font(.system(size: 13))
+                        .font(.system(size: 12))
                         .foregroundStyle(Theme.dim)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -901,7 +892,7 @@ struct CheckRow: View {
                     Spacer()
                 }
                 Image(systemName: "checkmark")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.accent)
                     .opacity(on ? 1 : 0)
             }
@@ -918,6 +909,18 @@ struct SheetListStyle: ViewModifier {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(PaperBackground())
+    }
+}
+
+/// 输入框下面那几个只弹一半的面板：字小一号、行矮一点、分组挨紧一点，半屏里能多看几行。
+/// 标题栏已经写了是什么，里面不再放大标题。
+struct CompactSheetStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.system(size: 14.5))
+            .listSectionSpacing(.compact)
+            .environment(\.defaultMinListRowHeight, 36)
+            .contentMargins(.top, 4, for: .scrollContent)
     }
 }
 

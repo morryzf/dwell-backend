@@ -163,6 +163,10 @@ final class VoicePlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var elapsed: TimeInterval = 0
     /// 播过的语音的真实时长，语音条显示用。
     @Published private(set) var durations: [String: TimeInterval] = [:]
+    /// 浮在输入框上面的那个播放器在放哪条；播完也留着，点叉才收起。
+    @Published private(set) var panelID: String?
+    @Published private(set) var rate: Float = 1
+    static let rates: [Float] = [1, 1.25, 1.5, 2, 0.75]
 
     private var player: AVAudioPlayer?
     private var ticker: Timer?
@@ -170,7 +174,40 @@ final class VoicePlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     func state(for id: String) -> State { currentID == id ? state : .idle }
 
+    /// 气泡下面点「朗读」：弹出播放器并开始放；正在放（或还在准备）这条时再点一下就停。
+    func readAloud(_ id: String) {
+        if currentID == id {
+            close()
+            return
+        }
+        panelID = id
+        Task { await play(id) }
+    }
+
+    func close() {
+        stop()
+        panelID = nil
+    }
+
+    func cycleRate() {
+        let index = Self.rates.firstIndex(of: rate) ?? 0
+        rate = Self.rates[(index + 1) % Self.rates.count]
+        player?.rate = rate
+    }
+
+    func seek(_ fraction: Double) {
+        guard let player, player.duration > 0 else { return }
+        player.currentTime = fraction * player.duration
+        elapsed = player.currentTime
+        progress = fraction
+    }
+
     func toggle(_ id: String) {
+        if currentID == id, player == nil {
+            // 还在生成语音：再点一下就是不要了。
+            stop()
+            return
+        }
         if currentID == id, let player {
             if player.isPlaying {
                 player.pause()
@@ -203,6 +240,8 @@ final class VoicePlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             try AVAudioSession.sharedInstance().setActive(true)
             let player = try AVAudioPlayer(data: data)
             player.delegate = self
+            player.enableRate = true
+            player.rate = rate
             self.player = player
             durations[id] = player.duration
             player.play()
@@ -249,5 +288,94 @@ final class VoicePlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             self.currentID = nil
             self.player = nil
         }
+    }
+}
+
+/// 点「朗读」后浮在输入框上面的播放器（照网页的 #ttsPlayer）：谁的声音、现在在干什么、
+/// 暂停继续、进度可拖、倍速、叉掉。播完不自己消失，想再听一遍点播放就行。
+struct VoicePlayerPanel: View {
+    @ObservedObject private var voice = VoicePlayer.shared
+    let name: String
+
+    var body: some View {
+        if let id = voice.panelID {
+            let state = voice.state(for: id)
+            let duration = voice.durations[id] ?? 0
+            VStack(spacing: 6) {
+                HStack(spacing: 10) {
+                    Button { voice.toggle(id) } label: {
+                        Group {
+                            if state == .loading {
+                                ProgressView().tint(Theme.accent)
+                            } else {
+                                Image(systemName: state == .playing ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 17))
+                                    .foregroundStyle(Theme.accent)
+                            }
+                        }
+                        .frame(width: 36, height: 36)
+                        .contentShape(Circle())
+                    }
+                    .accessibilityLabel(state == .playing ? "暂停" : "播放")
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(name).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.text)
+                        Text(status(state)).font(.system(size: 11.5)).foregroundStyle(Theme.dim).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Button { voice.cycleRate() } label: {
+                        Text(rateLabel)
+                            .font(.system(size: 12.5, weight: .bold).monospacedDigit())
+                            .foregroundStyle(Theme.text)
+                            .frame(minWidth: 40, minHeight: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("播放速度")
+                    Button { voice.close() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.dim)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("关闭播放器")
+                }
+                HStack(spacing: 8) {
+                    Text(clock(voice.currentID == id ? voice.elapsed : 0))
+                    Slider(value: Binding(get: { voice.currentID == id ? voice.progress : 0 },
+                                          set: { voice.seek($0) }))
+                        .tint(Theme.accent)
+                        .disabled(voice.currentID != id || state == .loading)
+                    Text(clock(duration))
+                }
+                .font(.system(size: 10.5).monospacedDigit())
+                .foregroundStyle(Theme.dim)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(GlassBackground(surface: .composer, shape: RoundedRectangle(cornerRadius: 18, style: .continuous)))
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private var rateLabel: String {
+        let r = voice.rate
+        return (r == r.rounded() ? String(Int(r)) : String(format: "%g", r)) + "×"
+    }
+
+    private func status(_ state: VoicePlayer.State) -> String {
+        switch state {
+        case .loading: return "正在生成或读取语音…"
+        case .playing: return "正在朗读这一条"
+        case .paused: return "已暂停"
+        case .error(let message): return "没能播放：" + message
+        case .idle: return "播放完成"
+        }
+    }
+
+    private func clock(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "0:00" }
+        let whole = Int(seconds)
+        return "\(whole / 60):" + String(format: "%02d", whole % 60)
     }
 }
