@@ -52,7 +52,15 @@ struct ChatView: View {
                                    paused: showSettings || page != nil || showCamera))
         .environment(\.assistantID, store.assistant?.id ?? "cloudy")
         .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .top, spacing: 0) { header }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                header
+                // 朗读的播放器浮在顶栏下面，不挡输入框。
+                VoicePlayerPanel(name: store.assistant?.name ?? "Cloudy")
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 6)
+            }
+        }
         .overlay { drawer }
         // 设置一点开就是整屏，不会往下一划就整页关掉；右上角的叉关。
         .fullScreenCover(isPresented: $showSettings) {
@@ -170,37 +178,41 @@ struct ChatView: View {
                         }
                         // 同一个人连着说：气泡之间 6；换人说话：空 22，一眼分得出谁是谁。
                         let sameSpeaker = index > 0 && store.messages[index - 1].kind == message.kind
-                        HStack(alignment: .center, spacing: 10) {
-                            // 多选模式：每条前面一个小圆圈，点消息就是勾选。
-                            if let selection, message.kind != .system, !message.isLocal {
-                                Image(systemName: selection.contains(message.id) ? "checkmark.circle.fill" : "circle")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(selection.contains(message.id) ? Theme.accent : Theme.dim)
-                                    .onTapGesture { toggleSelected(message.id) }
-                                    .transition(.move(edge: .leading).combined(with: .opacity))
-                            }
-                            MessageRow(message: message,
-                                       actionsOpen: selection == nil && actionsFor == message.id,
-                                       onToggleActions: {
-                                           if selection != nil {
-                                               toggleSelected(message.id)
-                                           } else {
-                                               withAnimation(.easeOut(duration: 0.18)) {
-                                                   actionsFor = actionsFor == message.id ? nil : message.id
+                        // 他的消息排着队、一个气泡都还没露的，先不占位置。
+                        if store.shown[message.id] != 0 {
+                            HStack(alignment: .center, spacing: 10) {
+                                // 多选模式：每条前面一个小圆圈，点消息就是勾选。
+                                if let selection, message.kind != .system, !message.isLocal {
+                                    Image(systemName: selection.contains(message.id) ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(selection.contains(message.id) ? Theme.accent : Theme.dim)
+                                        .onTapGesture { toggleSelected(message.id) }
+                                        .transition(.move(edge: .leading).combined(with: .opacity))
+                                }
+                                MessageRow(message: message,
+                                           actionsOpen: selection == nil && actionsFor == message.id,
+                                           onToggleActions: {
+                                               if selection != nil {
+                                                   toggleSelected(message.id)
+                                               } else {
+                                                   withAnimation(.easeOut(duration: 0.18)) {
+                                                       actionsFor = actionsFor == message.id ? nil : message.id
+                                                   }
                                                }
-                                           }
-                                       },
-                                       onEdit: { editing = $0 },
-                                       onDelete: { deleting = $0 },
-                                       onVersions: { versionsFor = $0 },
-                                       onSelect: {
-                                           withAnimation(.easeOut(duration: 0.2)) {
-                                               actionsFor = nil
-                                               selection = [message.id]
-                                           }
-                                       })
+                                           },
+                                           onEdit: { editing = $0 },
+                                           onDelete: { deleting = $0 },
+                                           onVersions: { versionsFor = $0 },
+                                           onSelect: {
+                                               withAnimation(.easeOut(duration: 0.2)) {
+                                                   actionsFor = nil
+                                                   selection = [message.id]
+                                               }
+                                           })
+                            }
+                            .padding(.top, newDay || index == 0 ? 0 : (sameSpeaker ? 6 : 22))
+                            .transition(BubbleEntrance.insertion(isMe: message.kind == .me))
                         }
-                        .padding(.top, newDay || index == 0 ? 0 : (sameSpeaker ? 6 : 22))
                     }
                     Color.clear.frame(height: 16)
                     if !store.streamingThinking.isEmpty {
@@ -214,16 +226,18 @@ struct ChatView: View {
                             // 语音回复还在说：先给一条「正在说」的语音条，说完再念。
                             VoiceBar(messageID: "streaming", text: store.streamingText, pending: true)
                         } else {
-                            ForEach(Array(store.streamParagraphs.enumerated()), id: \.offset) { _, text in
+                            ForEach(Array(store.streamVisible.enumerated()), id: \.offset) { _, text in
                                 Bubble(text: text, tail: true)
                                     .transition(BubbleEntrance.insertion(isMe: false))
                             }
-                            if !store.streamingText.isEmpty || (store.isReplying && store.streamingThinking.isEmpty) {
-                                TypingDots()
+                            // 一发出去对面就是一个装着三个点的气泡，字凑够一个气泡才换成字。
+                            if store.isReplying || store.revealing {
+                                Bubble(text: "", tail: true, typing: true)
+                                    .transition(BubbleEntrance.insertion(isMe: false))
                             }
                         }
                     }
-                    .animation(.spring(duration: 0.4, bounce: 0.18), value: store.streamParagraphs.count)
+                    .animation(.spring(duration: 0.4, bounce: 0.18), value: store.isReplying || store.revealing)
                     Color.clear.frame(height: 1).id(bottomID)
                         .onAppear { atBottom = true }
                         .onDisappear { atBottom = false }
@@ -250,6 +264,7 @@ struct ChatView: View {
             // 只在最底下多了新消息时才滚到底；往上翻出更早的消息时不能把人拽回去。
             .onChange(of: store.messages.last?.id) { _, _ in scrollToBottom(proxy) }
             .onChange(of: store.streamingText) { _, _ in scrollToBottom(proxy, animated: false) }
+            .onChange(of: store.revealTick) { _, _ in scrollToBottom(proxy) }
             // 点输入框：原来就在最底下的，等键盘升上来再贴底；正往上翻着看的，就别动她的位置。
             .onChange(of: inputFocused) { _, focused in
                 guard focused, atBottom else { return }
@@ -320,7 +335,6 @@ struct ChatView: View {
     /// 网页的 composer：一张浮在方格纸上的圆角卡，上面是输入框，下面一排圆按钮和粉色发送键。
     private var inputBar: some View {
         VStack(spacing: 6) {
-            VoicePlayerPanel(name: store.assistant?.name ?? "Cloudy")
             if !store.status.isEmpty {
                 Text(store.status)
                     .font(.system(size: 13))
@@ -831,7 +845,10 @@ struct MessageRow: View {
                 } else {
                     bubbleList(isMe: isMe)
                 }
-                footer(isMe: isMe)
+                // 还没冒完就先不挂 token 和按钮。
+                if store.shown[message.id] == nil {
+                    footer(isMe: isMe)
+                }
                 if message.usage.cacheCheckpoint {
                     Divider(text: "已达50条缓存点，下一条将重新缓存").padding(.top, 4)
                 }
@@ -844,12 +861,12 @@ struct MessageRow: View {
     @ViewBuilder
     private func bubbleList(isMe: Bool) -> some View {
         let parts = message.bubbles
-        let entrance = store.entering[message.id]
-        ForEach(Array(parts.enumerated()), id: \.offset) { index, text in
+        // 他的还在排队冒的，只画已经露出来的那几个。
+        let visible = store.shown[message.id] ?? parts.count
+        ForEach(Array(parts.prefix(visible).enumerated()), id: \.offset) { index, text in
             Bubble(text: text, isMe: isMe, tail: true)
-                .modifier(BubbleEntrance(delay: entrance.flatMap { e in
-                    index < e.skip ? nil : Double(e.order * parts.count + index - e.skip) * 0.16
-                }, isMe: isMe))
+                .modifier(BubbleEntrance(delay: store.entering.contains(message.id) ? 0 : nil, isMe: isMe))
+                .transition(BubbleEntrance.insertion(isMe: isMe))
                 .contentShape(Rectangle())
                 .onTapGesture { onToggleActions() }
                 .contextMenu { menu(copying: text) }
@@ -1108,6 +1125,8 @@ struct Bubble: View {
     var isMe = false
     /// 最后一个气泡带个小尖角：他的在左下，我的在右下。
     var tail = false
+    /// 只装三个点的气泡：他在打字。
+    var typing = false
     @Environment(\.bubbleMaxWidth) private var maxWidth
     @Environment(\.colorScheme) private var scheme
     @Environment(\.assistantID) private var assistant
@@ -1125,7 +1144,10 @@ struct Bubble: View {
             style: .continuous)
         let rendered = Self.render(text)
         Group {
-            if Self.hasEmphasis(rendered) {
+            if typing {
+                TypingDots(color: style.textColor)
+                    .frame(height: 22)
+            } else if Self.hasEmphasis(rendered) {
                 // 有斜体：中文字体没有斜体字形，SwiftUI 画不歪，换 UIKit 把那几个字倾斜着画。
                 SlantedText(text: rendered, color: UIColor(style.textColor))
             } else {
@@ -1332,22 +1354,24 @@ struct EditMessageSheet: View {
 }
 
 struct TypingDots: View {
-    @State private var phase = 0.0
+    var color: Color = Theme.accent
 
+    /// 三个点轮流由浅变深再变浅，像一道波从左走到右（跟信息 app 的「正在输入」一样）。
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<3) { index in
-                Circle()
-                    .fill(Theme.accent)
-                    .frame(width: 7, height: 7)
-                    .opacity(0.3 + 0.7 * abs(sin(phase + Double(index) * 0.6)))
+        TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 5) {
+                ForEach(0..<3, id: \.self) { index in
+                    // 一圈 1.2 秒，每个点晚 0.2 秒；亮的时候稍微大一点点。
+                    let wave = max(0, sin((t / 1.2 - Double(index) * 0.18) * 2 * .pi))
+                    Circle()
+                        .fill(color)
+                        .frame(width: 7, height: 7)
+                        .opacity(0.25 + 0.65 * wave)
+                        .scaleEffect(1 + 0.12 * wave)
+                }
             }
-        }
-        .padding(.vertical, 6)
-        .onAppear {
-            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
-                phase = .pi
-            }
+            .padding(.horizontal, 2)
         }
     }
 }

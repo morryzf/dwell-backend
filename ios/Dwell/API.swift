@@ -153,9 +153,14 @@ final class API {
     }
 
     /// 拿原始字节（语音）。
-    func data(_ path: String) async throws -> Data {
+    func data(_ path: String, query: [String: String] = [:]) async throws -> Data {
         guard let base = baseURL else { throw APIError(status: 0, message: "还没填服务器地址") }
-        var req = URLRequest(url: base.appendingPathComponent(path))
+        var url = base.appendingPathComponent(path)
+        if !query.isEmpty, var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            parts.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
+            url = parts.url ?? url
+        }
+        var req = URLRequest(url: url)
         req.timeoutInterval = 60
         let (data, response) = try await session.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
