@@ -162,6 +162,15 @@ struct MemorySummary {
     /// 互通开着、模型实际读的是别的窗口的公共摘要时，显示那份。
     var sharedOverview = ""
     var sharedFrom = ""
+    /// 正式摘要的历史：每次被生成的新版、手动编辑或换回旧版替掉之前，都留一份。
+    var versions: [Version] = []
+
+    struct Version: Identifiable {
+        let id: String
+        let overview: String
+        let reason: String
+        let made: Int
+    }
 
     init(json: [String: Any]? = nil) {
         status = json?["status"] as? String ?? "idle"
@@ -176,6 +185,10 @@ struct MemorySummary {
         let shared = json?["shared_overview"] as? [String: Any] ?? [:]
         sharedOverview = shared["overview"] as? String ?? ""
         sharedFrom = shared["chat_name"] as? String ?? ""
+        versions = (json?["versions"] as? [[String: Any]] ?? []).map {
+            Version(id: $0["id"] as? String ?? UUID().uuidString, overview: $0["overview"] as? String ?? "",
+                    reason: $0["reason"] as? String ?? "", made: $0["made"] as? Int ?? 0)
+        }
     }
 
     var isBusy: Bool { status == "queued" || status == "running" }

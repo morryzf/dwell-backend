@@ -1300,10 +1300,9 @@ async def _refresh_long_context(chat_id: str, reset: bool = False) -> None:
             raise RuntimeError("生成长期上下文前，请先为这个聊天选择可用的供应商和模型")
 
         db.chat_memory_set_status(chat_id, "running", enabled=True)
-        cutoff = _memory_cutoff(chat_id)
-        if cutoff <= 0:
-            db.chat_memory_set_status(chat_id, "ready", enabled=bool(state.get("overview")))
-            return
+        # 聊得还少（最近那些都原样带着）就没有旧消息要压缩，但摘要是从记忆卡长出来的，
+        # 照样能写。以前这里直接收工，新窗口点「生成摘要」什么都不发生。
+        cutoff = max(0, _memory_cutoff(chat_id))
 
         summarized_through = 0 if reset else int(state.get("through_rowid") or 0)
         pending_segments = _memory_segments_waiting_for_summary(
@@ -2796,6 +2795,15 @@ async def quotes_add(payload: dict = Body(...)):
         raise HTTPException(400, "摘的话不能是空的")
     return db.quote_add(quote, str(payload.get("note", "")),
                         str(payload.get("date", "")))
+
+
+@app.patch("/api/quotes/{item_id}", dependencies=authed)
+async def quotes_note(item_id: str, payload: dict = Body(...)):
+    """在摘下来的那句下面写为什么喜欢。"""
+    item = db.quote_note_set(item_id, str(payload.get("note", "")))
+    if not item:
+        raise HTTPException(404, "找不到这句")
+    return item
 
 
 @app.delete("/api/quotes/{item_id}", dependencies=authed)

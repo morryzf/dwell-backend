@@ -30,7 +30,7 @@ struct MemorySummaryPanel: View {
                     VStack(alignment: .leading, spacing: 12) {
                         TextEditor(text: $draftText)
                             .font(.system(size: 14))
-                            .frame(minHeight: 220)
+                            .frame(minHeight: 420)
                             .scrollContentBackground(.hidden)
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
@@ -49,9 +49,10 @@ struct MemorySummaryPanel: View {
             section("正式摘要") {
                 VStack(alignment: .leading, spacing: 12) {
                     if editing {
+                        // 编辑时给足高度：摘要动辄好几百字，框太矮就只能一小截一小截地翻。
                         TextEditor(text: $draftText)
                             .font(.system(size: 14))
-                            .frame(minHeight: 260)
+                            .frame(minHeight: 520)
                             .scrollContentBackground(.hidden)
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
@@ -86,9 +87,50 @@ struct MemorySummaryPanel: View {
                             .lineSpacing(5)
                             .foregroundStyle(Theme.bubbleText)
                             .textSelection(.enabled)
+                        writeOwnButton
                     } else {
-                        Text("还没有正式摘要。摘要只在你点击时生成。")
+                        Text("还没有正式摘要。可以点下面生成，也可以自己写一份。")
                             .font(.system(size: 13))
+                            .foregroundStyle(Theme.dim)
+                        writeOwnButton
+                    }
+                }
+            }
+
+            if !summary.versions.isEmpty {
+                section("摘要历史") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(summary.versions) { version in
+                            DisclosureGroup {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text(version.overview)
+                                        .font(.system(size: 13))
+                                        .lineSpacing(4)
+                                        .foregroundStyle(Theme.bubbleText)
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Button("换回这一版") { Task { await store.restoreSummary(version.id) } }
+                                        .buttonStyle(MemoryButtonStyle(kind: .normal))
+                                        .disabled(summary.isBusy || editing)
+                                }
+                                .padding(.top, 6)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(Date(timeIntervalSince1970: TimeInterval(version.made))
+                                        .formatted(date: .abbreviated, time: .shortened))
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(Theme.text)
+                                    Text((version.reason.isEmpty ? "" : version.reason + " · ")
+                                         + String(version.overview.prefix(40)))
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Theme.dim)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .tint(Theme.dim)
+                        }
+                        Text("每次生成的新版被采用、手动编辑或换回旧版之前，原来那版都会留在这里。")
+                            .font(.system(size: 11.5))
                             .foregroundStyle(Theme.dim)
                     }
                 }
@@ -106,6 +148,15 @@ struct MemorySummaryPanel: View {
             .buttonStyle(MemoryButtonStyle(kind: .primary, large: true))
             .disabled(summary.isBusy || summary.hasDraft)
         }
+    }
+
+    /// 还没有自己的摘要时：自己写一份。聊得少的窗口、或者想自己定调的时候用。
+    private var writeOwnButton: some View {
+        Button("自己写一份") {
+            draftText = summary.overview.isEmpty ? summary.sharedOverview : summary.overview
+            editing = true
+        }
+        .buttonStyle(MemoryButtonStyle(kind: .normal))
     }
 
     private var statusLine: String {

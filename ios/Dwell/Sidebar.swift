@@ -365,6 +365,7 @@ enum SidebarStyle {
 /// 侧边栏里已经做成原生的那几页。
 enum NativePage: String, Identifiable {
     case tasks = "Tasks", calendar = "Calendar", usage = "Usage", heartbeat = "Heartbeat", focus = "Focus", library = "Library"
+    case journal = "Journal"
     var id: String { rawValue }
 }
 

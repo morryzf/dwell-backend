@@ -203,7 +203,8 @@ final class ChatStore: ObservableObject {
     /// 报错、提示这种一行字：过一会儿自己消失，不用等下一条消息才把它冲掉。
     private var statusClear: Task<Void, Never>?
 
-    private func flash(_ text: String, for seconds: Double = 4) {
+    /// 输入框上方那行小字说一句，几秒后自己消失。
+    func flash(_ text: String, for seconds: Double = 4) {
         status = text
         statusClear?.cancel()
         statusClear = Task { [weak self] in
