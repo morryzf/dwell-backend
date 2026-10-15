@@ -97,7 +97,8 @@ struct ChatView: View {
             SearchSheet().environmentObject(store)
         }
         .sheet(item: $versionsFor) { message in
-            VersionsSheet(message: message)
+            VersionsSheet(message: message, anchor: store.turn(of: message).first ?? message)
+                .environmentObject(store)
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $editing) { message in
@@ -237,7 +238,7 @@ struct ChatView: View {
                             }
                         }
                     }
-                    .animation(.spring(duration: 0.4, bounce: 0.18), value: store.isReplying || store.revealing)
+                    .animation(.spring(duration: 0.4, bounce: 0), value: store.isReplying || store.revealing)
                     Color.clear.frame(height: 1).id(bottomID)
                         .onAppear { atBottom = true }
                         .onDisappear { atBottom = false }
@@ -891,6 +892,8 @@ struct MessageRow: View {
                             Text("\(tokens.formatted()) tokens")
                                 .font(.system(size: 10.5).monospacedDigit())
                                 .foregroundStyle(Theme.dim.opacity(0.66))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                         .buttonStyle(.plain)
                         .popover(isPresented: $showUsage) {
@@ -937,9 +940,12 @@ struct MessageRow: View {
                     .frame(width: 22, height: 22)
             }
             .accessibilityLabel("更多消息操作")
+            // 不让它被挤：挤窄了它会一个字一行竖着折下去，把这一排撑得很高，气泡和按钮之间就空出一大截。
             Text(message.at.formatted(date: .omitted, time: .shortened))
                 .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(Theme.dim)
+                .lineLimit(1)
+                .fixedSize()
         }
     }
 
@@ -1060,21 +1066,35 @@ struct UsageDetail: View {
 /// 「查看版本」：重新生成、编辑之前的旧版本都在这里。
 struct VersionsSheet: View {
     let message: Message
+    /// 这一轮的第一条：重新生成前的旧版本记在它身上。
+    let anchor: Message
+    @EnvironmentObject private var store: ChatStore
     @Environment(\.dismiss) private var dismiss
-    @State private var current = ""
-    @State private var versions: [(text: String, title: String)] = []
+    @State private var versions: [Version] = []
     @State private var loaded = false
+    @State private var choosing: Version?
+    @State private var working = false
+    @State private var note = ""
+
+    struct Version: Identifiable {
+        let id: String
+        let text: String
+        let title: String
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    card("当前版本", current.isEmpty ? message.text : current)
-                    ForEach(Array(versions.enumerated()), id: \.offset) { _, item in
-                        card(item.title, item.text)
+                    card("当前版本", store.turn(of: message).map(\.text).joined(separator: "\n\n"))
+                    ForEach(versions) { item in
+                        card(item.title, item.text, version: item)
                     }
                     if loaded && versions.isEmpty {
                         Text("这条回复还没有旧版本。").font(.system(size: 13)).foregroundStyle(Theme.dim)
+                    }
+                    if !note.isEmpty {
+                        Text(note).font(.system(size: 13)).foregroundStyle(Theme.dim)
                     }
                 }
                 .padding(18)
@@ -1085,36 +1105,80 @@ struct VersionsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("好") { dismiss() } }
             }
+            .confirmationDialog("用这个版本接着聊？",
+                                isPresented: Binding(get: { choosing != nil }, set: { if !$0 { choosing = nil } }),
+                                titleVisibility: .visible) {
+                Button("用这个版本") {
+                    if let choosing { Task { await restore(choosing) } }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("现在这版会存成旧版本，不会丢。换好后他下一句会把聊天记录从头读一遍，确定读到的是这一版。")
+            }
             .task { await load() }
         }
     }
 
-    private func card(_ title: String, _ text: String) -> some View {
+    private func card(_ title: String, _ text: String, version: Version? = nil) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.system(size: 12)).foregroundStyle(Theme.dim)
             Text(text).font(.system(size: 14.5)).lineSpacing(5).foregroundStyle(Theme.text).textSelection(.enabled)
+            if let version {
+                Button { choosing = version } label: {
+                    Label("用这个版本接着聊", systemImage: "arrow.uturn.backward")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(Theme.accent.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .disabled(working || store.isReplying)
+                .padding(.top, 2)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.bubble))
     }
 
+    /// 重新生成前的旧版本记在这一轮的第一条上，编辑前的记在被改的那条上，两处都拿。
     private func load() async {
-        guard let json = try? await API.shared.request("GET", "api/messages/\(message.id)/versions") else {
-            loaded = true
-            return
-        }
-        current = (json["current"] as? [String: Any])?["content"] as? String ?? (json["current"] as? String ?? "")
-        let items = json["versions"] as? [[String: Any]] ?? []
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日 HH:mm"
+        var items: [[String: Any]] = []
+        let ids = anchor.id == message.id ? [message.id] : [anchor.id, message.id]
+        for id in ids {
+            guard let json = try? await API.shared.request("GET", "api/messages/\(id)/versions") else { continue }
+            items += json["versions"] as? [[String: Any]] ?? []
+        }
+        items.sort { (($0["made"] as? NSNumber)?.doubleValue ?? 0) > (($1["made"] as? NSNumber)?.doubleValue ?? 0) }
         versions = items.enumerated().map { index, item in
-            let reason = (item["reason"] as? String) == "regenerated" ? "重新生成前" : "编辑前"
+            let reason: String
+            switch item["reason"] as? String {
+            case "regenerated": reason = "重新生成前"
+            case "restored": reason = "换版本前"
+            default: reason = "编辑前"
+            }
             let made = (item["made"] as? NSNumber).map { " · " + formatter.string(from: Date(timeIntervalSince1970: $0.doubleValue)) } ?? ""
-            return (text: item["content"] as? String ?? "", title: "旧版本 \(index + 1)（\(reason)）" + made)
+            return Version(id: item["id"] as? String ?? UUID().uuidString,
+                           text: item["content"] as? String ?? "",
+                           title: "旧版本 \(index + 1)（\(reason)）" + made)
         }
         loaded = true
+    }
+
+    private func restore(_ version: Version) async {
+        working = true
+        defer { working = false }
+        do {
+            _ = try await API.shared.request("POST", "api/messages/\(message.id)/versions/\(version.id)/restore")
+            try? await store.reloadMessages()
+            dismiss()
+        } catch {
+            note = "没换成：" + error.localizedDescription
+        }
     }
 }
 
@@ -1463,7 +1527,7 @@ struct BubbleEntrance: ViewModifier {
             .scaleEffect(shown || reduceMotion ? 1 : 0.94, anchor: isMe ? .bottomTrailing : .bottomLeading)
             .onAppear {
                 guard !shown, let delay else { return }
-                withAnimation(.spring(duration: 0.42, bounce: 0.18).delay(delay)) { shown = true }
+                withAnimation(.spring(duration: 0.4, bounce: 0).delay(delay)) { shown = true }
             }
     }
 

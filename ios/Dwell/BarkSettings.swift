@@ -16,8 +16,10 @@ struct BarkSettings: View {
 
     /// Bark 自带的铃声。
     private static let sounds = [
-        "", "minuet", "bell", "birdsong", "bloom", "calypso", "chime", "choo", "glass", "healthnotification",
-        "ladder", "newmail", "noir", "paymentsuccess", "spell", "telegraph", "tiptoes", "typewriters", "update",
+        "", "alarm", "anticipate", "bell", "birdsong", "bloom", "calypso", "chime", "choo", "descent",
+        "electronic", "fanfare", "glass", "gotosleep", "healthnotification", "horn", "ladder", "mailsent",
+        "minuet", "multiwayinvitation", "newmail", "newsflash", "noir", "paymentsuccess", "shake",
+        "sherwoodforest", "spell", "suspense", "telegraph", "tiptoes", "typewriters", "update",
     ]
 
     var body: some View {

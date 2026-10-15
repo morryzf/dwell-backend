@@ -185,7 +185,8 @@ final class ChatStore: ObservableObject {
     }
 
     private func revealOne() {
-        withAnimation(.spring(duration: 0.42, bounce: 0.18)) {
+        // 不带回弹：带了的话气泡会先冲过头再往下落。
+        withAnimation(.spring(duration: 0.4, bounce: 0)) {
             // 先把已经存好的消息冒完，再轮到正在打的这段。
             if let message = messages.first(where: { shown[$0.id] != nil }), let count = shown[message.id] {
                 shown[message.id] = count + 1 >= message.bubbles.count ? nil : count + 1
