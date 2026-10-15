@@ -3710,6 +3710,17 @@ def message_version_add(message_id: str, content: str, reason: str = "") -> dict
     return row
 
 
+def message_version_get(version_id: str) -> dict | None:
+    with conn() as cx:
+        row = cx.execute("SELECT * FROM message_versions WHERE id=?", (version_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def message_version_delete(version_id: str) -> None:
+    with conn() as cx:
+        cx.execute("DELETE FROM message_versions WHERE id=?", (version_id,))
+
+
 def message_versions(message_id: str) -> list[dict]:
     with conn() as cx:
         rows = cx.execute(

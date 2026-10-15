@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import auth, db, file_text, focus_log, home_mcp, provider_secrets, push_service, shop, sigillo, study, subscription_usage
 from app.pet_assets import ensure_pet_assets
-from app.agent_sdk_client import MEMORY_CARD_KEY, PROMPT_TAIL_KEY
+from app.agent_sdk_client import MEMORY_CARD_KEY, PROMPT_TAIL_KEY, clear_state as clear_agent_session
 from app.llm_client import prompt_cache_enabled, reply_language_ok, stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
 from app.web_tools import WebToolError, web_fetch, web_search
@@ -5520,6 +5520,55 @@ async def messages_versions(message_id: str):
     if not message or message["chat_id"] != current or message["role"] != "assistant":
         raise HTTPException(404, "找不到这条 AI 回复")
     return {"ok": True, "current": message["content"], "versions": db.message_versions(message_id)}
+
+
+def _restore_reply_version(chat_id: str, message_id: str, version_id: str) -> dict:
+    """拿一个旧版本接着聊：它换回成当前的回复，现在这版存成旧版本，不丢。
+
+    重新生成前的旧版本是一整轮（可能分了好几条），换回来时这一轮的几条并成一条；
+    编辑前的旧版本只换那一条。换完把 Claude Code 的会话忘掉，下一句从头读一遍记录，
+    它才真的知道自己说的是这一版。
+    """
+    message = db.message_get(message_id)
+    if not message or message["chat_id"] != chat_id or message["role"] != "assistant":
+        raise HTTPException(404, "找不到这条 AI 回复")
+    version = db.message_version_get(version_id)
+    target = db.message_get(version["message_id"]) if version else None
+    if not version or not target or target["chat_id"] != chat_id or target["role"] != "assistant":
+        raise HTTPException(404, "找不到这个版本")
+    content = str(version.get("content") or "").strip()
+    if not content:
+        raise HTTPException(400, "这个版本是空的")
+    whole_turn = version.get("reason") == "regenerated"
+    reply = (db.message_assistant_reply_turn(target["id"]) if whole_turn else []) or [target]
+    replaced = [item["id"] for item in reply]
+    current = "\n\n".join(
+        str(item.get("content") or "").strip() for item in reply if str(item.get("content") or "").strip()
+    )
+    if current:
+        db.message_version_add(target["id"], current, "restored")
+    db.message_version_delete(version_id)
+    for reply_id in replaced:
+        _tts_remove_message_cache(chat_id, reply_id)
+    db.message_delete_many([reply_id for reply_id in replaced if reply_id != target["id"]])
+    db.message_update(target["id"], content)
+    db.message_thinking_update(target["id"], "")
+    segments = _split_reply_segments(content)
+    db.message_display_split_set(target["id"], db.chat_split_replies_get(chat_id) and len(segments) > 1)
+    clear_agent_session(f"dwell-chat:{chat_id}")
+    return {"ok": True, "id": target["id"], "replaced_ids": replaced}
+
+
+@app.post("/api/messages/{message_id}/versions/{version_id}/restore", dependencies=authed)
+async def messages_version_restore(message_id: str, version_id: str):
+    chat_id = _get_or_create_current_chat()
+    task = _running_tasks.get(chat_id)
+    if task and not task.done():
+        raise HTTPException(409, "这间聊天正在生成，请等它结束后再试")
+    result = _restore_reply_version(chat_id, message_id, version_id)
+    _emit(chat_id, {"type": "system", "subtype": "version_restored",
+                    "message_id": result["id"], "message_ids": result["replaced_ids"]})
+    return result
 
 
 @app.post("/api/messages/{message_id}/regenerate", dependencies=authed)
