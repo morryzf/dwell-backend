@@ -12809,6 +12809,7 @@ function memorySettingsHtml(modelState, cardState, embeddingState, sigilloState,
     + memorySwitchRow('记忆互通', '和其他窗口共用同一套记忆卡与摘要。关掉之后，这个窗口只看自己的，自己的也不外流。', 'memorySharedToggle', cardState.shared_enabled)
     + memorySwitchRow('按需记忆', '每次回复只挑最多 5 条真正相关的卡片；不相关时一条也不会带入。', 'memoryInjectionToggle', cardState.injection_enabled)
     + `<div class="gnote">${cardState.injection_enabled ? '每累计 50 条旧消息会自动生成待确认记忆卡。' : '已暂停带入，但每累计 50 条旧消息仍会自动生成待确认记忆卡。'}</div></div>`
+    + `<div class="ap-section" id="memoryMcpBox"><div class="ap-section-title">跨平台记忆</div><div class="gnote">正在读取…</div></div>`
     + sigilloBlock
     + shopBlock
     + `<div class="ap-section"><div class="ap-section-title">整理所用模型</div><div class="gnote">用来压缩长期摘要、生成记忆卡草稿。</div>${modelOptions ? `<select class="ap-in" id="longContextModel" style="margin-top:10px">${modelOptions}</select><div class="ap-msg" id="longContextModelMsg"></div>` : '<div class="gnote">还没有可选模型。先在设置里为供应商添加模型。</div>'}</div>`
@@ -12855,7 +12856,41 @@ function wireMemorySwitch(id, enabled, send) {
   };
 }
 
+/* 跨平台记忆：把 Cloudy 的记忆卡作为一个 MCP 地址开给 Claude App 这些地方。
+   自己读自己的状态，不挤进控制台那一大串并发请求里——读不到也只影响这一块。 */
+async function loadMemoryMcp() {
+  const box = document.getElementById('memoryMcpBox');
+  if (!box) return;
+  let state;
+  try { state = await memoryJson('api/memory-mcp', {cache:'no-store'}); }
+  catch (e) { box.innerHTML = '<div class="ap-section-title">跨平台记忆</div><div class="gnote">没有读取到：' + instructionEsc(e.message) + '</div>'; return; }
+  const intro = '<div class="gnote">把 Cloudy 的记忆卡开给 Claude App 等支持 MCP 的地方：能搜卡、读长期摘要；那边记下的卡会进这里的「待确认」，你确认了才生效。</div>';
+  box.innerHTML = '<div class="ap-section-title">跨平台记忆</div>' + intro + (state.enabled
+    ? `<div class="gnote" style="margin-top:8px">在那边添加连接器时填这个地址。地址里带着密钥，别发给别人；漏了就换一个，旧地址立刻失效。</div><input class="ap-in" id="memoryMcpUrl" readonly value="${instructionEsc(state.url)}" style="margin-top:8px"><div class="mc-actions"><button class="mc-btn primary" id="memoryMcpCopy">复制地址</button><button class="mc-btn" id="memoryMcpReset">换一个地址</button><button class="mc-btn quiet danger" id="memoryMcpOff">关闭</button></div>`
+    : `<div class="mc-actions"><button class="mc-btn primary" id="memoryMcpOn">开启</button></div>`)
+    + '<div class="ap-msg" id="memoryMcpMsg"></div>';
+  const msg = text => { const el = document.getElementById('memoryMcpMsg'); if (el) { el.textContent = text; el.className = 'ap-msg on'; } };
+  const act = async (url, method, done) => {
+    try { await memoryJson(url, {method}); await loadMemoryMcp(); if (done) note(done); }
+    catch (e) { msg('没有完成：' + e.message); }
+  };
+  const on = document.getElementById('memoryMcpOn');
+  if (on) on.onclick = () => act('api/memory-mcp/reset', 'POST', '（跨平台记忆已开启，复制地址去连接器里添加）');
+  const copy = document.getElementById('memoryMcpCopy');
+  if (copy) copy.onclick = () => {
+    const input = document.getElementById('memoryMcpUrl');
+    const fallback = () => { input.select(); msg('没能自动复制，地址已选中，长按拷贝。'); };
+    if (navigator.clipboard) navigator.clipboard.writeText(input.value).then(() => note('（地址复制好了）')).catch(fallback);
+    else fallback();
+  };
+  const reset = document.getElementById('memoryMcpReset');
+  if (reset) reset.onclick = () => { if (confirm('换一个地址？旧地址会立刻失效，已经连上的地方都要改成新地址。')) act('api/memory-mcp/reset', 'POST', '（换好了，记得去那边改地址）'); };
+  const off = document.getElementById('memoryMcpOff');
+  if (off) off.onclick = () => { if (confirm('关闭跨平台记忆？地址会立刻失效，外面就搜不到记忆卡了。')) act('api/memory-mcp', 'DELETE', '（跨平台记忆已关闭）'); };
+}
+
 function wireMemorySettings(chat, cardState, sigilloState, shopState) {
+  loadMemoryMcp();
   wireMemorySwitch('memorySharedToggle', !!cardState.shared_enabled, next =>
     memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-shared',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:next})}));
   wireMemorySwitch('memoryInjectionToggle', !!cardState.injection_enabled, next =>
