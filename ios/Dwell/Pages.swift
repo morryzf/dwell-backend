@@ -70,20 +70,97 @@ struct PageSection: View {
     }
 }
 
-/// 网页的 .hrow：一张圆角玻璃卡片。
+/// 网页的 .hrow：一张圆角玻璃卡片。放进 PageGroup 里就只是一行，卡片由那一组共用。
 struct PageRow<Content: View>: View {
     var dim = false
     @ViewBuilder var content: Content
+    @Environment(\.inPageGroup) private var grouped
 
     var body: some View {
-        HStack(spacing: 12) { content }
-            .padding(.horizontal, 15)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        if grouped {
+            HStack(spacing: 12) { content }
+                .padding(.horizontal, 15)
+                .padding(.vertical, 11)
+                .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                .contentShape(Rectangle())
+                .opacity(dim ? 0.7 : 1)
+        } else {
+            HStack(spacing: 12) { content }
+                .padding(.horizontal, 15)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.bubble))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.bubbleBorder, lineWidth: 1))
+                .shadow(color: Theme.bubbleShadow, radius: 10, y: 6)
+                .opacity(dim ? 0.7 : 1)
+        }
+    }
+}
+
+private struct InPageGroupKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var inPageGroup: Bool {
+        get { self[InPageGroupKey.self] }
+        set { self[InPageGroupKey.self] = newValue }
+    }
+}
+
+/// 一组相关的设置共用一张卡片，行和行之间一道细线（跟系统设置一样），
+/// 不再每一行都是一个带影子的圆框——一屏全是框，眼睛没处落。
+struct PageGroup<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: 0) { content }
+            .environment(\.inPageGroup, true)
             .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.bubble))
             .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.bubbleBorder, lineWidth: 1))
-            .shadow(color: Theme.bubbleShadow, radius: 10, y: 6)
-            .opacity(dim ? 0.7 : 1)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Theme.bubbleShadow.opacity(0.6), radius: 8, y: 4)
+    }
+}
+
+/// 组里两行之间的细线，从文字那里开始，不顶到卡片边。
+struct PageDivider: View {
+    var inset: CGFloat = 15
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.dim.opacity(0.16))
+            .frame(height: 0.5)
+            .padding(.leading, inset)
+    }
+}
+
+/// 小一号的 − / + ：数字在左边，按钮只占一小块，不把一整行撑高。
+struct CompactStepper: View {
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    var step = 1
+
+    var body: some View {
+        HStack(spacing: 0) {
+            button("minus", enabled: value > range.lowerBound) { value = max(range.lowerBound, value - step) }
+            Rectangle().fill(Theme.dim.opacity(0.25)).frame(width: 0.5, height: 16)
+            button("plus", enabled: value < range.upperBound) { value = min(range.upperBound, value + step) }
+        }
+        .background(Capsule().fill(Theme.dim.opacity(0.12)))
+    }
+
+    private func button(_ icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(enabled ? Theme.text : Theme.dim.opacity(0.4))
+                .frame(width: 36, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .buttonRepeatBehavior(.enabled)
     }
 }
 
