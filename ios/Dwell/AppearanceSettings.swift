@@ -277,8 +277,8 @@ struct GlassSettings: View {
 
     /// 模糊只给五档（关 / 很轻 / 轻 / 中 / 重），系统毛玻璃就这么几层厚度。
     private func blurPicker(_ value: Binding<Double>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("模糊")
+        HStack(spacing: 12) {
+            Text("模糊").frame(width: 70, alignment: .leading)
             Picker("模糊", selection: Binding(get: { BlurLevel.of(value.wrappedValue) },
                                              set: { value.wrappedValue = $0.px })) {
                 ForEach(BlurLevel.allCases) { level in Text(level.label).tag(level) }
@@ -326,27 +326,24 @@ struct GlassSettings: View {
                     .tint(Theme.send)
                     .disabled(!liquidAvailable)
             } footer: {
-                Text(liquidAvailable
-                     ? "用 iOS 26 系统的液态玻璃：气泡、输入框、按钮、侧边栏和弹窗都会跟着光线流动。关掉就回到磨砂玻璃。下面的颜色、不透明度和模糊档位两种都管用。"
-                     : "液态玻璃要 iOS 26 才有，这台手机上用的是磨砂玻璃。")
+                Text(liquidAvailable ? "iOS 26 的液态玻璃；关掉是磨砂玻璃。下面的设置两种都管用。"
+                                     : "液态玻璃要 iOS 26 才有，这台手机上用的是磨砂玻璃。")
             }
 
-            Section("气泡") {
+            // 颜色、透明度、边框、文字都是同一个气泡的，放一组；一项一行，滑块跟名字并排。
+            Section {
                 ColorPicker("底色", selection: colorBinding(\.background), supportsOpacity: false)
-                slider("底色不透明度", value: style.backgroundOpacity, range: 0...100, unit: "%")
+                slider("不透明度", value: style.backgroundOpacity, range: 0...100, unit: "%")
                 blurPicker(style.blur)
                 slider("圆角", value: style.radius, range: 4...32, unit: "")
-            }
-            Section("边框") {
-                ColorPicker("边框颜色", selection: colorBinding(\.border), supportsOpacity: false)
-                slider("边框不透明度", value: style.borderOpacity, range: 0...100, unit: "%")
-                slider("边框粗细", value: style.borderWidth, range: 0...3, unit: "", step: 0.5)
-            }
-            Section("文字") {
                 ColorPicker("文字颜色", selection: colorBinding(\.text), supportsOpacity: false)
-            }
-            Section {
+                ColorPicker("边框颜色", selection: colorBinding(\.border), supportsOpacity: false)
+                slider("边框透明", value: style.borderOpacity, range: 0...100, unit: "%")
+                slider("边框粗细", value: style.borderWidth, range: 0...3, unit: "", step: 0.1)
                 Button("恢复这一套气泡的默认值") { appearance.resetStyle(role: role, mode: mode) }
+                    .font(.system(size: 14))
+            } header: {
+                Text("气泡")
             }
 
             // 网页「玻璃效果」下半截：输入框、侧边栏、整页弹窗的透明度和模糊。
@@ -358,10 +355,11 @@ struct GlassSettings: View {
                 slider("不透明度", value: glassBinding(\.opacity), range: 0...100, unit: "%")
                 blurPicker(glassBinding(\.blur))
                 Button("恢复\(surface.label)的默认值") { appearance.resetGlass(surface, mode) }
+                    .font(.system(size: 14))
             } header: {
                 Text("界面")
             } footer: {
-                Text("跟上面的「浅色 / 深色」走：现在调的是\(mode == "dark" ? "深色" : "浅色")模式下的\(surface.label)。")
+                Text("现在调的是\(mode == "dark" ? "深色" : "浅色")模式下的\(surface.label)。")
             }
         }
         .modifier(SheetListStyle())
@@ -400,7 +398,7 @@ struct GlassSettings: View {
             .environment(\.assistantID, who)
             .padding(14)
         }
-        .frame(height: 210)
+        .frame(height: 180)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         // 预览只给人看：背景图铺满时会超出这块框，不关掉它接手指，就会把下面的按钮挡住。
         .allowsHitTesting(false)
@@ -425,17 +423,16 @@ struct GlassSettings: View {
         })
     }
 
+    /// 一行：名字、滑块、数值并排，比「名字一行、滑块一行」省一半高度。
     private func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>,
                         unit: String, step: Double = 1) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text(step < 1 ? String(format: "%.1f", value.wrappedValue) : "\(Int(value.wrappedValue))\(unit)")
-                    .foregroundStyle(Theme.dim)
-                    .monospacedDigit()
-            }
+        HStack(spacing: 12) {
+            Text(title).frame(width: 70, alignment: .leading)
             Slider(value: value, in: range, step: step).tint(Theme.send)
+            Text(step < 1 ? String(format: "%.1f", value.wrappedValue) : "\(Int(value.wrappedValue))\(unit)")
+                .font(.system(size: 13).monospacedDigit())
+                .foregroundStyle(Theme.dim)
+                .frame(width: 40, alignment: .trailing)
         }
     }
 }

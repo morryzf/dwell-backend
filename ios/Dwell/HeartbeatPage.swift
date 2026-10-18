@@ -40,9 +40,9 @@ struct HeartbeatPage: View {
                 .padding(.top, 6)
 
             PageSection(text: "连接")
-            VStack(spacing: 9) {
+            PageGroup {
                 PageRow {
-                    Image(systemName: "alarm").foregroundStyle(Theme.dim)
+                    Image(systemName: "alarm").foregroundStyle(Theme.dim).frame(width: 22)
                     Toggle("允许主动消息", isOn: Binding(get: { on }, set: { value in
                         on = value
                         Task { await save(["on": value], note: value ? "心跳开了——他会按这个节奏醒来看看" : "心跳关了，他不会主动发消息") }
@@ -50,9 +50,10 @@ struct HeartbeatPage: View {
                     .tint(Theme.send)
                     .disabled(!loaded)
                 }
+                PageDivider(inset: 49)
                 Button { showBark = true } label: {
                     PageRow {
-                        Image(systemName: "bell").foregroundStyle(Theme.dim)
+                        Image(systemName: "bell").foregroundStyle(Theme.dim).frame(width: 22)
                         Text("手机通知").foregroundStyle(Theme.text)
                         Spacer()
                         Text(notifyText).foregroundStyle(Theme.dim)
@@ -60,9 +61,10 @@ struct HeartbeatPage: View {
                     }
                 }
                 .buttonStyle(.plain)
+                PageDivider(inset: 49)
                 Button { pickingTarget = true } label: {
                     PageRow {
-                        Image(systemName: "bubble.left").foregroundStyle(Theme.dim)
+                        Image(systemName: "bubble.left").foregroundStyle(Theme.dim).frame(width: 22)
                         Text("消息送到").foregroundStyle(Theme.text)
                         Spacer()
                         Text(targetName).foregroundStyle(Theme.dim).lineLimit(1)
@@ -74,48 +76,57 @@ struct HeartbeatPage: View {
             .font(.system(size: 15))
 
             PageSection(text: "醒来的节奏")
-            VStack(spacing: 9) {
+            PageGroup {
                 stepper("白天每隔", value: $dayMinutes, range: 15...1440, step: 15, unit: "分钟")
+                PageDivider()
                 stepper("夜间每隔", value: $nightMinutes, range: 15...1440, step: 15, unit: "分钟")
-                stepper("白天开始", value: $dayStart, range: 0...23, step: 1, unit: "点")
-                stepper("白天结束", value: $dayEnd, range: 1...24, step: 1, unit: "点")
+                PageDivider()
+                stepper("白天从", value: $dayStart, range: 0...23, step: 1, unit: "点")
+                PageDivider()
+                stepper("到", value: $dayEnd, range: 1...24, step: 1, unit: "点")
+                PageDivider()
                 stepper("一天最多主动发", value: $dailyLimit, range: 1...24, step: 1, unit: "条")
             }
             .disabled(!loaded)
 
             PageSection(text: "现在")
-            Button {
-                Task { await wake() }
-            } label: {
-                PageRow {
-                    Image(systemName: "arrow.clockwise").foregroundStyle(Theme.dim)
-                    Text("现在让他醒一次").foregroundStyle(Theme.text)
-                    Spacer()
-                    Text(waking ? "正在醒来…" : "让他自己判断要不要说话")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Theme.dim)
+            PageGroup {
+                Button {
+                    Task { await wake() }
+                } label: {
+                    PageRow {
+                        Image(systemName: "arrow.clockwise").foregroundStyle(Theme.dim).frame(width: 22)
+                        Text(waking ? "正在醒来…" : "现在让他醒一次").foregroundStyle(Theme.text)
+                        Spacer()
+                        Text("他自己判断要不要说话")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.dim)
+                    }
+                    .font(.system(size: 15))
                 }
-                .font(.system(size: 15))
+                .buttonStyle(.plain)
+                .disabled(waking || !loaded)
+                PageDivider(inset: 49)
+                // 上次心跳怎么样：跟上面那行放在同一张卡里，不再单独一个灰框。
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "waveform.path.ecg").foregroundStyle(Theme.dim).frame(width: 22)
+                    Text(statusText)
+                        .font(.system(size: 12.5).monospacedDigit())
+                        .foregroundStyle(Theme.dim)
+                        .lineSpacing(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 15)
+                .padding(.vertical, 11)
             }
-            .buttonStyle(.plain)
-            .disabled(waking || !loaded)
 
             if !message.isEmpty {
                 Text(message)
                     .font(.system(size: 13))
                     .foregroundStyle(messageBad ? MemoryStyle.danger : Theme.dim)
-                    .padding(.top, 12)
+                    .padding(.top, 10)
                     .padding(.horizontal, 4)
             }
-
-            Text(statusText)
-                .font(.system(size: 12.5).monospacedDigit())
-                .foregroundStyle(Theme.dim)
-                .lineSpacing(4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.dim.opacity(0.08)))
-                .padding(.top, 18)
         }
         .task { await load() }
         .refreshable { await load() }
@@ -141,9 +152,11 @@ struct HeartbeatPage: View {
             Text(title).font(.system(size: 15)).foregroundStyle(Theme.text)
             Spacer()
             Text("\(value.wrappedValue) \(unit)")
-                .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                .font(.system(size: 14, weight: .semibold).monospacedDigit())
                 .foregroundStyle(Theme.accent)
-            Stepper(title, value: value, in: range, step: step).labelsHidden()
+                .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.2), value: value.wrappedValue)
+            CompactStepper(value: value, range: range, step: step)
         }
     }
 

@@ -853,19 +853,16 @@ struct SheetIntro: View {
     let title: String
     let subtitle: String
 
+    /// 顶栏已经写着标题了，这里只留一行说明，不再大字重复一遍。
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(size: 25, weight: .regular, design: .serif))
-                .foregroundStyle(Theme.text)
-            Text(subtitle)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.dim)
-        }
-        // 列表的行会把超出行边的笔画切掉（衬线 M 的左脚、「要」的撇），两边留一点。
-        .padding(.horizontal, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 6)
+        Text(subtitle)
+            .font(.system(size: 13))
+            .foregroundStyle(Theme.dim)
+            .lineSpacing(2)
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, 2)
+            .accessibilityLabel(title + "：" + subtitle)
     }
 }
 
@@ -909,6 +906,9 @@ struct SheetListStyle: ViewModifier {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(PaperBackground())
+            // 顶栏下面别空一大截，分组之间也挨紧一点。
+            .listSectionSpacing(.compact)
+            .contentMargins(.top, 6, for: .scrollContent)
     }
 }
 
