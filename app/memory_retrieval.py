@@ -196,8 +196,12 @@ def select_memory_cards(
     limit: int = 5,
     now: datetime | None = None,
     query_embedding: list[float] | None = None,
+    cap: int = 5,
 ) -> list[dict]:
     """Return at most ``limit`` relevant, active and unexpired cards.
+
+    ``cap`` bounds ``limit``: chat injection keeps the default 5; the memory MCP
+    lets an outside client ask for a few more.
 
     Uses RRF to fuse vector and keyword rankings when both are available.
     Falls back to keyword-only when no query embedding is provided.
@@ -255,4 +259,4 @@ def select_memory_cards(
             str(item.get("id") or ""),
         )
     )
-    return ranked[: max(0, min(5, int(limit)))]
+    return ranked[: max(0, min(int(cap), int(limit)))]
