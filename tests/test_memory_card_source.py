@@ -264,3 +264,62 @@ class MemoryCardReplaceTest(unittest.TestCase):
         draft = db.memory_card_draft_list(self.chat)[0]
         self.assertEqual(draft["action"], "create")
         self.assertIsNone(draft["target_card_id"])
+
+
+class MemoryThreadTest(unittest.TestCase):
+    """同一件事的卡挂同一个事件名；取回细节卡时把主卡带上；「补全这张」进待确认。"""
+
+    CARD = MemoryCardSourceTest.CARD
+    _stage = MemoryCardSourceTest._stage
+    tearDown = MemoryCardSourceTest.tearDown
+
+    def setUp(self):
+        MemoryCardSourceTest.setUp(self)
+        self.main_card = db.memory_card_add_manual(self.chat, {
+            **self.CARD, "content": "Morry 在追音音（她在约会 AI 社区认识的女生），还没放手。",
+            "memory_type": "open_thread", "topics": ["relationship"], "thread": "追音音"})
+
+    def test_drafting_keeps_the_thread_and_the_prompt_asks_for_it(self):
+        sent = self._stage([{**self.CARD, "content": "在追音音这件事上，我让她别越界。", "thread": "追音音"}])
+        self.assertIn("thread", sent["system"])
+        self.assertIn("事件：追音音", sent["user"])
+        draft = db.memory_card_draft_list(self.chat)[0]
+        self.assertEqual(draft["thread"], "追音音")
+        card = db.memory_card_draft_accept(self.chat, draft["id"], main._memory_card_clean(draft))
+        self.assertEqual(card["thread"], "追音音")
+
+    def test_a_detail_card_brings_its_main_card_along(self):
+        detail = {"id": "d1", "thread": "追音音", "memory_type": "quote", "status": "active"}
+        pool = [*db.memory_card_embeddings(self.chat), detail]
+        out = main._with_thread_mains([detail], pool)
+        self.assertEqual([c["id"] for c in out], ["d1", self.main_card["id"]])
+
+    def test_cards_can_be_filtered_by_thread(self):
+        db.memory_card_add_manual(self.chat, {**self.CARD, "content": "别的事。"})
+        page = db.memory_card_page(self.chat, thread="追音音")
+        self.assertEqual([c["id"] for c in page["items"]], [self.main_card["id"]])
+        self.assertEqual(db.memory_card_threads(self.chat), [{"thread": "追音音", "count": 1}])
+
+    def test_completing_a_card_waits_for_review_then_rewrites_it_in_place(self):
+        vague = db.memory_card_add_manual(self.chat, {**self.CARD, "content": "她对那个女生有 crush。"})
+
+        async def fake(provider, model_id, system, user):
+            self.assertIn("她对那个女生有 crush。", user)
+            self.assertIn("事件：追音音", user)
+            return {"content": "她对音音（约会 AI 社区认识的女生）有 crush。", "thread": "追音音"}
+
+        async def run():
+            with mock.patch.object(main, "_memory_json_completion", fake), \
+                 mock.patch.object(main, "_long_context_model",
+                                   lambda chat: ({"model_id": "m"}, {"id": "p", "enabled": 1}, True)):
+                await main._complete_memory_card(self.chat, vague["id"])
+        asyncio.run(run())
+
+        draft = db.memory_card_draft_list(self.chat)[0]
+        self.assertEqual((draft["action"], draft["target_card_id"]), ("revise", vague["id"]))
+        self.assertEqual(db.memory_card_get(self.chat, vague["id"])["content"], "她对那个女生有 crush。")
+
+        card = db.memory_card_draft_accept(self.chat, draft["id"], main._memory_card_clean(draft))
+        self.assertEqual(card["id"], vague["id"])
+        self.assertEqual(card["thread"], "追音音")
+        self.assertIn("音音", card["content"])

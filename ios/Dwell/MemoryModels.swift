@@ -73,7 +73,9 @@ struct MemoryCard: Identifiable, Equatable {
     let sourceRowids: [Int]
     let sharedFrom: String?
     let sharedCount: Int
-    /// 待确认专用：create / update（重新分类）/ split（拆分）
+    /// 属于哪件事（「追音音」）；同一件事的主卡和细节卡挂同一个名字。空＝不属于哪件持续的事。
+    var thread: String
+    /// 待确认专用：create / update（重新分类）/ split（拆分）/ replace（更新旧卡）/ revise（补全）
     let action: String
     let targetCardID: String?
     let updated: Date
@@ -95,6 +97,7 @@ struct MemoryCard: Identifiable, Equatable {
         sourceRowids = json["source_rowids"] as? [Int] ?? []
         sharedFrom = (json["shared_from"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         sharedCount = json["shared_count"] as? Int ?? 0
+        thread = json["thread"] as? String ?? ""
         action = json["action"] as? String ?? "create"
         targetCardID = json["target_card_id"] as? String
         updated = Date(timeIntervalSince1970: TimeInterval(json["updated"] as? Int ?? json["made"] as? Int ?? 0))
@@ -118,6 +121,7 @@ struct MemoryCard: Identifiable, Equatable {
             "content": content, "memory_type": memoryType, "topics": topics,
             "importance": importance, "retention": retention,
             "valid_until": retention == "time_bound" ? (validUntil ?? "") : "",
+            "thread": thread.trimmingCharacters(in: .whitespacesAndNewlines),
         ]
     }
 
