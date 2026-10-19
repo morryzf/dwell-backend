@@ -23,6 +23,10 @@ final class MemoryStore: ObservableObject {
     @Published var query = ""
     @Published var filter = "all"
     @Published var topic = ""
+    /// 只看某一件事的卡；空＝不按事件筛。
+    @Published var thread = ""
+    /// 卡池里有哪些事件、各几张。
+    @Published var threads: [(name: String, count: Int)] = []
     @Published var lastInjection: MemoryInjection?
     @Published var loadingCards = false
 
@@ -68,7 +72,12 @@ final class MemoryStore: ObservableObject {
             let json = try await api.request("GET", "\(base)/memory-cards", query: [
                 "limit": String(Self.pageSize), "offset": String(offset),
                 "q": query.trimmingCharacters(in: .whitespaces), "filter": filter, "topic": topic,
+                "thread": thread,
             ])
+            threads = (json["threads"] as? [[String: Any]] ?? []).compactMap { item in
+                guard let name = item["thread"] as? String, !name.isEmpty else { return nil }
+                return (name, item["count"] as? Int ?? 0)
+            }
             let page = (json["items"] as? [[String: Any]] ?? []).map(MemoryCard.init(json:))
             cards = reset ? page : cards + page
             total = json["total"] as? Int ?? cards.count
@@ -198,6 +207,23 @@ final class MemoryStore: ObservableObject {
             toast = "在拆了，拆好会放进「待确认」"
             pollIfBusy()
         } catch { say(error) }
+    }
+
+    /// 补全这张：模型补上称呼和事件名，结果进「待确认」，采用了才改原卡。
+    func completeCard(_ card: MemoryCard) async {
+        do {
+            let json = try await api.request("POST", "api/chats/\(card.chatID)/memory-cards/\(card.id)/complete")
+            cardState = MemoryCardState(json: json["state"] as? [String: Any])
+            toast = "在补了，补好会放进「待确认」"
+            pollIfBusy()
+        } catch { say(error) }
+    }
+
+    /// 点卡片上的「事件：…」：只看这件事的卡；再点一次同一个就取消。
+    func showThread(_ name: String) async {
+        thread = thread == name ? "" : name
+        tab = .cards
+        await loadCards(reset: true)
     }
 
     // MARK: - 待确认

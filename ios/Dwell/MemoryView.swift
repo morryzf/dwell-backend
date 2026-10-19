@@ -39,6 +39,11 @@ struct MemoryView: View {
                 .padding(.bottom, 30)
             }
             .scrollDismissesKeyboard(.interactively)
+            // 卡片上点「事件：…」：打开筛选那一栏，只看这件事的卡。
+            .environment(\.memoryThreadTap, { name in
+                withAnimation { searchOpen = true }
+                Task { await store.showThread(name) }
+            })
             .background(PaperBackground())
             .navigationTitle("记忆")
             .navigationBarTitleDisplayMode(.inline)
@@ -221,7 +226,7 @@ struct MemoryView: View {
     }
 
     private var isSearching: Bool {
-        !store.query.isEmpty || store.filter != "all" || !store.topic.isEmpty
+        !store.query.isEmpty || store.filter != "all" || !store.topic.isEmpty || !store.thread.isEmpty
     }
 
     private var searchPanel: some View {
@@ -270,6 +275,33 @@ struct MemoryView: View {
                     }
                 }
             }
+            // 按事件看：一件事的主卡和细节卡排在一起。
+            if !store.threads.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(store.threads, id: \.name) { item in
+                            let on = store.thread == item.name
+                            Button {
+                                Task { await store.showThread(item.name) }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                                        .font(.system(size: 10.5))
+                                    Text("\(item.name) \(item.count)")
+                                    if on { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)) }
+                                }
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(on ? .white : Theme.text)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(Capsule().fill(on ? Theme.send : MemoryStyle.tag))
+                                .overlay(Capsule().stroke(on ? .clear : MemoryStyle.border, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -300,6 +332,10 @@ struct MemoryView: View {
         } else {
             Button("编辑") { editing = card }
                 .buttonStyle(MemoryButtonStyle(kind: .normal))
+            // 单独读看不懂（只写了「那个女生」）的卡：让模型补上名字和事件，补好进待确认。
+            Button("补全") { Task { await store.completeCard(card) } }
+                .buttonStyle(MemoryButtonStyle(kind: .quiet))
+                .disabled(store.cardState.isBusy)
             if card.sharedFrom == nil && card.sharedCount == 0 {
                 Button("共享") { Task { await store.share(card) } }
                     .buttonStyle(MemoryButtonStyle(kind: .quiet))
@@ -362,7 +398,7 @@ struct MemoryView: View {
                             .buttonStyle(MemoryButtonStyle(kind: .primary))
                         Button("先修改") { editingDraft = draft }
                             .buttonStyle(MemoryButtonStyle(kind: .normal))
-                        if draft.action != "update" {
+                        if draft.action != "update" && draft.action != "revise" {
                             Button("拆开") { Task { await store.splitDraft(draft) } }
                                 .buttonStyle(MemoryButtonStyle(kind: .quiet))
                         }
@@ -417,6 +453,7 @@ struct MemoryCardView<Actions: View>: View {
     var target: MemoryCard? = nil
     @ViewBuilder var actions: Actions
     var onSource: () -> Void = {}
+    @Environment(\.memoryThreadTap) private var onThread
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -437,7 +474,36 @@ struct MemoryCardView<Actions: View>: View {
                 }
             }
             MemoryTagFlow(tags: tags)
-            if let target, card.action == "replace" {
+            if !card.thread.isEmpty {
+                // 这张卡属于哪件事；点一下只看这件事的卡。
+                Button { onThread(card.thread) } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 10))
+                        Text("事件：\(card.thread)")
+                    }
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.accent.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+            }
+            if let target, card.action == "revise" {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("采用后，原卡会改成上面这样：")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.dim)
+                    Text(target.content)
+                        .font(.system(size: 13))
+                        .lineSpacing(3)
+                        .strikethrough(true, color: Theme.dim.opacity(0.7))
+                        .foregroundStyle(Theme.dim)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.dim.opacity(0.1)))
+            } else if let target, card.action == "replace" {
                 // 更新：上面是新的情况，下面划掉的是要被收起来的旧卡，一眼对照。
                 VStack(alignment: .leading, spacing: 4) {
                     Text("采用后，这张旧卡会收进归档：")
@@ -497,6 +563,7 @@ struct MemoryCardView<Actions: View>: View {
         if kind == .draft && card.action == "update" { out.append("重新分类") }
         if kind == .draft && card.action == "split" { out.append("拆分") }
         if kind == .draft && card.action == "replace" { out.append("更新旧卡") }
+        if kind == .draft && card.action == "revise" { out.append("补全") }
         return out
     }
 }
@@ -588,6 +655,12 @@ struct MemoryCardEditor: View {
                 .frame(minHeight: 96)
                 .scrollContentBackground(.hidden)
                 .padding(8)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
+
+            label("属于哪件事（可空）")
+            TextField("如：追音音；同一件事的卡写同一个名字", text: $card.thread)
+                .font(.system(size: 14))
+                .padding(10)
                 .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
 
             label("类型")
@@ -846,4 +919,16 @@ enum MemoryStyle {
     static let countPill = Color(light: Color(hex: 0xEFE4E8), dark: Color(hex: 0x5F555B))
     static let sage = Color(light: Color(hex: 0x7F9A84), dark: Color(hex: 0xA8C0A0))
     static let danger = Color(light: Color(hex: 0xBD7187), dark: Color(hex: 0xE59AB8))
+}
+
+private struct MemoryThreadTapKey: EnvironmentKey {
+    static let defaultValue: (String) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    /// 点卡片上的「事件：…」做什么（记忆页设成「只看这件事」）。
+    var memoryThreadTap: (String) -> Void {
+        get { self[MemoryThreadTapKey.self] }
+        set { self[MemoryThreadTapKey.self] = newValue }
+    }
 }

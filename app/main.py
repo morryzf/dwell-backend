@@ -807,9 +807,14 @@ def _memory_card_clean(raw: dict, allow_status: bool = False) -> dict:
     status = str(raw.get("status") or "active")
     if allow_status and status not in {"active", "hidden", "archived"}:
         raise ValueError("记忆状态不在允许范围内")
+    # 事件名：模型偶尔写成字符串 "null"，当成没有。
+    thread = re.sub(r"\s+", " ", str(raw.get("thread") or "")).strip()[:40]
+    if thread.lower() in {"null", "none", "无"}:
+        thread = ""
     return {
         "content": content[:1200], "memory_type": memory_type, "topics": clean_topics,
         "importance": importance, "retention": retention, "valid_until": valid_until,
+        "thread": thread,
         **({"status": status} if allow_status else {}),
     }
 
@@ -895,7 +900,7 @@ MEMORY_CARD_RULES = (
 MEMORY_CARD_JSON_SHAPE = (
     "只输出 JSON：{\"cards\":[{\"content\":\"...\",\"memory_type\":\"...\","
     "\"topics\":[\"...\"],\"importance\":\"normal\",\"retention\":\"long_term\","
-    "\"valid_until\":null,\"evidence\":[123,124],\"replaces\":null}]}。"
+    "\"valid_until\":null,\"evidence\":[123,124],\"thread\":null,\"replaces\":null}]}。"
 )
 # 出卡时才用：模型能看到已有的相关卡，能提「这张旧卡过时了，换成这张」。
 # 换不换由 Morry 在待确认里决定，采用了旧卡才收进归档。
@@ -910,6 +915,10 @@ MEMORY_CARD_UPDATE_RULES = (
     "就出一张写着最新情况的卡，replaces 填那张旧卡的编号；新卡要写完整，"
     "不能只写变了的那一点，因为旧卡采用后会被收起来。经过卡和原话卡不要被 replaces。"
     "不是替换的卡，replaces 写 null。"
+    # 事件把同一件事的卡连起来：取回其中一张时，这件事的主卡会跟着一起来。
+    "thread 写这张卡属于哪件事，2 到 8 个字（如「追音音」「搬家」）；"
+    "同一件事的主卡和细节卡写同一个名字，已有卡里有这件事的名字就照抄，不要另起一个；"
+    "不属于某件持续的事的卡，thread 写 null。"
 )
 MEMORY_CARD_RELATED_LIMIT = 12
 
@@ -5024,7 +5033,8 @@ async def memory_badge_seen(request: Request):
 
 @app.get("/api/chats/{chat_id}/memory-cards", dependencies=authed)
 async def memory_cards_get(chat_id: str, include_archived: bool = False, limit: int = 0,
-                           offset: int = 0, q: str = "", filter: str = "all", topic: str = ""):
+                           offset: int = 0, q: str = "", filter: str = "all", topic: str = "",
+                           thread: str = ""):
     """给了 limit 就分页：控制台一次只拿一页，搜索和筛选在这里对全部卡片做。"""
     if not db.chat_get(chat_id):
         raise HTTPException(404, "chat 不存在")
@@ -5032,10 +5042,11 @@ async def memory_cards_get(chat_id: str, include_archived: bool = False, limit: 
     paging = {}
     if limit:
         page = db.memory_card_page(chat_id, q, filter, limit, offset,
-                                   topic if topic in MEMORY_CARD_TOPICS else "")
+                                   topic if topic in MEMORY_CARD_TOPICS else "", thread)
         items = page["items"]
         paging = {
             "total": page["total"], "counts": page["counts"],
+            "threads": db.memory_card_threads(chat_id),
             "draft_targets": db.memory_cards_by_id(
                 chat_id, [d.get("target_card_id") for d in drafts if d.get("target_card_id")]
             ),
@@ -5196,7 +5207,7 @@ async def memory_card_draft_accept(chat_id: str, draft_id: str, request: Request
     draft = _memory_card_draft(chat_id, draft_id)
     payload = await _read_json(request)
     chosen = dict(draft)
-    for field in ("content", "memory_type", "topics", "importance", "retention", "valid_until"):
+    for field in ("content", "memory_type", "topics", "importance", "retention", "valid_until", "thread"):
         if field in payload:
             chosen[field] = payload[field]
     try:
@@ -5204,6 +5215,9 @@ async def memory_card_draft_accept(chat_id: str, draft_id: str, request: Request
         card = db.memory_card_draft_accept(chat_id, draft_id, clean)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if draft.get("action") == "revise":
+        # 原地改了字：Claude Code 那边记着的旧版本得作废。
+        db.memory_pool_touch()
     if card:
         asyncio.create_task(_embed_memory_card(card["id"], card["content"]))
     return {"ok": True, "item": card, "state": _memory_card_review_state(chat_id)}
@@ -5241,7 +5255,7 @@ async def memory_card_put(chat_id: str, card_id: str, request: Request):
     payload = await _read_json(request)
     chosen = dict(current)
     for field in (
-        "content", "memory_type", "topics", "importance", "retention", "valid_until", "status",
+        "content", "memory_type", "topics", "importance", "retention", "valid_until", "status", "thread",
     ):
         if field in payload:
             chosen[field] = payload[field]
@@ -5364,6 +5378,108 @@ async def _split_memory_card(chat_id: str, kind: str, item_id: str) -> None:
         _memory_card_tasks.pop(chat_id, None)
 
 
+MEMORY_THREAD_EXTRA = 2
+
+
+def _with_thread_mains(selected: list[dict], pool: list[dict]) -> list[dict]:
+    """取回的卡属于某件事，就把那件事的主卡（进行中事项）也带上，最多多带两张。
+
+    细节卡单独来，Cloudy 只看得到一个片段；有主卡在，他知道这件事是什么、现在到哪一步了。
+    """
+    have = {card.get("id") for card in selected}
+    threads = []
+    for card in selected:
+        thread = str(card.get("thread") or "")
+        if thread and thread not in threads:
+            threads.append(thread)
+    extra = []
+    for thread in threads:
+        for card in pool:
+            if len(extra) >= MEMORY_THREAD_EXTRA:
+                break
+            if (card.get("thread") == thread and card.get("memory_type") == "open_thread"
+                    and card.get("status", "active") == "active" and card.get("id") not in have):
+                extra.append(card)
+                have.add(card.get("id"))
+    return [*selected, *extra]
+
+
+MEMORY_COMPLETE_RULES = (
+    "下面是我的一张记忆卡，单独读的时候可能看不懂：人只写了「那个女生」「对方」「他」，"
+    "或者没说是哪件事。请对照这张卡的原文和已有的相关卡，把它补成单独读也懂的样子："
+    "人写名字，第一次出现时名字后面用括号带半句是谁；属于某件事的，用半句话点明是哪件事；"
+    "沿用已有卡里的叫法和事件名。"
+    "只补称呼和背景，不改原意、不删内容、不加原文里没有的事；原话一字不动。"
+    "thread 写这张卡属于哪件事（2 到 8 个字），已有卡里有这件事的名字就照抄；不属于某件持续的事写 null。"
+    "如果它本来就读得懂、也不属于哪件事，content 原样返回。"
+    "只输出 JSON：{\"content\":\"...\",\"thread\":null}。"
+)
+
+
+async def _complete_memory_card(chat_id: str, card_id: str) -> None:
+    """「补全这张」：让模型补上称呼和事件名，结果落成一条待确认，她采用了才改。"""
+    task_started = time.perf_counter()
+    task_log_id = _start_system_log("memory_task", "memory_card_complete", chat_id=chat_id)
+    task_status = "success"
+    task_detail: object = ""
+    try:
+        selection, provider, _explicit = _long_context_model(chat_id)
+        if not provider or not provider.get("enabled") or not selection.get("model_id"):
+            raise RuntimeError("补全前，请先选择可用的长期上下文模型")
+        card = db.memory_card_get(chat_id, card_id)
+        if not card:
+            raise RuntimeError("没有找到这张记忆卡片")
+        name = db.assistant_name(db.chat_assistant(chat_id))
+        start, end = db.memory_source_span(chat_id, card)
+        rows = db.messages_around(chat_id, start, end, 0) if end else []
+        related = [c for c in await _memory_related_cards(chat_id, str(card["content"]) + "\n"
+                                                          + _memory_transcript(rows, name))
+                   if c.get("id") != card_id]
+        parts = ["【要补全的卡】\n" + str(card["content"])]
+        if related:
+            parts.append("【已有的相关记忆卡：照抄名字和事件名】\n"
+                         + "\n".join("- " + _memory_card_line(c) for c in related))
+        parts.append("【这张卡来自的原文】\n" + _memory_transcript(rows, name) if rows
+                     else "（原文已经找不到了，只按已有的卡补）")
+        data = await _memory_json_completion(
+            provider, selection["model_id"],
+            _memory_voice_prompt(chat_id) + MEMORY_COMPLETE_RULES,
+            "\n\n".join(parts)[:MEMORY_CARD_SOURCE_CHARS],
+        )
+        content = str(data.get("content") or "").strip()
+        thread = _memory_card_clean({**card, "thread": data.get("thread")})["thread"]
+        if not content or (content == str(card["content"]).strip() and thread == (card.get("thread") or "")):
+            db.memory_card_state_set(
+                chat_id, "review" if db.memory_card_state_get(chat_id)["draft_count"] else "ready",
+                generated=True, note="这张卡本来就读得懂，没有要补的。",
+            )
+            return
+        db.memory_card_stage_revise(chat_id, card_id, content, thread)
+        db.memory_card_state_set(chat_id, "review", generated=True,
+                                 note="补好了，放在「待确认」里，采用了才会改原卡。")
+    except Exception as exc:
+        task_status = "error"
+        task_detail = exc
+        db.memory_card_state_set(chat_id, "error", str(exc), generated=True)
+    finally:
+        _finish_system_log(task_log_id, task_status, task_started, detail=task_detail)
+        _memory_card_tasks.pop(chat_id, None)
+
+
+@app.post("/api/chats/{chat_id}/memory-cards/{card_id}/complete", dependencies=authed)
+async def memory_card_complete(chat_id: str, card_id: str):
+    """后台补全一张卡的称呼和事件名；结果进待确认。"""
+    card = db.memory_card_get(chat_id, card_id)
+    if not card or card.get("status") == "archived":
+        raise HTTPException(404, "没有找到这张记忆卡片")
+    task = _memory_card_tasks.get(chat_id)
+    if task and not task.done():
+        raise HTTPException(409, "记忆正在整理，请等这一趟完成再补")
+    db.memory_card_state_set(chat_id, "queued")
+    _memory_card_tasks[chat_id] = asyncio.create_task(_complete_memory_card(chat_id, card_id))
+    return {"ok": True, "started": True, "state": db.memory_card_state_get(chat_id)}
+
+
 def _memory_split_target(chat_id: str, kind: str, item_id: str) -> dict | None:
     if kind == "draft":
         return next((d for d in db.memory_card_draft_list(chat_id) if d["id"] == item_id), None)
@@ -5374,8 +5490,8 @@ def _start_memory_split(chat_id: str, kind: str, item_id: str) -> dict:
     item = _memory_split_target(chat_id, kind, item_id)
     if not item:
         raise HTTPException(404, "没有找到这条记忆")
-    if kind == "draft" and item.get("action") == "update":
-        raise HTTPException(400, "重新分类的建议不能拆")
+    if kind == "draft" and item.get("action") in ("update", "revise"):
+        raise HTTPException(400, "重新分类或补全的建议不能拆")
     task = _memory_card_tasks.get(chat_id)
     if task and not task.done():
         raise HTTPException(409, "记忆正在整理，请等这一趟完成再拆")
@@ -6117,7 +6233,9 @@ def _memory_card_line(card: dict) -> str:
     topics = "、".join(
         MEMORY_CARD_TOPICS.get(str(topic), str(topic)) for topic in card.get("topics") or []
     )
-    parts = [part for part in (_memory_card_date(card), type_name, topics) if part]
+    thread = str(card.get("thread") or "").strip()
+    parts = [part for part in (_memory_card_date(card), type_name, topics,
+                               f"事件：{thread}" if thread else "") if part]
     content = re.sub(r"\s+", " ", str(card.get("content") or "")).strip()
     return f"[{' · '.join(parts)}] {content}"
 
@@ -6250,6 +6368,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             now=db.cn_now().replace(tzinfo=None),
             query_embedding=query_emb,
         )
+    if selected_memory_cards:
+        selected_memory_cards = _with_thread_mains(selected_memory_cards, db.memory_card_embeddings(chat_id))
     # 同一件事的几张卡按发生的先后排：先看到早的，再看到后来怎样了，不会把旧情况当成现在。
     selected_memory_cards.sort(key=lambda card: _memory_card_date(card) or "9999")
     # Re-generating the same response replaces its earlier audit; an empty
