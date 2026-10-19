@@ -12736,6 +12736,11 @@ function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
   const splitLine = (splitOf && splitOf.content)
     ? `<div class="mc-retag">拆自原卡：${instructionEsc(splitOf.content)}</div>`
     : '';
+  // 更新建议：新的情况在上面，被换掉的旧卡划掉写在下面；采用后旧卡收进归档。
+  const replaceOf = (kind === 'draft' && item.action === 'replace') ? ((currentById || {})[item.target_card_id] || {}) : null;
+  const replaceLine = (replaceOf && replaceOf.content)
+    ? `<div class="mc-retag">采用后，这张旧卡会收进归档：<s>${instructionEsc(replaceOf.content)}</s></div>`
+    : '';
   const topicTags = (item.topics || []).map(topic => `<span class="mc-tag">${instructionEsc((taxonomy.topics || {})[topic] || topic)}</span>`).join('');
   const importance = (taxonomy.importance || {})[item.importance] || item.importance;
   const retention = (taxonomy.retention || {})[item.retention] || item.retention;
@@ -12756,7 +12761,7 @@ function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
   else if (kind === 'used') actions = '';
   else if (archived) actions = `<button class="mc-btn" data-memory-restore="${instructionEsc(item.id)}">恢复</button><button class="mc-btn quiet danger" data-memory-delete-permanent="${instructionEsc(item.id)}">永久删除</button>`;
   else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button>${canShare ? `<button class="mc-btn quiet" data-memory-share="${instructionEsc(item.id)}">共享</button>` : ''}<button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
-  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${instructionEsc(item.content || '')}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${foreign ? `<span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span>` : ''}${sharedTag}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}${splitOf ? '<span class="mc-tag">拆分</span>' : ''}</div>${retagLine}${splitLine}${kind !== 'used' ? memorySourceHtml(item, kind) : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
+  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${instructionEsc(item.content || '')}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${foreign ? `<span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span>` : ''}${sharedTag}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}${splitOf ? '<span class="mc-tag">拆分</span>' : ''}${replaceOf ? '<span class="mc-tag">更新旧卡</span>' : ''}</div>${retagLine}${splitLine}${replaceLine}${kind !== 'used' ? memorySourceHtml(item, kind) : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
 }
 function memoryEmpty(title, text, button) {
   return `<div class="mc-empty"><strong>${instructionEsc(title)}</strong>${instructionEsc(text)}${button || ''}</div>`;
