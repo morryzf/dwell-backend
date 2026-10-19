@@ -437,7 +437,22 @@ struct MemoryCardView<Actions: View>: View {
                 }
             }
             MemoryTagFlow(tags: tags)
-            if let target {
+            if let target, card.action == "replace" {
+                // 更新：上面是新的情况，下面划掉的是要被收起来的旧卡，一眼对照。
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("采用后，这张旧卡会收进归档：")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.dim)
+                    Text(target.content)
+                        .font(.system(size: 13))
+                        .lineSpacing(3)
+                        .strikethrough(true, color: Theme.dim.opacity(0.7))
+                        .foregroundStyle(Theme.dim)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.dim.opacity(0.1)))
+            } else if let target {
                 Text(card.action == "split" ? "拆自原卡：\(target.content)"
                      : "原主题：\(target.topics.map(labels.topic).joined(separator: "、"))")
                     .font(.system(size: 11.5))
@@ -481,6 +496,7 @@ struct MemoryCardView<Actions: View>: View {
         }
         if kind == .draft && card.action == "update" { out.append("重新分类") }
         if kind == .draft && card.action == "split" { out.append("拆分") }
+        if kind == .draft && card.action == "replace" { out.append("更新旧卡") }
         return out
     }
 }

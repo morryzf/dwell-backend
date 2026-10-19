@@ -2598,8 +2598,16 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
             rowids_json, source_start, source_end = _source_fields(
                 proposal.get("source_rowids"), source_start, source_end
             )
+            # 「这张旧卡过时了，换成这张」：采用后旧卡收进归档。旧卡得是这个窗口里还在用的。
+            target = str(proposal.get("replaces_card_id") or "") or None
+            if target and not cx.execute(
+                "SELECT 1 FROM memory_cards WHERE id=? AND chat_id=? AND status<>'archived'",
+                (target, chat_id),
+            ).fetchone():
+                target = None
             row = {
-                "id": new_id(), "chat_id": chat_id, "action": "create", "target_card_id": None,
+                "id": new_id(), "chat_id": chat_id,
+                "action": "replace" if target else "create", "target_card_id": target,
                 "content": content, "memory_type": str(proposal.get("memory_type") or "stable_fact")[:40],
                 "topics_json": json.dumps(proposal.get("topics") or [], ensure_ascii=False),
                 "importance": str(proposal.get("importance") or "normal")[:20],
@@ -2660,7 +2668,7 @@ def memory_card_stage_split(chat_id: str, kind: str, item_id: str, proposals: li
     if not item:
         raise ValueError("没有找到这条记忆")
     item = dict(item)
-    if kind == "draft" and item["action"] not in ("create", "split"):
+    if kind == "draft" and item["action"] not in ("create", "split", "replace"):
         raise ValueError("重新分类的建议不能拆")
     start, end = memory_source_span(chat_id, item)
     # 删旧、放新放在同一个事务里：中途出错不会把原来那条弄丢。
@@ -2769,7 +2777,7 @@ def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
         ).fetchone()
         if not draft:
             raise ValueError("没有找到这条待确认记忆")
-        if draft["action"] not in ("create", "update", "split"):
+        if draft["action"] not in ("create", "update", "split", "replace"):
             raise ValueError("暂不支持这种记忆变更")
         if draft["action"] == "update":
             # target_card_id 上挂着 ON DELETE CASCADE：卡片没了，这条建议也早没了，
@@ -2813,9 +2821,10 @@ def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
             row,
         )
         cx.execute("DELETE FROM memory_card_drafts WHERE id=?", (draft_id,))
-        if draft["action"] == "split":
+        if draft["action"] in ("split", "replace"):
             # 拆出来的第一条一采用，原卡就退场——不然新旧两份同时被挑中带入。
-            # 归档而不是删除：拆错了还能从归档里恢复。
+            # 替换也一样：新的情况生效，过时的那张不再被取回。
+            # 归档而不是删除：拆错了、换错了还能从归档里恢复。
             cx.execute(
                 "UPDATE memory_cards SET status='archived',updated=? "
                 "WHERE id=? AND chat_id=? AND status<>'archived'",

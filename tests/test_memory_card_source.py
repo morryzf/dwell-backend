@@ -57,7 +57,7 @@ class MemoryCardSourceTest(unittest.TestCase):
     def test_the_card_model_reads_the_raw_messages_with_their_numbers(self):
         sent = self._stage([])
         self.assertIn(f"[{self.rowids[2]}] Morry：对了，我妈下周三生日", sent["user"])
-        self.assertIn("一张卡只记一件事", sent["system"])
+        self.assertIn("单独读得懂", sent["system"])
         self.assertIn("evidence", sent["system"])
 
     def test_the_previous_tail_comes_along_as_background_only(self):
@@ -222,3 +222,45 @@ class MemoryCardSourceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MemoryCardReplaceTest(unittest.TestCase):
+    """出卡时能看到相关的旧卡；旧状态过时了可以提「换成这张」，Morry 采用后旧卡才收起来。"""
+
+    OLD = {"content": "Morry 打算送她妈妈一条围巾当生日礼物。", "memory_type": "plan",
+           "topics": ["family_friends"], "importance": "normal",
+           "retention": "long_term", "valid_until": None}
+
+    CARD = MemoryCardSourceTest.CARD
+    _stage = MemoryCardSourceTest._stage
+    tearDown = MemoryCardSourceTest.tearDown
+
+    def setUp(self):
+        MemoryCardSourceTest.setUp(self)
+        self.old = db.memory_card_add_manual(self.chat, self.OLD)
+
+    def test_related_cards_are_shown_with_numbers(self):
+        sent = self._stage([])
+        self.assertIn("【已有的相关记忆卡", sent["user"])
+        self.assertIn("K1 ", sent["user"])
+        self.assertIn("围巾当生日礼物", sent["user"])
+        self.assertIn("replaces", sent["system"])
+
+    def test_a_replacing_card_waits_for_review_and_archives_the_old_one_when_accepted(self):
+        self._stage([{**self.CARD, "content": "Morry 改主意了，送她妈妈一束花当生日礼物。",
+                      "memory_type": "plan", "replaces": "K1"}])
+        draft = db.memory_card_draft_list(self.chat)[0]
+        self.assertEqual(draft["action"], "replace")
+        self.assertEqual(draft["target_card_id"], self.old["id"])
+        # 还没采用：旧卡照常生效。
+        self.assertEqual(db.memory_card_get(self.chat, self.old["id"])["status"], "active")
+
+        db.memory_card_draft_accept(self.chat, draft["id"], {**self.CARD, "content": draft["content"]})
+
+        self.assertEqual(db.memory_card_get(self.chat, self.old["id"])["status"], "archived")
+
+    def test_an_unknown_reference_is_just_a_new_card(self):
+        self._stage([{**self.CARD, "replaces": "K9"}])
+        draft = db.memory_card_draft_list(self.chat)[0]
+        self.assertEqual(draft["action"], "create")
+        self.assertIsNone(draft["target_card_id"])
