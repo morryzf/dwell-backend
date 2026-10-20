@@ -920,10 +920,13 @@ MEMORY_CARD_UPDATE_RULES = (
     "thread_role 是这张卡在事件里的身份：main（主卡）或 detail（副卡）。"
     "主卡写清这件事是什么、跟谁有关、现在到哪一步；副卡记其中的细节（某天发生了什么、谁说了什么），"
     "也要写事件名。一个事件只能有一张主卡。"
-    "这段原文里第一次出现一件会持续的事（已有事件名里没有）：先出一张主卡，需要的话再出副卡。"
-    "已有事件有了新进展：只能做两件事——更新主卡，或者加副卡。"
-    "更新主卡：thread_role 写 main，replaces 填那张主卡的编号，content 写完整的新版本："
-    "原来的内容一字不改地保留，在后面接着写新的走向；只有原来写错了的地方才改。"
+    # 主卡是一条时间线，每个节点是一天里这件事往前走了哪一步。
+    "主卡是这件事的时间线：每个节点写某一天这件事往前走了哪一步，日期由系统按原文另行附上。"
+    "这段原文里第一次出现一件会持续的事（已有事件名里没有）：先出一张主卡，content 写这件事是怎么开始的、"
+    "跟谁有关、走到了哪一步；需要的话再出副卡。"
+    "已有事件有了新进展：只能做两件事——给主卡加一个节点，或者加副卡。"
+    "加节点：thread_role 写 main，replaces 填那张主卡的编号，content 只写这一次新发生的走向，"
+    "不要把主卡里已经写过的再写一遍。没有新进展就不要加。"
     "原文说明某张别的状态卡或计划已经过时（变了、取消了、结束了），"
     "就出一张写着最新情况的卡，replaces 填那张旧卡的编号；新卡要写完整，因为旧卡采用后会被收起来。"
     "经过卡和原话卡不要被 replaces。不是替换也不是更新主卡的，replaces 写 null。"
@@ -1033,6 +1036,7 @@ async def _stage_memory_card_suggestions(
                                      db.memory_card_threads(chat_id)),
         )
         refs = {f"K{index}": card for index, card in enumerate(related, 1)}
+        made_by_rowid = {int(row["rowid"]): int(row.get("made") or 0) for row in rows}
         raw_cards = data.get("cards") or []
         if not isinstance(raw_cards, list):
             raise ValueError("记忆整理结果中的 cards 不是数组")
@@ -1052,6 +1056,10 @@ async def _stage_memory_card_suggestions(
                 continue
             clean["source_segment_id"] = segment["id"]
             clean["source_rowids"] = _memory_card_evidence(raw, allowed)
+            # 时间线节点的日子：这件事在原文里第一次说到的那天。
+            stamps = [made_by_rowid[r] for r in clean["source_rowids"] if made_by_rowid.get(r)] or \
+                [made for made in made_by_rowid.values() if made]
+            clean["node_date"] = db._day(min(stamps)) if stamps else ""
             # 只认这次递过去的编号。主卡在整个卡池里唯一，别的窗口记下的也能更新；
             # 别的卡只替换这个窗口自己的。
             replaced = refs.get(str(raw.get("replaces") or "").strip().upper())
@@ -5289,7 +5297,8 @@ async def memory_card_put(chat_id: str, card_id: str, request: Request):
             chosen[field] = payload[field]
     try:
         clean = _memory_card_clean(chosen, allow_status=True)
-        card = db.memory_card_update(chat_id, card_id, {**clean, "demote_other": bool(payload.get("demote_other"))})
+        card = db.memory_card_update(chat_id, card_id, {**clean, "demote_other": bool(payload.get("demote_other")),
+                                                        "timeline": payload.get("timeline")})
     except db.ThreadMainExists as exc:
         raise _main_exists(exc) from exc
     except ValueError as exc:
@@ -5514,6 +5523,8 @@ async def memory_card_complete(chat_id: str, card_id: str):
     card = db.memory_card_get(chat_id, card_id)
     if not card or card.get("status") == "archived":
         raise HTTPException(404, "没有找到这张记忆卡片")
+    if card.get("thread_role") == "main":
+        raise HTTPException(400, "主卡是时间线，在时间线里直接改节点就好")
     task = _memory_card_tasks.get(chat_id)
     if task and not task.done():
         raise HTTPException(409, "记忆正在整理，请等这一趟完成再补")

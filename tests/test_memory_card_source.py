@@ -340,18 +340,35 @@ class MemoryMainCardTest(unittest.TestCase):
             **self.CARD, "content": "Morry 在追音音。", "memory_type": "open_thread",
             "thread": "追音音", "thread_role": "main"})
 
-    def test_a_second_main_card_becomes_an_update_of_the_first(self):
-        self._stage([{**self.CARD, "content": "Morry 在追音音。后来音音回了消息。",
-                      "thread": "追音音", "thread_role": "main"}])
+    def test_a_second_main_card_becomes_a_new_node_on_the_first(self):
+        self._stage([{**self.CARD, "content": "后来音音回了消息。",
+                      "thread": "追音音", "thread_role": "main", "evidence": [self.rowids[2]]}])
         draft = db.memory_card_draft_list(self.chat)[0]
-        self.assertEqual((draft["action"], draft["target_card_id"]), ("revise", self.main_card["id"]))
+        self.assertEqual((draft["action"], draft["target_card_id"]), ("append", self.main_card["id"]))
+        self.assertRegex(draft["node_date"], r"^\d{4}-\d{2}-\d{2}$")
 
         card = db.memory_card_draft_accept(self.chat, draft["id"], main._memory_card_clean(draft))
 
         self.assertEqual(card["id"], self.main_card["id"])
-        self.assertEqual(card["thread_role"], "main")
+        self.assertEqual([n["text"] for n in card["timeline"]], ["Morry 在追音音。", "后来音音回了消息。"])
+        self.assertIn(f"{draft['node_date']}：后来音音回了消息。", card["content"])
         self.assertEqual([h["content"] for h in db.memory_card_history(self.chat, card["id"])],
                          ["Morry 在追音音。"])
+
+    def test_an_old_main_card_is_one_node_until_edited(self):
+        self.assertEqual([n["text"] for n in self.main_card["timeline"]], ["Morry 在追音音。"])
+        nodes = [{"date": "2026-10-15", "text": "她发现音的旧号不见了。"},
+                 {"date": "2026-10-13", "text": "Morry 关注了音。"}]
+        chosen = main._memory_card_clean(self.main_card)
+        card = db.memory_card_update(self.chat, self.main_card["id"], {**chosen, "timeline": nodes})
+        self.assertEqual([n["date"] for n in card["timeline"]], ["2026-10-13", "2026-10-15"])
+        self.assertEqual(card["content"], "2026-10-13：Morry 关注了音。\n\n2026-10-15：她发现音的旧号不见了。")
+
+    def test_main_cards_are_not_completed_by_the_model(self):
+        c = TestClient(main.app)
+        c.headers["X-Dwell-Token"] = "t"
+        res = c.post(f"/api/chats/{self.chat}/memory-cards/{self.main_card['id']}/complete")
+        self.assertEqual(res.status_code, 400)
 
     def test_two_mains_for_a_new_event_in_one_batch_leave_one_main(self):
         self._stage([{**self.CARD, "content": "Morry 开始学游泳。", "thread": "学游泳", "thread_role": "main"},

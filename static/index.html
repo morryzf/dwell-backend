@@ -3571,6 +3571,37 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .mc-added { padding: 0 2px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
   /* 主卡的旧版本，点「历史」摊在卡片下面 */
   .mc-history { display: grid; gap: 9px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  /* 主卡在列表里只露最新一步；点「时间线 · N 步」在卡片里摊开整条，摊开时最新一步不再重复 */
+  .mc-tl-latest { display: block; }
+  .mc-tl-latest-date { display: block; margin-bottom: 2px; color: var(--dim); font-size: 11.5px; line-height: 1.4; font-variant-numeric: tabular-nums; }
+  .mc-tl-draft-head { display: block; margin-bottom: 3px; color: var(--text); font-size: 12px; font-weight: 650; }
+  .mc-tl-link { display: inline-block; margin-top: 6px; padding: 0; color: color-mix(in srgb, var(--accent) 78%, var(--text)); font-size: 12px; font-weight: 650; white-space: nowrap; transition: transform 120ms var(--mc-ease-out); }
+  .mc-tl-link:active { transform: scale(.97); }
+  .mc-card.mc-tl-open .mc-tl-latest { display: none; }
+  .mc-tl { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+  /* 竖线 + 圆点：--tl-y 是圆点圆心离节点顶的距离，竖线从这颗圆心连到下一颗 */
+  .mc-tl-list { --tl-gap: 15px; --tl-y: 9px; display: grid; gap: var(--tl-gap); margin: 0; padding: 0 0 0 24px; list-style: none; }
+  .mc-tl-node { position: relative; min-width: 0; }
+  .mc-tl-node::before { content: ''; position: absolute; z-index: 1; left: -23px; top: calc(var(--tl-y) - 5px); width: 10px; height: 10px; box-sizing: border-box; border: 2px solid var(--accent); border-radius: 50%; background: var(--panel); }
+  .mc-tl-node.is-latest::before { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+  .mc-tl-node:not(:last-child)::after { content: ''; position: absolute; left: -19px; top: var(--tl-y); bottom: calc(-1 * (var(--tl-gap) + var(--tl-y))); width: 2px; border-radius: 1px; background: color-mix(in srgb, var(--accent) 32%, var(--line)); }
+  .mc-tl-date { color: var(--dim); font-size: 11.5px; line-height: 18px; font-variant-numeric: tabular-nums; }
+  .mc-tl-text { margin-top: 2px; color: var(--text); font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+  .mc-tl-date + .mc-tl-text { margin-top: 1px; }
+  /* 摊开时一步一步往上浮出来，步数多了不越拖越久（--i 封顶 8） */
+  .mc-tl-enter { animation: mcTlIn 200ms var(--mc-ease-out) both; animation-delay: calc(var(--i, 0) * 40ms); }
+  @keyframes mcTlIn { from { opacity: 0; transform: translateY(6px); } }
+  /* 编辑时间线：日期框和 × 一排，文字框在下面；圆点对齐日期框中间 */
+  .mc-tl-edit .mc-tl-list { --tl-gap: 18px; --tl-y: 21px; }
+  .mc-tl-edit .mc-tl-node { display: grid; gap: 6px; }
+  .mc-tl-edit-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .mc-tl-edit-row input[type="date"] { flex: 1; }
+  .mc-tl-edit textarea.ap-in { min-height: 64px; box-sizing: border-box; font-size: 14px; line-height: 1.55; }
+  .mc-tl-del { flex: none; width: 34px; height: 34px; border-radius: 10px; color: var(--dim); font-size: 19px; line-height: 1; transition: transform 120ms var(--mc-ease-out), background-color 160ms var(--mc-ease-out); }
+  .mc-tl-del:active { transform: scale(.94); background: color-mix(in srgb, var(--dim) 12%, transparent); }
+  .mc-tl-edit .mc-tl-add { justify-self: start; margin-left: 24px; }
+  .mc-tl-edit .mc-actions { margin-top: 0; }
+  @media (prefers-reduced-motion: reduce) { .mc-tl-enter { animation: none; } .mc-tl-link, .mc-tl-del { transition-duration: 0.01ms; } }
   .mc-source { margin-top: 9px; color: var(--dim); font-size: 11.5px; }
   .mc-source-link { padding: 0; color: var(--dim); font-size: 11.5px; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--dim) 45%, transparent); }
   .mc-source-link:active { opacity: .6; }
@@ -12708,8 +12739,10 @@ function memoryOptions(items, selected) {
 function memoryCardForm(item, taxonomy, kind) {
   const selectedTopics = item.topics || [];
   const topics = Object.entries(taxonomy.topics || {}).map(([key, name]) => `<label class="mc-topic"><input type="checkbox" value="${instructionEsc(key)}" ${selectedTopics.includes(key) ? 'checked' : ''}><span>${instructionEsc(name)}</span></label>`).join('');
+  // 主卡的正文是时间线拼出来的：这里不放正文框，存的时候也不带 content，免得把节点冲掉。
+  const timelineOwned = kind === 'card' && item.thread_role === 'main';
   return `<form class="mc-form" data-memory-form="${instructionEsc(item.id)}" data-kind="${kind}">
-    <label>记忆内容<textarea class="ap-in" name="content" maxlength="1200" rows="4">${instructionEsc(item.content || '')}</textarea></label>
+    ${timelineOwned ? '<div class="mc-retag">主卡的内容在时间线里改</div>' : `<label>记忆内容<textarea class="ap-in" name="content" maxlength="1200" rows="4">${instructionEsc(item.content || '')}</textarea></label>`}
     <div class="mc-form-grid"><label>类型<select class="ap-in" name="memory_type">${memoryOptions(taxonomy.types, item.memory_type)}</select></label><label>重要程度<select class="ap-in" name="importance">${memoryOptions(taxonomy.importance, item.importance)}</select></label></div>
     <div class="mc-form-grid"><label>保存时间<select class="ap-in" name="retention">${memoryOptions(taxonomy.retention, item.retention)}</select></label><label>有效至（仅“截至某日”需要）<input class="ap-in" name="valid_until" type="date" value="${instructionEsc(item.valid_until || '')}"></label></div>
     <label>主题（最多选 3 个）<span class="mc-topic-list">${topics}</span></label>
@@ -12783,8 +12816,21 @@ function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
   const threadTag = item.thread
     ? `<button type="button" class="mc-tag${item.thread_role === 'main' ? ' mc-tag-main' : ''}" data-mc-thread="${instructionEsc(item.thread)}">${roleName} · ${instructionEsc(item.thread)}</button>`
     : '';
+  // 加一步：给这件事的主卡时间线接上新的一步。整段都是新写的，全部标出来。
+  const isAppend = kind === 'draft' && item.action === 'append';
+  const appendTo = isAppend ? (currentById || {})[item.target_card_id] : null;
+  // 主卡：列表里只露最新一步（日子 + 那一步），整条时间线点开看。
+  const timeline = (kind === 'card' && item.thread_role === 'main' && Array.isArray(item.timeline)) ? item.timeline : [];
+  const latest = timeline[timeline.length - 1];
   // 补全建议多半是旧文字后面接上新进展：新加的那段标出来，不用逐字对照。
-  const contentHtml = (reviseOf && reviseOf.content) ? memoryAddedHtml(reviseOf.content, item.content) : instructionEsc(item.content || '');
+  let contentHtml = (reviseOf && reviseOf.content) ? memoryAddedHtml(reviseOf.content, item.content) : instructionEsc(item.content || '');
+  if (isAppend) {
+    const nodeDate = memoryNodeDate(item.node_date);
+    contentHtml = `<span class="mc-tl-draft-head">${appendTo ? `给主卡 · ${instructionEsc(appendTo.thread || item.thread || '')} 加一步` : '加一步'}</span>${nodeDate ? `<span class="mc-tl-latest-date">${instructionEsc(nodeDate)}</span>` : ''}<mark class="mc-added">${instructionEsc(item.content || '')}</mark>`;
+  } else if (latest) {
+    const nodeDate = memoryNodeDate(latest.date);
+    contentHtml = `<span class="mc-tl-latest">${nodeDate ? `<span class="mc-tl-latest-date">${instructionEsc(nodeDate)}</span>` : ''}${instructionEsc(latest.text || '')}</span><button type="button" class="mc-tl-link" data-memory-timeline="${instructionEsc(item.id)}" aria-expanded="false">时间线 · ${timeline.length} 步 ›</button>`;
+  }
   const topicTags = (item.topics || []).map(topic => `<span class="mc-tag">${instructionEsc((taxonomy.topics || {})[topic] || topic)}</span>`).join('');
   const importance = (taxonomy.importance || {})[item.importance] || item.importance;
   const retention = (taxonomy.retention || {})[item.retention] || item.retention;
@@ -12801,11 +12847,11 @@ function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
     : item.shared_count ? `<span class="mc-tag">已共享给 ${otherName}</span>` : '';
   const canShare = kind === 'card' && !item.shared_from && !item.shared_count;
   let actions = '';
-  if (kind === 'draft') actions = `<button class="mc-btn primary" data-memory-accept="${instructionEsc(item.id)}">采用</button><button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="draft">先修改</button>${(item.action === 'update' || item.action === 'revise') ? '' : `<button class="mc-btn quiet" data-memory-split="${instructionEsc(item.id)}" data-kind="draft">拆开</button>`}<button class="mc-btn quiet" data-memory-discard="${instructionEsc(item.id)}">忽略</button>`;
+  if (kind === 'draft') actions = `<button class="mc-btn primary" data-memory-accept="${instructionEsc(item.id)}">采用</button><button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="draft">先修改</button>${(item.action === 'update' || item.action === 'revise' || item.action === 'append') ? '' : `<button class="mc-btn quiet" data-memory-split="${instructionEsc(item.id)}" data-kind="draft">拆开</button>`}<button class="mc-btn quiet" data-memory-discard="${instructionEsc(item.id)}">忽略</button>`;
   else if (kind === 'used') actions = '';
   else if (archived) actions = `<button class="mc-btn" data-memory-restore="${instructionEsc(item.id)}">恢复</button><button class="mc-btn quiet danger" data-memory-delete-permanent="${instructionEsc(item.id)}">永久删除</button>`;
-  else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button><button class="mc-btn quiet" data-memory-complete="${instructionEsc(item.id)}">补全</button>${item.thread_role === 'main' ? `<button class="mc-btn quiet" data-memory-history="${instructionEsc(item.id)}" aria-expanded="false">历史</button>` : ''}${canShare ? `<button class="mc-btn quiet" data-memory-share="${instructionEsc(item.id)}">共享</button>` : ''}<button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
-  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${contentHtml}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${threadTag}${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${foreign ? `<span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span>` : ''}${sharedTag}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}${splitOf ? '<span class="mc-tag">拆分</span>' : ''}${replaceOf ? '<span class="mc-tag">更新旧卡</span>' : ''}${reviseOf ? '<span class="mc-tag">补全</span>' : ''}</div>${retagLine}${splitLine}${replaceLine}${reviseLine}${kind !== 'used' ? memorySourceHtml(item, kind) : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
+  else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button>${item.thread_role === 'main' ? '' : `<button class="mc-btn quiet" data-memory-complete="${instructionEsc(item.id)}">补全</button>`}${item.thread_role === 'main' ? `<button class="mc-btn quiet" data-memory-history="${instructionEsc(item.id)}" aria-expanded="false">历史</button>` : ''}${canShare ? `<button class="mc-btn quiet" data-memory-share="${instructionEsc(item.id)}">共享</button>` : ''}<button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
+  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${contentHtml}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${threadTag}${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${foreign ? `<span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span>` : ''}${sharedTag}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}${splitOf ? '<span class="mc-tag">拆分</span>' : ''}${replaceOf ? '<span class="mc-tag">更新旧卡</span>' : ''}${reviseOf ? '<span class="mc-tag">补全</span>' : ''}${isAppend ? '<span class="mc-tag">时间线</span>' : ''}</div>${retagLine}${splitLine}${replaceLine}${reviseLine}${kind !== 'used' ? memorySourceHtml(item, kind) : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
 }
 // 新旧两段对一下：开头、结尾相同的部分照常显示，中间新写的那段包进 <mark>。按字（码点）比，不切坏 emoji。
 function memoryAddedHtml(oldText, newText) {
@@ -12817,6 +12863,82 @@ function memoryAddedHtml(oldText, newText) {
   const added = b.slice(start, b.length - end).join('');
   if (!added) return instructionEsc(b.join(''));
   return instructionEsc(b.slice(0, start).join('')) + `<mark class="mc-added">${instructionEsc(added)}</mark>` + instructionEsc(b.slice(b.length - end).join(''));
+}
+// 时间线节点的日子：「10月15日」，不是今年的再带上年份；没有日子就空着。
+function memoryNodeDate(day) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ''));
+  if (!m) return '';
+  const md = Number(m[2]) + '月' + Number(m[3]) + '日';
+  return Number(m[1]) === new Date().getFullYear() ? md : m[1] + '年' + md;
+}
+function memoryToday() {
+  const d = new Date(), pad = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+// 时间线：旧的在上、最新的在下，最新那颗点是实心的。animate 时一步一步浮出来。
+function memoryTimelineHtml(nodes, animate) {
+  const last = nodes.length - 1;
+  return `<ol class="mc-tl-list">${nodes.map((node, i) => `<li class="mc-tl-node${i === last ? ' is-latest' : ''}${animate ? ' mc-tl-enter' : ''}" style="--i:${Math.min(i, 8)}">${node.date ? `<div class="mc-tl-date">${instructionEsc(memoryNodeDate(node.date))}</div>` : ''}<div class="mc-tl-text">${instructionEsc(node.text || '')}</div></li>`).join('')}</ol>`;
+}
+function memoryTimelineEditNode(node, animate) {
+  return `<li class="mc-tl-node${animate ? ' mc-tl-enter' : ''}" data-mc-tl-node><div class="mc-tl-edit-row"><input class="ap-in" type="date" value="${instructionEsc(node.date || '')}" aria-label="这一步的日子"><button type="button" class="mc-tl-del" aria-label="删掉这一步">×</button></div><textarea class="ap-in" rows="2" maxlength="1200" aria-label="这一步发生了什么">${instructionEsc(node.text || '')}</textarea></li>`;
+}
+// 点「时间线 · N 步」：在卡片头下面摊开整条时间线；再点收起。
+function memoryTimelineToggle(card, item, chat, cardState, allItems, animate) {
+  const link = card.querySelector('[data-memory-timeline]');
+  const open = card.querySelector('.mc-tl');
+  if (open) {
+    open.remove(); card.classList.remove('mc-tl-open');
+    if (link) { link.textContent = '时间线 · ' + (item.timeline || []).length + ' 步 ›'; link.setAttribute('aria-expanded', 'false'); }
+    return;
+  }
+  const box = document.createElement('div');
+  box.className = 'mc-tl';
+  card.querySelector('.mc-card-head').after(box);
+  card.classList.add('mc-tl-open');
+  if (link) { link.textContent = '收起时间线'; link.setAttribute('aria-expanded', 'true'); }
+  memoryTimelineRender(box, item, chat, cardState, allItems, animate);
+}
+function memoryTimelineRender(box, item, chat, cardState, allItems, animate) {
+  // 归档的卡只看不改，和卡片上不给「编辑」一致。
+  const editable = item.status !== 'archived';
+  box.innerHTML = memoryTimelineHtml(item.timeline || [], animate)
+    + (editable ? '<div class="mc-actions"><button type="button" class="mc-btn quiet" data-mc-tl-edit>编辑时间线</button></div>' : '');
+  const edit = box.querySelector('[data-mc-tl-edit]');
+  if (edit) edit.onclick = () => memoryTimelineEdit(box, item, chat, cardState, allItems);
+}
+// 编辑时间线：每一步一个日期框 + 文字框，× 删掉，「加一步」接在最后（默认今天）。
+// 存的时候只发 {timeline}，正文由服务器按节点重拼。
+function memoryTimelineEdit(box, item, chat, cardState, allItems) {
+  box.innerHTML = `<div class="mc-form mc-tl-edit"><ol class="mc-tl-list">${(item.timeline || []).map(node => memoryTimelineEditNode(node, false)).join('')}</ol>`
+    + '<button type="button" class="mc-btn quiet mc-tl-add" data-mc-tl-add>加一步</button>'
+    + '<div class="mc-actions"><button type="button" class="mc-btn primary" data-mc-tl-save>保存</button><button type="button" class="mc-btn quiet" data-mc-tl-cancel>取消</button></div>'
+    + '<div class="ap-msg" data-mc-tl-msg></div></div>';
+  const list = box.querySelector('.mc-tl-list'), msg = box.querySelector('[data-mc-tl-msg]');
+  list.onclick = event => { const del = event.target.closest('.mc-tl-del'); if (del) del.closest('[data-mc-tl-node]').remove(); };
+  box.querySelector('[data-mc-tl-add]').onclick = () => {
+    list.insertAdjacentHTML('beforeend', memoryTimelineEditNode({date: memoryToday(), text: ''}, true));
+    list.lastElementChild.querySelector('textarea').focus();
+  };
+  box.querySelector('[data-mc-tl-cancel]').onclick = () => memoryTimelineRender(box, item, chat, cardState, allItems, false);
+  const save = box.querySelector('[data-mc-tl-save]');
+  save.onclick = async () => {
+    const nodes = [...list.querySelectorAll('[data-mc-tl-node]')]
+      .map(li => ({date: li.querySelector('input').value, text: li.querySelector('textarea').value.trim()}))
+      .filter(node => node.text);
+    if (!nodes.length) { msg.textContent = '时间线至少要留一步。'; msg.className = 'ap-msg on bad'; return; }
+    save.disabled = true; msg.textContent = '正在保存…'; msg.className = 'ap-msg on';
+    try {
+      const saved = await memorySaveCard('api/chats/' + encodeURIComponent(memoryCardChatId(item, chat)) + '/memory-cards/' + encodeURIComponent(item.id), 'PUT', {timeline: nodes});
+      if (saved.demoted || !saved.data.item) { loadLongContext(true); return; }
+      // 服务器排好序、重拼了正文：拿回来原地换掉这张卡，时间线保持摊开。
+      Object.assign(item, saved.data.item);
+      const card = box.closest('.mc-card');
+      memoryCardReplace(card, item, cardState.taxonomy, 'card');
+      wireMemoryCards(chat, cardState, allItems);
+      memoryTimelineToggle(card, item, chat, cardState, allItems, false);
+    } catch (e) { save.disabled = false; msg.textContent = '没有保存：' + e.message; msg.className = 'ap-msg on bad'; }
+  };
 }
 function memoryEmpty(title, text, button) {
   return `<div class="mc-empty"><strong>${instructionEsc(title)}</strong>${instructionEsc(text)}${button || ''}</div>`;
@@ -12971,7 +13093,10 @@ function memoryReadForm(form) {
   const pick = form.elements.thread_pick;
   const isNew = !!(pick && pick.options[pick.selectedIndex] && pick.options[pick.selectedIndex].hasAttribute('data-mc-new'));
   const thread = pick ? (isNew ? form.elements.thread_new.value.trim() : pick.value) : '';
-  return {content:form.elements.content.value.trim(),memory_type:form.elements.memory_type.value,topics,importance:form.elements.importance.value,retention:form.elements.retention.value,valid_until:form.elements.valid_until.value || null,thread,thread_role:thread ? form.elements.thread_role.value : ''};
+  const payload = {memory_type:form.elements.memory_type.value,topics,importance:form.elements.importance.value,retention:form.elements.retention.value,valid_until:form.elements.valid_until.value || null,thread,thread_role:thread ? form.elements.thread_role.value : ''};
+  // 主卡的表单没有正文框：不带 content，服务器照旧留着时间线和拼好的正文。
+  if (form.elements.content) payload.content = form.elements.content.value.trim();
+  return payload;
 }
 async function memoryJson(url, options) {
   const response = await fetch(url, options);
@@ -13012,7 +13137,7 @@ function removeMemoryCard(card, tabKey) {
 function wireMemoryCards(chat, cardState, allItems) {
   document.querySelectorAll('[data-memory-edit]').forEach(button => button.onclick = () => { const item=[...(cardState.drafts||[]),...allItems].find(value=>value.id===button.dataset.memoryEdit); const card=button.closest('.mc-card'); card.innerHTML=memoryCardForm(item,cardState.taxonomy,button.dataset.kind); wireMemoryCards(chat,cardState,allItems); });
   document.querySelectorAll('[data-memory-cancel]').forEach(button => button.onclick = () => { const form=button.closest('[data-memory-form]'); const item=[...(cardState.drafts||[]),...allItems].find(v=>v.id===form.dataset.memoryForm); const card=button.closest('.mc-card'); if(item){memoryCardReplace(card,item,cardState.taxonomy,form.dataset.kind==='draft'?'draft':'card');wireMemoryCards(chat,cardState,allItems);}else{loadLongContext();} });
-  document.querySelectorAll('[data-memory-form]').forEach(form => { form.querySelectorAll('.mc-topic input').forEach(input => input.onchange=()=>{ if(form.querySelectorAll('.mc-topic input:checked').length>3){ input.checked=false; const msg=form.querySelector('[data-memory-msg]'); msg.textContent='一条记忆最多选 3 个主题。'; msg.className='ap-msg on bad'; } }); const formItem=[...(cardState.drafts||[]),...allItems].find(v=>v.id===form.dataset.memoryForm)||{}; const pick=form.elements.thread_pick; if(pick)pick.onchange=()=>{ const opt=pick.options[pick.selectedIndex]; const isNew=opt.hasAttribute('data-mc-new'); form.querySelector('[data-mc-new-wrap]').hidden=!isNew; form.querySelector('[data-mc-role-wrap]').hidden=!isNew&&!pick.value; form.elements.thread_role.value=memoryThreadRoleFor(formItem,isNew?'':pick.value); if(isNew)form.elements.thread_new.focus(); }; form.onsubmit=async event=>{ event.preventDefault(); const msg=form.querySelector('[data-memory-msg]'); const payload=memoryReadForm(form); if(!payload.content){msg.textContent='记忆内容不能为空。';msg.className='ap-msg on bad';return;} if(pick&&!form.querySelector('[data-mc-new-wrap]').hidden&&!payload.thread){msg.textContent='给新事件起个名字。';msg.className='ap-msg on bad';return;} msg.textContent='正在保存…';msg.className='ap-msg on'; try { if(form.dataset.kind==='new'){ await memorySaveCard('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards','POST',payload); memoryConsoleTab='cards'; loadLongContext(); return; } const editing=form.dataset.kind==='draft'?null:allItems.find(v=>v.id===form.dataset.memoryForm);const base='api/chats/'+encodeURIComponent(memoryCardChatId(editing,chat)); const url=form.dataset.kind==='draft'?base+'/memory-card-drafts/'+encodeURIComponent(form.dataset.memoryForm)+'/accept':base+'/memory-cards/'+encodeURIComponent(form.dataset.memoryForm); const saved=await memorySaveCard(url,form.dataset.kind==='draft'?'POST':'PUT',payload); const card=form.closest('.mc-card'); if(form.dataset.kind==='draft'){removeMemoryCard(card,'review');updateMemoryTabCount('cards',1);}else{const item=allItems.find(v=>v.id===form.dataset.memoryForm); /* 换了事件或主副：别的卡、事件列表都可能跟着变，整页静默重拿 */ if(saved.demoted||!item||(item.thread||'')!==payload.thread||(item.thread_role||'')!==payload.thread_role){loadLongContext(true);return;} Object.assign(item,payload);memoryCardReplace(card,item,cardState.taxonomy,'card');wireMemoryCards(chat,cardState,allItems);} } catch(e){msg.textContent='没有保存：'+e.message;msg.className='ap-msg on bad';} }; });
+  document.querySelectorAll('[data-memory-form]').forEach(form => { form.querySelectorAll('.mc-topic input').forEach(input => input.onchange=()=>{ if(form.querySelectorAll('.mc-topic input:checked').length>3){ input.checked=false; const msg=form.querySelector('[data-memory-msg]'); msg.textContent='一条记忆最多选 3 个主题。'; msg.className='ap-msg on bad'; } }); const formItem=[...(cardState.drafts||[]),...allItems].find(v=>v.id===form.dataset.memoryForm)||{}; const pick=form.elements.thread_pick; if(pick)pick.onchange=()=>{ const opt=pick.options[pick.selectedIndex]; const isNew=opt.hasAttribute('data-mc-new'); form.querySelector('[data-mc-new-wrap]').hidden=!isNew; form.querySelector('[data-mc-role-wrap]').hidden=!isNew&&!pick.value; form.elements.thread_role.value=memoryThreadRoleFor(formItem,isNew?'':pick.value); if(isNew)form.elements.thread_new.focus(); }; form.onsubmit=async event=>{ event.preventDefault(); const msg=form.querySelector('[data-memory-msg]'); const payload=memoryReadForm(form); if(form.elements.content&&!payload.content){msg.textContent='记忆内容不能为空。';msg.className='ap-msg on bad';return;} if(pick&&!form.querySelector('[data-mc-new-wrap]').hidden&&!payload.thread){msg.textContent='给新事件起个名字。';msg.className='ap-msg on bad';return;} msg.textContent='正在保存…';msg.className='ap-msg on'; try { if(form.dataset.kind==='new'){ await memorySaveCard('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards','POST',payload); memoryConsoleTab='cards'; loadLongContext(); return; } const editing=form.dataset.kind==='draft'?null:allItems.find(v=>v.id===form.dataset.memoryForm);const base='api/chats/'+encodeURIComponent(memoryCardChatId(editing,chat)); const url=form.dataset.kind==='draft'?base+'/memory-card-drafts/'+encodeURIComponent(form.dataset.memoryForm)+'/accept':base+'/memory-cards/'+encodeURIComponent(form.dataset.memoryForm); const saved=await memorySaveCard(url,form.dataset.kind==='draft'?'POST':'PUT',payload); const card=form.closest('.mc-card'); if(form.dataset.kind==='draft'){removeMemoryCard(card,'review');updateMemoryTabCount('cards',1);}else{const item=allItems.find(v=>v.id===form.dataset.memoryForm); /* 换了事件或主副：别的卡、事件列表都可能跟着变，整页静默重拿 */ if(saved.demoted||!item||(item.thread||'')!==payload.thread||(item.thread_role||'')!==payload.thread_role){loadLongContext(true);return;} Object.assign(item,payload);memoryCardReplace(card,item,cardState.taxonomy,'card');wireMemoryCards(chat,cardState,allItems);} } catch(e){msg.textContent='没有保存：'+e.message;msg.className='ap-msg on bad';} }; });
   document.querySelectorAll('[data-memory-accept]').forEach(button => button.onclick=async()=>{ button.disabled=true; try { await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/'+encodeURIComponent(button.dataset.memoryAccept)+'/accept',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); removeMemoryCard(button.closest('.mc-card'),'review');updateMemoryTabCount('cards',1); } catch(e){button.disabled=false;alert('没有采用：'+e.message);} });
   document.querySelectorAll('[data-memory-discard]').forEach(button => button.onclick=async()=>{ if(!confirm('忽略这条候选记忆？'))return; try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/'+encodeURIComponent(button.dataset.memoryDiscard),{method:'DELETE'});removeMemoryCard(button.closest('.mc-card'),'review');}catch(e){alert('没有忽略：'+e.message);} });
   document.querySelectorAll('[data-memory-toggle]').forEach(button => button.onclick=async()=>{ const item=allItems.find(value=>value.id===button.dataset.memoryToggle); try{await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(item.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...item,status:button.dataset.status})});item.status=button.dataset.status;const card=button.closest('.mc-card');memoryCardReplace(card,item,cardState.taxonomy,'card');wireMemoryCards(chat,cardState,allItems);}catch(e){alert('没有修改：'+e.message);} });
@@ -13023,6 +13148,8 @@ function wireMemoryCards(chat, cardState, allItems) {
   document.querySelectorAll('[data-memory-complete]').forEach(button => button.onclick=async()=>{ if(!confirm('让模型补全这张卡？\n会补上称呼、背景和所属事件，结果放进「待确认」；你采用后原卡才会改。'))return; button.disabled=true; try{const item=allItems.find(value=>value.id===button.dataset.memoryComplete);await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(button.dataset.memoryComplete)+'/complete',{method:'POST'});memoryConsoleTab='review';loadLongContext();}catch(e){button.disabled=false;alert('没有开始补全：'+e.message);} });
   // 主卡的「历史」：在卡片下面摊开之前的每一版（新的在前），再点收起。
   document.querySelectorAll('[data-memory-history]').forEach(button => button.onclick=async()=>{ const card=button.closest('.mc-card'); const open=card.querySelector('.mc-history'); if(open){open.remove();button.textContent='历史';button.setAttribute('aria-expanded','false');return;} const item=allItems.find(value=>value.id===button.dataset.memoryHistory); const box=document.createElement('div'); box.className='mc-history'; box.innerHTML='<div class="mc-retag">正在读取…</div>'; card.querySelector('.mc-card-view').appendChild(box); button.textContent='收起历史'; button.setAttribute('aria-expanded','true'); try{const d=await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(button.dataset.memoryHistory)+'/history',{cache:'no-store'}); const items=d.items||[]; box.innerHTML=items.length?items.map(v=>`<div><div class="mc-retag">${instructionEsc(memoryDate(v.made))}${v.reason?' · '+instructionEsc(v.reason):''}</div><div class="mc-content">${instructionEsc(v.content||'')}</div></div>`).join(''):'<div class="mc-retag">还没有旧版本</div>';}catch(e){box.innerHTML='<div class="mc-retag">没读到历史：'+instructionEsc(e.message)+'</div>';} });
+  // 主卡的「时间线 · N 步」：在卡片里摊开整条时间线，再点收起。
+  document.querySelectorAll('[data-memory-timeline]').forEach(button => button.onclick = () => { const item=allItems.find(value=>value.id===button.dataset.memoryTimeline); if(item)memoryTimelineToggle(button.closest('.mc-card'),item,chat,cardState,allItems,true); });
   // 点「主卡 · xx」「副卡 · xx」：回到记忆卡页，只看这件事的卡。
   document.querySelectorAll('[data-mc-thread]').forEach(tag => tag.onclick = () => { memoryConsoleThread = tag.dataset.mcThread; memoryConsoleTab = 'cards'; memoryCardLimit = MEMORY_PAGE; loadLongContext(true); });
   document.querySelectorAll('[data-memory-share]').forEach(button => button.onclick = async () => {

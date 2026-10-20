@@ -54,6 +54,23 @@ struct MemoryLabels {
     func retention(_ key: String) -> String { Self.lookup(key, retention, MemoryTaxonomy.retention) }
 }
 
+/// 主卡时间线上的一步。
+struct TimelineNode: Identifiable, Equatable {
+    let id = UUID()
+    var date: String
+    var text: String
+
+    /// 「10月13日」；不是今年的带上年份。
+    var label: String {
+        let parts = date.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return "" }
+        let year = Calendar.current.component(.year, from: Date())
+        return (parts[0] == year ? "" : "\(parts[0])年") + "\(parts[1])月\(parts[2])日"
+    }
+
+    static func == (a: TimelineNode, b: TimelineNode) -> Bool { a.date == b.date && a.text == b.text }
+}
+
 /// 一张记忆卡，或者一条待确认（两者字段几乎一样，待确认多了 action / target_card_id）。
 struct MemoryCard: Identifiable, Equatable {
     let id: String
@@ -77,6 +94,10 @@ struct MemoryCard: Identifiable, Equatable {
     var thread: String
     /// 在这件事里的身份：main（主卡，一件事只有一张）/ detail（副卡）/ 空（不属于任何事件）。
     var threadRole: String
+    /// 主卡的时间线：一个节点是某一天这件事往前走的一步，按日子排。别的卡是空的。
+    var timeline: [TimelineNode]
+    /// 「给主卡加一步」那条待确认：这一步发生在哪天。
+    let nodeDate: String
     /// 待确认专用：create / update（重新分类）/ split（拆分）/ replace（更新旧卡）/ revise（补全）
     let action: String
     let targetCardID: String?
@@ -101,6 +122,10 @@ struct MemoryCard: Identifiable, Equatable {
         sharedCount = json["shared_count"] as? Int ?? 0
         thread = json["thread"] as? String ?? ""
         threadRole = json["thread_role"] as? String ?? ""
+        timeline = (json["timeline"] as? [[String: Any]] ?? []).map {
+            TimelineNode(date: $0["date"] as? String ?? "", text: $0["text"] as? String ?? "")
+        }
+        nodeDate = json["node_date"] as? String ?? ""
         action = json["action"] as? String ?? "create"
         targetCardID = json["target_card_id"] as? String
         updated = Date(timeIntervalSince1970: TimeInterval(json["updated"] as? Int ?? json["made"] as? Int ?? 0))

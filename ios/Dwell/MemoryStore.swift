@@ -188,6 +188,17 @@ final class MemoryStore: ObservableObject {
         } catch { say(error); return false }
     }
 
+    /// 改主卡的时间线：改、删、加节点都是整条发回去，正文由后端按节点拼。
+    func saveTimeline(_ card: MemoryCard, _ nodes: [TimelineNode]) async -> MemoryCard? {
+        do {
+            var body = card.payload
+            body["timeline"] = nodes.map { ["date": $0.date, "text": $0.text] }
+            let json = try await api.request("PUT", "api/chats/\(card.chatID)/memory-cards/\(card.id)", body: body)
+            await loadCards(reset: true)
+            return (json["item"] as? [String: Any]).map(MemoryCard.init(json:))
+        } catch { say(error); return nil }
+    }
+
     /// 主卡的旧版本（主卡在原卡上更新，改之前的都留着）。
     func history(_ card: MemoryCard) async -> [(text: String, reason: String, made: Date)] {
         guard let json = try? await api.request("GET", "api/chats/\(card.chatID)/memory-cards/\(card.id)/history") else {

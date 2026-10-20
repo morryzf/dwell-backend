@@ -704,6 +704,12 @@ def init_db():
             cx.execute("UPDATE memory_cards SET thread_role='detail' WHERE thread<>''")
         if "thread_role" not in draft_cols:
             cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN thread_role TEXT NOT NULL DEFAULT ''")
+        # 主卡是一条时间线：[{date, text}]，按发生的日子排。正文由它拼出来，取回和检索照旧用正文。
+        if "timeline_json" not in mc_cols:
+            cx.execute("ALTER TABLE memory_cards ADD COLUMN timeline_json TEXT NOT NULL DEFAULT ''")
+        # 给主卡加一个节点的那条待确认：这一步发生在哪天。
+        if "node_date" not in draft_cols:
+            cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN node_date TEXT NOT NULL DEFAULT ''")
         # 主卡在原卡上更新，改之前的内容留在这里，卡片上「历史」点开能看。
         cx.execute(
             """CREATE TABLE IF NOT EXISTS memory_card_history (
@@ -2290,7 +2296,52 @@ def _memory_card_dict(row: sqlite3.Row | dict | None) -> dict | None:
     item["source_rowids"] = _source_rowids(item.pop("source_rowids_json", "[]"))
     # 向量只给检索用，一张卡几千个数字。界面用不着，别跟着卡片一起发出去。
     item.pop("embedding_json", None)
+    if "timeline_json" in item:
+        item["timeline"] = card_timeline(item)
+        item.pop("timeline_json", None)
+    item.pop("source_made", None)
     return item
+
+
+def _day(stamp) -> str:
+    try:
+        return datetime.fromtimestamp(int(stamp or 0), CN_TZ).strftime("%Y-%m-%d") if stamp else ""
+    except (ValueError, OSError, OverflowError):
+        return ""
+
+
+def _clean_nodes(nodes) -> list[dict]:
+    out = []
+    for node in nodes if isinstance(nodes, list) else []:
+        if not isinstance(node, dict):
+            continue
+        text = str(node.get("text") or "").strip()[:1200]
+        date = str(node.get("date") or "").strip()[:10]
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+            date = ""
+        if text:
+            out.append({"date": date, "text": text})
+    # 按发生的日子排；没日子的放最前（多半是事情的起头），同一天的保持原来的先后。
+    return sorted(out, key=lambda n: n["date"] or "0000")
+
+
+def card_timeline(card: dict) -> list[dict]:
+    """主卡的时间线。老主卡还没拆成节点：整段正文算一个节点，日子取它的来源消息。"""
+    if card.get("thread_role") != "main":
+        return []
+    try:
+        nodes = _clean_nodes(json.loads(card.get("timeline_json") or "[]"))
+    except (TypeError, json.JSONDecodeError):
+        nodes = []
+    if nodes:
+        return nodes
+    text = str(card.get("content") or "").strip()
+    return [{"date": _day(card.get("source_made") or card.get("made")), "text": text}] if text else []
+
+
+def render_timeline(nodes: list[dict]) -> str:
+    """时间线拼成正文：一个节点一段，前面写日子。给模型读、给检索用。"""
+    return "\n\n".join(f"{n['date']}：{n['text']}" if n.get("date") else n["text"] for n in nodes)
 
 
 def _source_rowids(raw) -> list[int]:
@@ -2408,6 +2459,7 @@ _CARD_LIST_COLUMNS = (
     "c.id,c.chat_id,c.content,c.memory_type,c.topics_json,c.importance,c.retention,"
     "c.valid_until,c.surface_scope,c.status,c.source_segment_id,c.source_start_rowid,"
     "c.source_end_rowid,c.source_rowids_json,c.made,c.updated,c.undated,c.shared_from,c.thread,c.thread_role,"
+    "c.timeline_json,(SELECT m.made FROM messages m WHERE m.rowid=c.source_start_rowid) AS source_made,"
     "(SELECT COUNT(*) FROM memory_cards s WHERE s.shared_from=c.id AND s.status<>'archived') AS shared_count"
 )
 
@@ -2659,7 +2711,9 @@ def memory_card_get(chat_id: str, card_id: str) -> dict | None:
     with conn() as cx:
         row = cx.execute(
             "SELECT c.*, (SELECT COUNT(*) FROM memory_cards s WHERE s.shared_from=c.id "
-            "AND s.status<>'archived') AS shared_count FROM memory_cards c WHERE c.id=? AND c.chat_id=?",
+            "AND s.status<>'archived') AS shared_count, "
+            "(SELECT m.made FROM messages m WHERE m.rowid=c.source_start_rowid) AS source_made "
+            "FROM memory_cards c WHERE c.id=? AND c.chat_id=?",
             (card_id, chat_id),
         ).fetchone()
     return _memory_card_dict(row)
@@ -2720,11 +2774,8 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
             if wanted and main and wanted == main["id"]:
                 role = "main"
             if role == "main" and main:
-                action, target = "revise", main["id"]
-                cx.execute(
-                    "DELETE FROM memory_card_drafts WHERE chat_id=? AND action='revise' AND target_card_id=?",
-                    (chat_id, main["id"]),
-                )
+                # 已有主卡：这张写的是这一步的走向，采用后接在主卡的时间线后面。
+                action, target = "append", main["id"]
             elif role == "main" and thread in staged_mains:
                 role = "detail"
             elif wanted:
@@ -2747,6 +2798,7 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
                 "source_segment_id": segment_id, "source_start_rowid": source_start,
                 "source_end_rowid": source_end, "source_rowids_json": rowids_json, "made": now,
                 "thread": thread, "thread_role": role,
+                "node_date": str(proposal.get("node_date") or "")[:10],
             }
             _insert_draft(cx, row)
             existing.add(fingerprint)
@@ -2759,11 +2811,12 @@ def _insert_draft(cx: sqlite3.Connection, row: dict) -> None:
         """INSERT INTO memory_card_drafts
            (id,chat_id,action,target_card_id,content,memory_type,topics_json,importance,
             retention,valid_until,surface_scope,source_segment_id,source_start_rowid,
-            source_end_rowid,source_rowids_json,made,thread,thread_role)
+            source_end_rowid,source_rowids_json,made,thread,thread_role,node_date)
            VALUES (:id,:chat_id,:action,:target_card_id,:content,:memory_type,:topics_json,
                    :importance,:retention,:valid_until,:surface_scope,:source_segment_id,
-                   :source_start_rowid,:source_end_rowid,:source_rowids_json,:made,:thread,:thread_role)""",
-        {"thread": "", "thread_role": "", **row},
+                   :source_start_rowid,:source_end_rowid,:source_rowids_json,:made,:thread,:thread_role,
+                   :node_date)""",
+        {"thread": "", "thread_role": "", "node_date": "", **row},
     )
 
 
@@ -2950,8 +3003,30 @@ def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
         ).fetchone()
         if not draft:
             raise ValueError("没有找到这条待确认记忆")
-        if draft["action"] not in ("create", "update", "split", "replace", "revise"):
+        if draft["action"] not in ("create", "update", "split", "replace", "revise", "append"):
             raise ValueError("暂不支持这种记忆变更")
+        if draft["action"] == "append":
+            # 给主卡的时间线加一个节点：主卡还在原处，正文跟着时间线重拼。
+            pool = _memory_card_pool(chat_id)
+            target = cx.execute(
+                f"SELECT c.*, (SELECT m.made FROM messages m WHERE m.rowid=c.source_start_rowid) AS source_made "
+                f"FROM memory_cards c WHERE c.id=? AND c.chat_id IN ({','.join('?' for _ in pool)})",
+                [draft["target_card_id"], *pool],
+            ).fetchone()
+            if not target or target["status"] == "archived":
+                raise ValueError("这件事的主卡已经不在了")
+            nodes = card_timeline(dict(target))
+            nodes = _clean_nodes([*nodes, {"date": draft["node_date"] or _day(now),
+                                           "text": str(chosen["content"]).strip()}])
+            content = render_timeline(nodes)[:12000]
+            _remember_main_content(cx, target, content, "整理时加了一步")
+            cx.execute(
+                "UPDATE memory_cards SET content=?,timeline_json=?,updated=? WHERE id=?",
+                (content, json.dumps(nodes, ensure_ascii=False), now, target["id"]),
+            )
+            cx.execute("DELETE FROM memory_card_drafts WHERE id=?", (draft_id,))
+            cx.commit()
+            return memory_card_get(target["chat_id"], target["id"])
         if draft["action"] in ("update", "revise"):
             # target_card_id 上挂着 ON DELETE CASCADE：卡片没了，这条建议也早没了，
             # 所以走到这里 target 必然还在。status 不碰——重新分类不该顺手取消归档。
@@ -3003,14 +3078,21 @@ def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
         # 采用的时候这件事已经有主卡了（同一趟出了两张、或者她刚手动设了一张），这张就当副卡。
         if row["thread_role"] == "main" and _thread_main(cx, _memory_card_pool(chat_id), row["thread"]):
             row["thread_role"] = "detail"
+        # 新事件的主卡：时间线从这一步开始。
+        row["timeline_json"] = ""
+        if row["thread_role"] == "main":
+            first = [{"date": draft["node_date"] or "", "text": row["content"]}]
+            row["timeline_json"] = json.dumps(_clean_nodes(first), ensure_ascii=False)
+            row["content"] = render_timeline(_clean_nodes(first)) or row["content"]
         cx.execute(
             """INSERT INTO memory_cards
                (id,chat_id,content,memory_type,topics_json,importance,retention,valid_until,
                 surface_scope,status,source_segment_id,source_start_rowid,source_end_rowid,
-                source_rowids_json,made,updated,thread,thread_role)
+                source_rowids_json,made,updated,thread,thread_role,timeline_json)
                VALUES (:id,:chat_id,:content,:memory_type,:topics_json,:importance,:retention,
                        :valid_until,:surface_scope,:status,:source_segment_id,:source_start_rowid,
-                       :source_end_rowid,:source_rowids_json,:made,:updated,:thread,:thread_role)""",
+                       :source_end_rowid,:source_rowids_json,:made,:updated,:thread,:thread_role,
+                       :timeline_json)""",
             row,
         )
         cx.execute("DELETE FROM memory_card_drafts WHERE id=?", (draft_id,))
@@ -3046,20 +3128,34 @@ def memory_card_update(chat_id: str, card_id: str, chosen: dict) -> dict:
     now = int(time.time())
     thread = str(chosen.get("thread") or "")[:40]
     role = str(chosen.get("thread_role") or "")[:10] if thread else ""
+    content = str(chosen["content"]).strip()[:2400]
+    timeline_json = None
     with conn() as cx:
-        current = cx.execute("SELECT * FROM memory_cards WHERE id=? AND chat_id=?", (card_id, chat_id)).fetchone()
+        current = cx.execute(
+            "SELECT c.*, (SELECT m.made FROM messages m WHERE m.rowid=c.source_start_rowid) AS source_made "
+            "FROM memory_cards c WHERE c.id=? AND c.chat_id=?", (card_id, chat_id)).fetchone()
         if current:
             _settle_main(cx, _memory_card_pool(chat_id), card_id, thread, role, bool(chosen.get("demote_other")))
-            _remember_main_content(cx, current, chosen["content"], "手动编辑")
+            if role == "main":
+                # 主卡的正文由时间线拼出来：她改了节点就按节点拼；只改了别的（类型、主题），时间线不动。
+                if isinstance(chosen.get("timeline"), list):
+                    nodes = _clean_nodes(chosen["timeline"])
+                else:
+                    nodes = card_timeline({**dict(current), "thread_role": "main"})
+                if nodes:
+                    timeline_json = json.dumps(nodes, ensure_ascii=False)
+                    content = render_timeline(nodes)[:12000]
+            _remember_main_content(cx, current, content, "手动编辑")
         cur = cx.execute(
             """UPDATE memory_cards SET content=?,memory_type=?,topics_json=?,importance=?,
-               retention=?,valid_until=?,status=?,thread=?,thread_role=?,updated=? WHERE id=? AND chat_id=?""",
+               retention=?,valid_until=?,status=?,thread=?,thread_role=?,
+               timeline_json=COALESCE(?,timeline_json),updated=? WHERE id=? AND chat_id=?""",
             (
-                str(chosen["content"]).strip()[:2400], str(chosen["memory_type"])[:40],
+                content, str(chosen["memory_type"])[:40],
                 json.dumps(chosen.get("topics") or [], ensure_ascii=False),
                 str(chosen["importance"])[:20], str(chosen["retention"])[:20],
                 chosen.get("valid_until") or None, str(chosen.get("status") or "active")[:20],
-                thread, role, now, card_id, chat_id,
+                thread, role, timeline_json, now, card_id, chat_id,
             ),
         )
     if not cur.rowcount:
