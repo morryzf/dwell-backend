@@ -277,19 +277,21 @@ class MemoryThreadTest(unittest.TestCase):
         MemoryCardSourceTest.setUp(self)
         self.main_card = db.memory_card_add_manual(self.chat, {
             **self.CARD, "content": "Morry 在追音音（她在约会 AI 社区认识的女生），还没放手。",
-            "memory_type": "open_thread", "topics": ["relationship"], "thread": "追音音"})
+            "memory_type": "open_thread", "topics": ["relationship"], "thread": "追音音",
+            "thread_role": "main"})
 
     def test_drafting_keeps_the_thread_and_the_prompt_asks_for_it(self):
         sent = self._stage([{**self.CARD, "content": "在追音音这件事上，我让她别越界。", "thread": "追音音"}])
         self.assertIn("thread", sent["system"])
-        self.assertIn("事件：追音音", sent["user"])
+        self.assertIn("主卡·追音音", sent["user"])
+        self.assertIn("追音音（已有主卡）", sent["user"])
         draft = db.memory_card_draft_list(self.chat)[0]
         self.assertEqual(draft["thread"], "追音音")
         card = db.memory_card_draft_accept(self.chat, draft["id"], main._memory_card_clean(draft))
         self.assertEqual(card["thread"], "追音音")
 
     def test_a_detail_card_brings_its_main_card_along(self):
-        detail = {"id": "d1", "thread": "追音音", "memory_type": "quote", "status": "active"}
+        detail = {"id": "d1", "thread": "追音音", "thread_role": "detail", "memory_type": "quote", "status": "active"}
         pool = [*db.memory_card_embeddings(self.chat), detail]
         out = main._with_thread_mains([detail], pool)
         self.assertEqual([c["id"] for c in out], ["d1", self.main_card["id"]])
@@ -298,14 +300,14 @@ class MemoryThreadTest(unittest.TestCase):
         db.memory_card_add_manual(self.chat, {**self.CARD, "content": "别的事。"})
         page = db.memory_card_page(self.chat, thread="追音音")
         self.assertEqual([c["id"] for c in page["items"]], [self.main_card["id"]])
-        self.assertEqual(db.memory_card_threads(self.chat), [{"thread": "追音音", "count": 1}])
+        self.assertEqual(db.memory_card_threads(self.chat), [{"thread": "追音音", "count": 1, "has_main": True}])
 
     def test_completing_a_card_waits_for_review_then_rewrites_it_in_place(self):
         vague = db.memory_card_add_manual(self.chat, {**self.CARD, "content": "她对那个女生有 crush。"})
 
         async def fake(provider, model_id, system, user):
             self.assertIn("她对那个女生有 crush。", user)
-            self.assertIn("事件：追音音", user)
+            self.assertIn("主卡·追音音", user)
             return {"content": "她对音音（约会 AI 社区认识的女生）有 crush。", "thread": "追音音"}
 
         async def run():
@@ -323,3 +325,54 @@ class MemoryThreadTest(unittest.TestCase):
         self.assertEqual(card["id"], vague["id"])
         self.assertEqual(card["thread"], "追音音")
         self.assertIn("音音", card["content"])
+
+
+class MemoryMainCardTest(unittest.TestCase):
+    """一件事只有一张主卡：模型再提主卡就变成「在原主卡上更新」；主卡改字留历史。"""
+
+    CARD = MemoryCardSourceTest.CARD
+    _stage = MemoryCardSourceTest._stage
+    tearDown = MemoryCardSourceTest.tearDown
+
+    def setUp(self):
+        MemoryCardSourceTest.setUp(self)
+        self.main_card = db.memory_card_add_manual(self.chat, {
+            **self.CARD, "content": "Morry 在追音音。", "memory_type": "open_thread",
+            "thread": "追音音", "thread_role": "main"})
+
+    def test_a_second_main_card_becomes_an_update_of_the_first(self):
+        self._stage([{**self.CARD, "content": "Morry 在追音音。后来音音回了消息。",
+                      "thread": "追音音", "thread_role": "main"}])
+        draft = db.memory_card_draft_list(self.chat)[0]
+        self.assertEqual((draft["action"], draft["target_card_id"]), ("revise", self.main_card["id"]))
+
+        card = db.memory_card_draft_accept(self.chat, draft["id"], main._memory_card_clean(draft))
+
+        self.assertEqual(card["id"], self.main_card["id"])
+        self.assertEqual(card["thread_role"], "main")
+        self.assertEqual([h["content"] for h in db.memory_card_history(self.chat, card["id"])],
+                         ["Morry 在追音音。"])
+
+    def test_two_mains_for_a_new_event_in_one_batch_leave_one_main(self):
+        self._stage([{**self.CARD, "content": "Morry 开始学游泳。", "thread": "学游泳", "thread_role": "main"},
+                     {**self.CARD, "content": "Morry 学游泳报了周末班。", "thread": "学游泳", "thread_role": "main"}])
+        roles = sorted(d["thread_role"] for d in db.memory_card_draft_list(self.chat))
+        self.assertEqual(roles, ["detail", "main"])
+
+    def test_setting_a_second_main_by_hand_asks_first(self):
+        other = db.memory_card_add_manual(self.chat, {**self.CARD, "content": "她说想再试一次。",
+                                                       "thread": "追音音", "thread_role": "detail"})
+        chosen = main._memory_card_clean({**other, "thread_role": "main"})
+        with self.assertRaises(db.ThreadMainExists):
+            db.memory_card_update(self.chat, other["id"], chosen)
+
+        db.memory_card_update(self.chat, other["id"], {**chosen, "demote_other": True})
+
+        self.assertEqual(db.memory_card_get(self.chat, other["id"])["thread_role"], "main")
+        self.assertEqual(db.memory_card_get(self.chat, self.main_card["id"])["thread_role"], "detail")
+
+    def test_editing_a_main_card_keeps_its_old_text(self):
+        chosen = main._memory_card_clean({**self.main_card, "content": "Morry 在追音音，还没放手。"})
+        db.memory_card_update(self.chat, self.main_card["id"], chosen)
+        self.assertEqual([h["content"] for h in db.memory_card_history(self.chat, self.main_card["id"])],
+                         ["Morry 在追音音。"])
