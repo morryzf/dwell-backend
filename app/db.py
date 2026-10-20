@@ -698,6 +698,20 @@ def init_db():
             cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN source_rowids_json TEXT NOT NULL DEFAULT '[]'")
         if "thread" not in draft_cols:
             cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN thread TEXT NOT NULL DEFAULT ''")
+        # 在这件事里是主卡还是副卡。一件事只有一张主卡：写清是什么事、跟谁有关、现在到哪一步。
+        if "thread_role" not in mc_cols:
+            cx.execute("ALTER TABLE memory_cards ADD COLUMN thread_role TEXT NOT NULL DEFAULT ''")
+            cx.execute("UPDATE memory_cards SET thread_role='detail' WHERE thread<>''")
+        if "thread_role" not in draft_cols:
+            cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN thread_role TEXT NOT NULL DEFAULT ''")
+        # 主卡在原卡上更新，改之前的内容留在这里，卡片上「历史」点开能看。
+        cx.execute(
+            """CREATE TABLE IF NOT EXISTS memory_card_history (
+                   id TEXT PRIMARY KEY, card_id TEXT NOT NULL, content TEXT NOT NULL,
+                   reason TEXT NOT NULL DEFAULT '', made INTEGER NOT NULL,
+                   FOREIGN KEY (card_id) REFERENCES memory_cards(id) ON DELETE CASCADE)"""
+        )
+        cx.execute("CREATE INDEX IF NOT EXISTS ix_memory_card_history_card ON memory_card_history(card_id, made DESC)")
         # 已经产出过卡片或候选卡片的旧分段，不再重复调用模型。
         cx.execute(
             """INSERT OR IGNORE INTO memory_card_segment_runs
@@ -2393,7 +2407,7 @@ def memory_card_list(chat_id: str, include_archived: bool = False) -> list[dict]
 _CARD_LIST_COLUMNS = (
     "c.id,c.chat_id,c.content,c.memory_type,c.topics_json,c.importance,c.retention,"
     "c.valid_until,c.surface_scope,c.status,c.source_segment_id,c.source_start_rowid,"
-    "c.source_end_rowid,c.source_rowids_json,c.made,c.updated,c.undated,c.shared_from,c.thread,"
+    "c.source_end_rowid,c.source_rowids_json,c.made,c.updated,c.undated,c.shared_from,c.thread,c.thread_role,"
     "(SELECT COUNT(*) FROM memory_cards s WHERE s.shared_from=c.id AND s.status<>'archived') AS shared_count"
 )
 
@@ -2444,7 +2458,9 @@ def memory_card_page(chat_id: str, query: str = "", scope: str = "all",
         rows = cx.execute(
             f"SELECT {_CARD_LIST_COLUMNS}, ch.name AS chat_name FROM memory_cards c "
             f"LEFT JOIN chats ch ON ch.id=c.chat_id WHERE {sql_where} "
-            f"ORDER BY c.updated DESC, c.rowid DESC LIMIT ? OFFSET ?",
+            # 按事件看时主卡排第一，副卡跟在后面。
+            f"ORDER BY {'(c.thread_role=' + chr(39) + 'main' + chr(39) + ') DESC, ' if thread else ''}"
+            f"c.updated DESC, c.rowid DESC LIMIT ? OFFSET ?",
             [*args, limit, offset],
         ).fetchall()
         counts = cx.execute(
@@ -2463,11 +2479,79 @@ def memory_card_threads(chat_id: str) -> list[dict]:
     ids = _memory_card_pool(chat_id)
     with conn() as cx:
         rows = cx.execute(
-            f"SELECT thread, COUNT(*) AS count FROM memory_cards WHERE chat_id IN ({','.join('?' for _ in ids)}) "
+            f"SELECT thread, COUNT(*) AS count, SUM(thread_role='main') AS mains FROM memory_cards "
+            f"WHERE chat_id IN ({','.join('?' for _ in ids)}) "
             "AND status<>'archived' AND thread<>'' GROUP BY thread ORDER BY MAX(updated) DESC",
             ids,
         ).fetchall()
-    return [{"thread": row["thread"], "count": int(row["count"])} for row in rows]
+    return [{"thread": row["thread"], "count": int(row["count"]), "has_main": bool(row["mains"])}
+            for row in rows]
+
+
+class ThreadMainExists(ValueError):
+    """这件事已经有主卡了；带着那张卡，界面上好问她要不要把它改成副卡。"""
+
+    def __init__(self, card: dict):
+        super().__init__(f"「{card.get('thread')}」已经有主卡了")
+        self.card = card
+
+
+def _thread_main(cx: sqlite3.Connection, ids: list[str], thread: str, exclude: str = "") -> dict | None:
+    if not thread:
+        return None
+    row = cx.execute(
+        f"SELECT * FROM memory_cards WHERE chat_id IN ({','.join('?' for _ in ids)}) "
+        "AND thread=? AND thread_role='main' AND status<>'archived' AND id<>? ORDER BY updated DESC LIMIT 1",
+        [*ids, thread, exclude or ""],
+    ).fetchone()
+    return _memory_card_dict(row)
+
+
+def memory_thread_main(chat_id: str, thread: str, exclude: str = "") -> dict | None:
+    """这件事的主卡（整个卡池里只有一张）。"""
+    with conn() as cx:
+        return _thread_main(cx, _memory_card_pool(chat_id), thread, exclude)
+
+
+def _settle_main(cx: sqlite3.Connection, ids: list[str], card_id: str, thread: str,
+                 role: str, demote_other: bool) -> None:
+    """一件事只能有一张主卡：要把这张设成主卡、而那件事已经有了，
+    她点过「把原来那张改成副卡」才改，不然拦下来问她。"""
+    if role != "main":
+        return
+    other = _thread_main(cx, ids, thread, card_id)
+    if not other:
+        return
+    if not demote_other:
+        raise ThreadMainExists(other)
+    cx.execute("UPDATE memory_cards SET thread_role='detail',updated=? WHERE id=?",
+               (int(time.time()), other["id"]))
+
+
+def _remember_main_content(cx: sqlite3.Connection, card: dict | sqlite3.Row, new_content: str, reason: str) -> None:
+    """主卡改字之前，先把原来的内容存一份。"""
+    card = dict(card)
+    if card.get("thread_role") != "main":
+        return
+    old = str(card.get("content") or "").strip()
+    if not old or old == str(new_content or "").strip():
+        return
+    cx.execute(
+        "INSERT INTO memory_card_history (id,card_id,content,reason,made) VALUES (?,?,?,?,?)",
+        (new_id(), card["id"], old, reason, int(time.time())),
+    )
+
+
+def memory_card_history(chat_id: str, card_id: str) -> list[dict]:
+    ids = _memory_card_pool(chat_id)
+    with conn() as cx:
+        rows = cx.execute(
+            f"SELECT h.id,h.content,h.reason,h.made FROM memory_card_history h "
+            f"JOIN memory_cards c ON c.id=h.card_id "
+            f"WHERE h.card_id=? AND c.chat_id IN ({','.join('?' for _ in ids)}) ORDER BY h.made DESC, h.rowid DESC",
+            [card_id, *ids],
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def memory_cards_by_id(chat_id: str, card_ids: list[str]) -> list[dict]:
@@ -2496,14 +2580,18 @@ def memory_card_add_manual(chat_id: str, chosen: dict) -> dict:
         "importance": chosen["importance"], "retention": chosen["retention"],
         "valid_until": chosen.get("valid_until"), "made": now, "updated": now,
         "thread": str(chosen.get("thread") or "")[:40],
+        "thread_role": str(chosen.get("thread_role") or "")[:10],
     }
     with conn() as cx:
+        _settle_main(cx, _memory_card_pool(chat_id), row["id"], row["thread"], row["thread_role"],
+                     bool(chosen.get("demote_other")))
         cx.execute(
             """INSERT INTO memory_cards
                (id,chat_id,content,memory_type,topics_json,importance,retention,valid_until,
-                status,source_segment_id,source_start_rowid,source_end_rowid,made,updated,undated,thread)
+                status,source_segment_id,source_start_rowid,source_end_rowid,made,updated,undated,
+                thread,thread_role)
                VALUES (:id,:chat_id,:content,:memory_type,:topics_json,:importance,:retention,
-                       :valid_until,'active',NULL,0,0,:made,:updated,1,:thread)""",
+                       :valid_until,'active',NULL,0,0,:made,:updated,1,:thread,:thread_role)""",
             row,
         )
     memory_pool_touch()
@@ -2590,6 +2678,9 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
     """保存模型建议；相同内容的正式卡片或待审草稿不会重复出现。"""
     now = int(time.time())
     inserted = 0
+    pool = _memory_card_pool(chat_id)
+    # 这一趟里已经提出主卡的事件：同一趟又来一张主卡，就当副卡。
+    staged_mains: set[str] = set()
     with conn() as cx:
         existing = {
             re.sub(r"\s+", "", str(row["content"])).casefold()
@@ -2600,7 +2691,7 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
             ).fetchall()
         }
         for proposal in proposals[:40]:
-            content = str(proposal.get("content") or "").strip()[:1200]
+            content = str(proposal.get("content") or "").strip()[:2400]
             fingerprint = re.sub(r"\s+", "", content).casefold()
             if not content or fingerprint in existing:
                 continue
@@ -2620,16 +2711,34 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
             rowids_json, source_start, source_end = _source_fields(
                 proposal.get("source_rowids"), source_start, source_end
             )
-            # 「这张旧卡过时了，换成这张」：采用后旧卡收进归档。旧卡得是这个窗口里还在用的。
-            target = str(proposal.get("replaces_card_id") or "") or None
-            if target and not cx.execute(
-                "SELECT 1 FROM memory_cards WHERE id=? AND chat_id=? AND status<>'archived'",
-                (target, chat_id),
-            ).fetchone():
-                target = None
+            thread = str(proposal.get("thread") or "")[:40]
+            role = str(proposal.get("thread_role") or "")[:10] if thread else ""
+            action, target = "create", None
+            # 主卡一件事只有一张：已经有了，这张就是「在原主卡上更新」，不另起一张。
+            main = _thread_main(cx, pool, thread) if thread else None
+            wanted = str(proposal.get("replaces_card_id") or "") or None
+            if wanted and main and wanted == main["id"]:
+                role = "main"
+            if role == "main" and main:
+                action, target = "revise", main["id"]
+                cx.execute(
+                    "DELETE FROM memory_card_drafts WHERE chat_id=? AND action='revise' AND target_card_id=?",
+                    (chat_id, main["id"]),
+                )
+            elif role == "main" and thread in staged_mains:
+                role = "detail"
+            elif wanted:
+                # 「这张旧卡过时了，换成这张」：采用后旧卡收进归档。旧卡得是这个窗口里还在用的。
+                if cx.execute(
+                    "SELECT 1 FROM memory_cards WHERE id=? AND chat_id=? AND status<>'archived'",
+                    (wanted, chat_id),
+                ).fetchone():
+                    action, target = "replace", wanted
+            if role == "main":
+                staged_mains.add(thread)
             row = {
                 "id": new_id(), "chat_id": chat_id,
-                "action": "replace" if target else "create", "target_card_id": target,
+                "action": action, "target_card_id": target,
                 "content": content, "memory_type": str(proposal.get("memory_type") or "stable_fact")[:40],
                 "topics_json": json.dumps(proposal.get("topics") or [], ensure_ascii=False),
                 "importance": str(proposal.get("importance") or "normal")[:20],
@@ -2637,7 +2746,7 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
                 "valid_until": proposal.get("valid_until") or None, "surface_scope": "chat_only",
                 "source_segment_id": segment_id, "source_start_rowid": source_start,
                 "source_end_rowid": source_end, "source_rowids_json": rowids_json, "made": now,
-                "thread": str(proposal.get("thread") or "")[:40],
+                "thread": thread, "thread_role": role,
             }
             _insert_draft(cx, row)
             existing.add(fingerprint)
@@ -2650,11 +2759,11 @@ def _insert_draft(cx: sqlite3.Connection, row: dict) -> None:
         """INSERT INTO memory_card_drafts
            (id,chat_id,action,target_card_id,content,memory_type,topics_json,importance,
             retention,valid_until,surface_scope,source_segment_id,source_start_rowid,
-            source_end_rowid,source_rowids_json,made,thread)
+            source_end_rowid,source_rowids_json,made,thread,thread_role)
            VALUES (:id,:chat_id,:action,:target_card_id,:content,:memory_type,:topics_json,
                    :importance,:retention,:valid_until,:surface_scope,:source_segment_id,
-                   :source_start_rowid,:source_end_rowid,:source_rowids_json,:made,:thread)""",
-        {"thread": "", **row},
+                   :source_start_rowid,:source_end_rowid,:source_rowids_json,:made,:thread,:thread_role)""",
+        {"thread": "", "thread_role": "", **row},
     )
 
 
@@ -2707,7 +2816,7 @@ def memory_card_stage_split(chat_id: str, kind: str, item_id: str, proposals: li
             )
         inserted = 0
         for proposal in proposals[:8]:
-            content = str(proposal.get("content") or "").strip()[:1200]
+            content = str(proposal.get("content") or "").strip()[:2400]
             if not content:
                 continue
             rowids_json, source_start, source_end = _source_fields(
@@ -2724,6 +2833,8 @@ def memory_card_stage_split(chat_id: str, kind: str, item_id: str, proposals: li
                 "source_start_rowid": source_start, "source_end_rowid": source_end,
                 "source_rowids_json": rowids_json, "made": now,
                 "thread": str(proposal.get("thread") or item.get("thread") or "")[:40],
+                # 拆出来的几条都算副卡：主卡只有一张，拆了就让她自己再挑。
+                "thread_role": "detail" if (proposal.get("thread") or item.get("thread")) else "",
             })
             inserted += 1
     return inserted
@@ -2777,14 +2888,15 @@ def memory_card_stage_retags(chat_id: str, proposals: list[dict]) -> int:
                 """INSERT INTO memory_card_drafts
                    (id,chat_id,action,target_card_id,content,memory_type,topics_json,importance,
                     retention,valid_until,surface_scope,source_segment_id,source_start_rowid,
-                    source_end_rowid,source_rowids_json,made,thread)
-                   VALUES (?,?,'update',?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    source_end_rowid,source_rowids_json,made,thread,thread_role)
+                   VALUES (?,?,'update',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     new_id(), chat_id, card_id, card["content"], card["memory_type"],
                     json.dumps(topics, ensure_ascii=False), card["importance"],
                     card["retention"], card["valid_until"], card["surface_scope"],
                     card["source_segment_id"], card["source_start_rowid"],
                     card["source_end_rowid"], card["source_rowids_json"], now, card["thread"],
+                    card["thread_role"],
                 ),
             )
             pending.add(card_id)
@@ -2800,9 +2912,14 @@ def memory_card_stage_revise(chat_id: str, card_id: str, content: str, thread: s
     card = memory_card_get(chat_id, card_id)
     if not card or card.get("status") == "archived":
         raise ValueError("没有找到这张记忆卡片")
-    content = str(content or "").strip()[:1200]
+    content = str(content or "").strip()[:2400]
     if not content:
         raise ValueError("补全结果是空的")
+    thread = str(thread or "")[:40]
+    # 补全不改身份：主卡还是主卡；原来没有事件、这次补上了的，算副卡。
+    role = card.get("thread_role") or ("detail" if thread else "")
+    if not thread:
+        role = ""
     with conn() as cx:
         cx.execute(
             "DELETE FROM memory_card_drafts WHERE chat_id=? AND action='revise' AND target_card_id=?",
@@ -2818,7 +2935,7 @@ def memory_card_stage_revise(chat_id: str, card_id: str, content: str, thread: s
             "source_start_rowid": int(card.get("source_start_rowid") or 0),
             "source_end_rowid": int(card.get("source_end_rowid") or 0),
             "source_rowids_json": json.dumps(card.get("source_rowids") or []),
-            "made": int(time.time()), "thread": str(thread or "")[:40],
+            "made": int(time.time()), "thread": thread, "thread_role": role,
         }
         _insert_draft(cx, row)
     return next(d for d in memory_card_draft_list(chat_id) if d["id"] == row["id"])
@@ -2839,25 +2956,37 @@ def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
             # target_card_id 上挂着 ON DELETE CASCADE：卡片没了，这条建议也早没了，
             # 所以走到这里 target 必然还在。status 不碰——重新分类不该顺手取消归档。
             target_id = str(draft["target_card_id"] or "")
-            # revise（补全）：同一张卡原地改写，称呼和事件补上，id 不变。
+            # revise：同一张卡原地改写（补全称呼，或在主卡上接着写事件走向），id 不变。
+            # 主卡可能是互通卡池里别的窗口记下的，所以按卡池找，不只看这个窗口。
+            pool = _memory_card_pool(chat_id)
+            target = cx.execute(
+                f"SELECT * FROM memory_cards WHERE id=? AND chat_id IN ({','.join('?' for _ in pool)})",
+                [target_id, *pool],
+            ).fetchone()
+            if not target:
+                raise ValueError("要改的那张卡已经不在了")
+            content = str(chosen["content"]).strip()[:2400]
+            thread = str(chosen.get("thread") or "")[:40]
+            role = str(chosen.get("thread_role") or "")[:10] if thread else ""
+            _settle_main(cx, pool, target_id, thread, role, bool(chosen.get("demote_other")))
+            _remember_main_content(cx, target, content, "整理时更新" if draft["action"] == "revise" else "")
             cx.execute(
                 """UPDATE memory_cards SET content=?,memory_type=?,topics_json=?,importance=?,
-                   retention=?,valid_until=?,thread=?,updated=? WHERE id=? AND chat_id=?""",
+                   retention=?,valid_until=?,thread=?,thread_role=?,updated=? WHERE id=?""",
                 (
-                    str(chosen["content"]).strip()[:1200], str(chosen["memory_type"])[:40],
+                    content, str(chosen["memory_type"])[:40],
                     json.dumps(chosen.get("topics") or [], ensure_ascii=False),
                     str(chosen["importance"])[:20], str(chosen["retention"])[:20],
-                    chosen.get("valid_until") or None, str(chosen.get("thread") or "")[:40],
-                    now, target_id, chat_id,
+                    chosen.get("valid_until") or None, thread, role, now, target_id,
                 ),
             )
             cx.execute("DELETE FROM memory_card_drafts WHERE id=?", (draft_id,))
             # 先提交再读回：不然另开的连接读到的还是改之前的那张，界面上看着像没改成。
             cx.commit()
-            return memory_card_get(chat_id, target_id)
+            return memory_card_get(target["chat_id"], target_id)
         row = {
             "id": new_id(), "chat_id": chat_id,
-            "content": str(chosen["content"]).strip()[:1200],
+            "content": str(chosen["content"]).strip()[:2400],
             "memory_type": str(chosen["memory_type"])[:40],
             "topics_json": json.dumps(chosen.get("topics") or [], ensure_ascii=False),
             "importance": str(chosen["importance"])[:20],
@@ -2869,15 +2998,19 @@ def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
             "source_end_rowid": int(draft["source_end_rowid"]),
             "source_rowids_json": draft["source_rowids_json"] or "[]",
             "made": now, "updated": now, "thread": str(chosen.get("thread") or "")[:40],
+            "thread_role": str(chosen.get("thread_role") or "")[:10] if chosen.get("thread") else "",
         }
+        # 采用的时候这件事已经有主卡了（同一趟出了两张、或者她刚手动设了一张），这张就当副卡。
+        if row["thread_role"] == "main" and _thread_main(cx, _memory_card_pool(chat_id), row["thread"]):
+            row["thread_role"] = "detail"
         cx.execute(
             """INSERT INTO memory_cards
                (id,chat_id,content,memory_type,topics_json,importance,retention,valid_until,
                 surface_scope,status,source_segment_id,source_start_rowid,source_end_rowid,
-                source_rowids_json,made,updated,thread)
+                source_rowids_json,made,updated,thread,thread_role)
                VALUES (:id,:chat_id,:content,:memory_type,:topics_json,:importance,:retention,
                        :valid_until,:surface_scope,:status,:source_segment_id,:source_start_rowid,
-                       :source_end_rowid,:source_rowids_json,:made,:updated,:thread)""",
+                       :source_end_rowid,:source_rowids_json,:made,:updated,:thread,:thread_role)""",
             row,
         )
         cx.execute("DELETE FROM memory_card_drafts WHERE id=?", (draft_id,))
@@ -2911,16 +3044,22 @@ def memory_card_draft_discard(chat_id: str, draft_id: str) -> bool:
 
 def memory_card_update(chat_id: str, card_id: str, chosen: dict) -> dict:
     now = int(time.time())
+    thread = str(chosen.get("thread") or "")[:40]
+    role = str(chosen.get("thread_role") or "")[:10] if thread else ""
     with conn() as cx:
+        current = cx.execute("SELECT * FROM memory_cards WHERE id=? AND chat_id=?", (card_id, chat_id)).fetchone()
+        if current:
+            _settle_main(cx, _memory_card_pool(chat_id), card_id, thread, role, bool(chosen.get("demote_other")))
+            _remember_main_content(cx, current, chosen["content"], "手动编辑")
         cur = cx.execute(
             """UPDATE memory_cards SET content=?,memory_type=?,topics_json=?,importance=?,
-               retention=?,valid_until=?,status=?,thread=?,updated=? WHERE id=? AND chat_id=?""",
+               retention=?,valid_until=?,status=?,thread=?,thread_role=?,updated=? WHERE id=? AND chat_id=?""",
             (
-                str(chosen["content"]).strip()[:1200], str(chosen["memory_type"])[:40],
+                str(chosen["content"]).strip()[:2400], str(chosen["memory_type"])[:40],
                 json.dumps(chosen.get("topics") or [], ensure_ascii=False),
                 str(chosen["importance"])[:20], str(chosen["retention"])[:20],
                 chosen.get("valid_until") or None, str(chosen.get("status") or "active")[:20],
-                str(chosen.get("thread") or "")[:40], now, card_id, chat_id,
+                thread, role, now, card_id, chat_id,
             ),
         )
     if not cur.rowcount:
@@ -2950,7 +3089,7 @@ def memory_card_embeddings(chat_id: str) -> list[dict]:
     with conn() as cx:
         rows = cx.execute(
             "SELECT c.id,c.chat_id,c.content,c.embedding_json,c.memory_type,c.topics_json,"
-            "c.importance,c.retention,c.valid_until,c.status,c.made,c.updated,c.undated,c.thread,"
+            "c.importance,c.retention,c.valid_until,c.status,c.made,c.updated,c.undated,c.thread,c.thread_role,"
             "(SELECT m.made FROM messages m WHERE m.rowid=c.source_start_rowid) AS source_made "
             f"FROM memory_cards c WHERE c.chat_id IN ({marks}) AND c.status<>'archived'",
             ids,

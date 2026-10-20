@@ -75,6 +75,8 @@ struct MemoryCard: Identifiable, Equatable {
     let sharedCount: Int
     /// 属于哪件事（「追音音」）；同一件事的主卡和细节卡挂同一个名字。空＝不属于哪件持续的事。
     var thread: String
+    /// 在这件事里的身份：main（主卡，一件事只有一张）/ detail（副卡）/ 空（不属于任何事件）。
+    var threadRole: String
     /// 待确认专用：create / update（重新分类）/ split（拆分）/ replace（更新旧卡）/ revise（补全）
     let action: String
     let targetCardID: String?
@@ -98,12 +100,14 @@ struct MemoryCard: Identifiable, Equatable {
         sharedFrom = (json["shared_from"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         sharedCount = json["shared_count"] as? Int ?? 0
         thread = json["thread"] as? String ?? ""
+        threadRole = json["thread_role"] as? String ?? ""
         action = json["action"] as? String ?? "create"
         targetCardID = json["target_card_id"] as? String
         updated = Date(timeIntervalSince1970: TimeInterval(json["updated"] as? Int ?? json["made"] as? Int ?? 0))
     }
 
     var isHidden: Bool { status == "hidden" }
+    var isMain: Bool { !thread.isEmpty && threadRole == "main" }
     var isArchived: Bool { status == "archived" }
     var hasSource: Bool { sourceEnd > 0 }
 
@@ -122,6 +126,7 @@ struct MemoryCard: Identifiable, Equatable {
             "importance": importance, "retention": retention,
             "valid_until": retention == "time_bound" ? (validUntil ?? "") : "",
             "thread": thread.trimmingCharacters(in: .whitespacesAndNewlines),
+            "thread_role": thread.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : threadRole,
         ]
     }
 

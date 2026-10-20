@@ -811,10 +811,13 @@ def _memory_card_clean(raw: dict, allow_status: bool = False) -> dict:
     thread = re.sub(r"\s+", " ", str(raw.get("thread") or "")).strip()[:40]
     if thread.lower() in {"null", "none", "无"}:
         thread = ""
+    # 有事件就一定有身份：主卡或副卡，说不清的当副卡。没有事件就没有身份。
+    role = str(raw.get("thread_role") or "").strip().lower()
+    role = ("main" if role == "main" else "detail") if thread else ""
     return {
-        "content": content[:1200], "memory_type": memory_type, "topics": clean_topics,
+        "content": content[:2400], "memory_type": memory_type, "topics": clean_topics,
         "importance": importance, "retention": retention, "valid_until": valid_until,
-        "thread": thread,
+        "thread": thread, "thread_role": role,
         **({"status": status} if allow_status else {}),
     }
 
@@ -900,25 +903,30 @@ MEMORY_CARD_RULES = (
 MEMORY_CARD_JSON_SHAPE = (
     "只输出 JSON：{\"cards\":[{\"content\":\"...\",\"memory_type\":\"...\","
     "\"topics\":[\"...\"],\"importance\":\"normal\",\"retention\":\"long_term\","
-    "\"valid_until\":null,\"evidence\":[123,124],\"thread\":null,\"replaces\":null}]}。"
+    "\"valid_until\":null,\"evidence\":[123,124],\"thread\":null,\"thread_role\":null,"
+    "\"replaces\":null}]}。"
 )
 # 出卡时才用：模型能看到已有的相关卡，能提「这张旧卡过时了，换成这张」。
 # 换不换由 Morry 在待确认里决定，采用了旧卡才收进归档。
 MEMORY_CARD_UPDATE_RULES = (
     "卡分两种：经过（哪天发生了什么、谁说了什么）记的是当时，不会过时；"
     "状态（现在是什么情况：关系、住处、工作、计划、一件事进行到哪一步）会变。"
-    "一件持续好几天、还在进行的事，用一张 open_thread 主卡写清它是什么、跟谁有关、现在到哪一步。"
-    "原文里会附上已有的相关卡，每张有编号（K1、K2…）："
+    "原文里会附上已有的相关卡，每张有编号（K1、K2…），还有已有的全部事件名："
     "已有卡已经写到、这段原文没带来新内容的，不要再出一张换了说法的；"
     "称呼人和事时沿用已有卡里的名字。"
-    "原文说明某张状态卡、主卡或计划已经过时（有了进展、变了、取消了、结束了），"
-    "就出一张写着最新情况的卡，replaces 填那张旧卡的编号；新卡要写完整，"
-    "不能只写变了的那一点，因为旧卡采用后会被收起来。经过卡和原话卡不要被 replaces。"
-    "不是替换的卡，replaces 写 null。"
-    # 事件把同一件事的卡连起来：取回其中一张时，这件事的主卡会跟着一起来。
-    "thread 写这张卡属于哪件事，2 到 8 个字（如「追音音」「搬家」）；"
-    "同一件事的主卡和细节卡写同一个名字，已有卡里有这件事的名字就照抄，不要另起一个；"
-    "不属于某件持续的事的卡，thread 写 null。"
+    # 事件：一件持续好几天的事，一张主卡 + 若干副卡，主卡只有一张。
+    "持续好几天的事算一个事件。thread 写事件名，2 到 8 个字（如「追音音」「搬家」）；"
+    "已有事件名里有这件事，就照抄那个名字，不要另起一个；不属于任何事件的卡，thread 和 thread_role 都写 null。"
+    "thread_role 是这张卡在事件里的身份：main（主卡）或 detail（副卡）。"
+    "主卡写清这件事是什么、跟谁有关、现在到哪一步；副卡记其中的细节（某天发生了什么、谁说了什么），"
+    "也要写事件名。一个事件只能有一张主卡。"
+    "这段原文里第一次出现一件会持续的事（已有事件名里没有）：先出一张主卡，需要的话再出副卡。"
+    "已有事件有了新进展：只能做两件事——更新主卡，或者加副卡。"
+    "更新主卡：thread_role 写 main，replaces 填那张主卡的编号，content 写完整的新版本："
+    "原来的内容一字不改地保留，在后面接着写新的走向；只有原来写错了的地方才改。"
+    "原文说明某张别的状态卡或计划已经过时（变了、取消了、结束了），"
+    "就出一张写着最新情况的卡，replaces 填那张旧卡的编号；新卡要写完整，因为旧卡采用后会被收起来。"
+    "经过卡和原话卡不要被 replaces。不是替换也不是更新主卡的，replaces 写 null。"
 )
 MEMORY_CARD_RELATED_LIMIT = 12
 
@@ -951,9 +959,15 @@ def _chat_overview(chat_id: str) -> str:
 
 def _memory_card_source_text(
     rows: list[dict], context: list[dict], name: str = "Cloudy", overview: str = "",
-    related: list[dict] | None = None,
+    related: list[dict] | None = None, threads: list[dict] | None = None,
 ) -> str:
     parts = []
+    if threads:
+        parts.append(
+            "【已有的事件名：属于其中一件就照抄名字；标「已有主卡」的，不能再出主卡，只能更新它或加副卡】\n"
+            + "\n".join(f"- {t['thread']}" + ("（已有主卡）" if t.get("has_main") else "（还没有主卡）")
+                        for t in threads)
+        )
     if related:
         lines = [f"K{index} {_memory_card_line(card)}" for index, card in enumerate(related, 1)]
         parts.append(
@@ -1015,7 +1029,8 @@ async def _stage_memory_card_suggestions(
             "只提出日后仍可能有帮助、且能在原文里核对的卡片，"
             f"这一段最多 {MEMORY_CARD_PER_SEGMENT} 张；没有值得记的就返回空数组。"
             + MEMORY_CARD_RULES + MEMORY_CARD_UPDATE_RULES + MEMORY_CARD_JSON_SHAPE,
-            _memory_card_source_text(rows, context, name, _chat_overview(chat_id), related),
+            _memory_card_source_text(rows, context, name, _chat_overview(chat_id), related,
+                                     db.memory_card_threads(chat_id)),
         )
         refs = {f"K{index}": card for index, card in enumerate(related, 1)}
         raw_cards = data.get("cards") or []
@@ -1037,9 +1052,10 @@ async def _stage_memory_card_suggestions(
                 continue
             clean["source_segment_id"] = segment["id"]
             clean["source_rowids"] = _memory_card_evidence(raw, allowed)
-            # 只认这次递过去的编号；别的窗口的卡（互通卡池里的）这里不替换。
+            # 只认这次递过去的编号。主卡在整个卡池里唯一，别的窗口记下的也能更新；
+            # 别的卡只替换这个窗口自己的。
             replaced = refs.get(str(raw.get("replaces") or "").strip().upper())
-            if replaced and replaced.get("chat_id") == chat_id:
+            if replaced and (replaced.get("chat_id") == chat_id or replaced.get("thread_role") == "main"):
                 clean["replaces_card_id"] = replaced["id"]
             proposals.append(clean)
         db.memory_card_stage(chat_id, proposals)
@@ -1067,10 +1083,16 @@ async def _memory_related_cards(chat_id: str, transcript: str) -> list[dict]:
         cards = db.memory_card_embeddings(chat_id)
         if not cards:
             return []
-        return select_memory_cards(
+        picked = select_memory_cards(
             cards, query, limit=MEMORY_CARD_RELATED_LIMIT, cap=MEMORY_CARD_RELATED_LIMIT,
             now=db.cn_now().replace(tzinfo=None), query_embedding=await _embed_text(query),
         )
+        # 挑中了某件事的副卡，就一定把这件事的主卡也给它看：没看到主卡，它会以为是新事件、再出一张。
+        have = {card["id"] for card in picked}
+        threads = {card.get("thread") for card in picked if card.get("thread")}
+        mains = [card for card in cards if card.get("thread") in threads
+                 and card.get("thread_role") == "main" and card["id"] not in have]
+        return [*picked, *mains]
     except Exception:
         return []
 
@@ -5207,12 +5229,15 @@ async def memory_card_draft_accept(chat_id: str, draft_id: str, request: Request
     draft = _memory_card_draft(chat_id, draft_id)
     payload = await _read_json(request)
     chosen = dict(draft)
-    for field in ("content", "memory_type", "topics", "importance", "retention", "valid_until", "thread"):
+    for field in ("content", "memory_type", "topics", "importance", "retention", "valid_until",
+                  "thread", "thread_role"):
         if field in payload:
             chosen[field] = payload[field]
     try:
         clean = _memory_card_clean(chosen)
-        card = db.memory_card_draft_accept(chat_id, draft_id, clean)
+        card = db.memory_card_draft_accept(chat_id, draft_id, {**clean, "demote_other": bool(payload.get("demote_other"))})
+    except db.ThreadMainExists as exc:
+        raise _main_exists(exc) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if draft.get("action") == "revise":
@@ -5240,9 +5265,11 @@ async def memory_card_post(chat_id: str, request: Request):
     payload = await _read_json(request)
     try:
         clean = _memory_card_clean(payload)
+        card = db.memory_card_add_manual(chat_id, {**clean, "demote_other": bool(payload.get("demote_other"))})
+    except db.ThreadMainExists as exc:
+        raise _main_exists(exc) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    card = db.memory_card_add_manual(chat_id, clean)
     asyncio.create_task(_embed_memory_card(card["id"], card["content"]))
     return {"ok": True, "item": card}
 
@@ -5255,18 +5282,33 @@ async def memory_card_put(chat_id: str, card_id: str, request: Request):
     payload = await _read_json(request)
     chosen = dict(current)
     for field in (
-        "content", "memory_type", "topics", "importance", "retention", "valid_until", "status", "thread",
+        "content", "memory_type", "topics", "importance", "retention", "valid_until", "status",
+        "thread", "thread_role",
     ):
         if field in payload:
             chosen[field] = payload[field]
     try:
         clean = _memory_card_clean(chosen, allow_status=True)
-        card = db.memory_card_update(chat_id, card_id, clean)
+        card = db.memory_card_update(chat_id, card_id, {**clean, "demote_other": bool(payload.get("demote_other"))})
+    except db.ThreadMainExists as exc:
+        raise _main_exists(exc) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if card and "content" in payload:
         asyncio.create_task(_embed_memory_card(card["id"], card["content"]))
     return {"ok": True, "item": card}
+
+
+def _main_exists(exc: "db.ThreadMainExists") -> HTTPException:
+    """这件事已经有主卡：409，界面问她要不要把原来那张改成副卡，点了再带 demote_other 重发。"""
+    excerpt = re.sub(r"\s+", " ", str(exc.card.get("content") or ""))[:40]
+    return HTTPException(409, f"「{exc.card.get('thread')}」已经有主卡了：{excerpt}…… 要把它改成副卡、让这张当主卡吗？")
+
+
+@app.get("/api/chats/{chat_id}/memory-cards/{card_id}/history", dependencies=authed)
+async def memory_card_history_get(chat_id: str, card_id: str):
+    """主卡在原卡上更新，之前的每一版都在这里。"""
+    return {"ok": True, "items": db.memory_card_history(chat_id, card_id)}
 
 
 MEMORY_SOURCE_PAD = 3
@@ -5382,7 +5424,7 @@ MEMORY_THREAD_EXTRA = 2
 
 
 def _with_thread_mains(selected: list[dict], pool: list[dict]) -> list[dict]:
-    """取回的卡属于某件事，就把那件事的主卡（进行中事项）也带上，最多多带两张。
+    """取回的卡属于某件事，就把那件事的主卡也带上，最多多带两张。
 
     细节卡单独来，Cloudy 只看得到一个片段；有主卡在，他知道这件事是什么、现在到哪一步了。
     """
@@ -5397,7 +5439,7 @@ def _with_thread_mains(selected: list[dict], pool: list[dict]) -> list[dict]:
         for card in pool:
             if len(extra) >= MEMORY_THREAD_EXTRA:
                 break
-            if (card.get("thread") == thread and card.get("memory_type") == "open_thread"
+            if (card.get("thread") == thread and card.get("thread_role") == "main"
                     and card.get("status", "active") == "active" and card.get("id") not in have):
                 extra.append(card)
                 have.add(card.get("id"))
@@ -6234,8 +6276,9 @@ def _memory_card_line(card: dict) -> str:
         MEMORY_CARD_TOPICS.get(str(topic), str(topic)) for topic in card.get("topics") or []
     )
     thread = str(card.get("thread") or "").strip()
+    role = "主卡" if card.get("thread_role") == "main" else "副卡"
     parts = [part for part in (_memory_card_date(card), type_name, topics,
-                               f"事件：{thread}" if thread else "") if part]
+                               f"{role}·{thread}" if thread else "") if part]
     content = re.sub(r"\s+", " ", str(card.get("content") or "")).strip()
     return f"[{' · '.join(parts)}] {content}"
 
