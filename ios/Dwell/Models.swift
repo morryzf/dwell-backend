@@ -65,6 +65,8 @@ struct Message: Identifiable, Equatable {
     var voice: Bool
     /// 这一轮用了多少 token（只记在一轮回复的最后一条上）。
     var usage: MessageUsage
+    /// 贴在这条上的一个表情：我的消息上是他贴的，他的消息上是我贴的。没有是空串。
+    var reaction: String
 
     init(json: [String: Any]) {
         id = json["id"] as? String ?? UUID().uuidString
@@ -80,9 +82,12 @@ struct Message: Identifiable, Equatable {
         fromHeartbeat = (json["origin"] as? String) == "heartbeat"
         images = json["images"] as? [String] ?? []
         thinking = (json["thinking"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // 贴表情也是一次工具调用，但它已经画在消息角上了，不再写进「用过的工具」。
         tools = (json["tools"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+            .filter { $0 != "React" }
         voice = json["voice"] as? Bool ?? false
         usage = MessageUsage(json: json["usage"] as? [String: Any] ?? [:])
+        reaction = json["reaction"] as? String ?? ""
     }
 
     init(id: String, kind: Kind, text: String, images: [String] = [], at: Date = Date()) {
@@ -98,6 +103,7 @@ struct Message: Identifiable, Equatable {
         self.tools = []
         self.voice = false
         self.usage = MessageUsage(json: [:])
+        self.reaction = ""
     }
 
     var isLocal: Bool { id.hasPrefix("local-") }

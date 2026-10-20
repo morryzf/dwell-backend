@@ -810,6 +810,8 @@ struct MessageRow: View {
     let onSelect: () -> Void
 
     @State private var showUsage = false
+    /// 正在给他这条挑表情。
+    @State private var reacting = false
 
     var body: some View {
         switch message.kind {
@@ -835,17 +837,23 @@ struct MessageRow: View {
                         }
                     }
                 }
-                ForEach(Array(message.images.enumerated()), id: \.offset) { _, url in
+                let voiceBar = message.voice && !isMe && !message.text.isEmpty
+                // 表情挂在最后一个看得见的东西上：一般是最后一个气泡；只发了图就挂在最后一张图上。
+                let badgeOnImage = message.bubbles.isEmpty && !voiceBar
+                ForEach(Array(message.images.enumerated()), id: \.offset) { index, url in
                     MessageImage(url: url)
+                        .modifier(ReactionHost(message: message, isMe: isMe, reacting: $reacting,
+                                               active: badgeOnImage && index == message.images.count - 1))
                 }
-                if message.voice && !isMe && !message.text.isEmpty {
+                if voiceBar {
                     VoiceBar(messageID: message.id, text: message.text, pending: false) {
-                        bubbleList(isMe: isMe)
+                        bubbleList(isMe: isMe, badge: false)
                     }
                     .contextMenu { menu(copying: message.text) }
                     .onTapGesture { onToggleActions() }
+                    .modifier(ReactionHost(message: message, isMe: isMe, reacting: $reacting, active: true))
                 } else {
-                    bubbleList(isMe: isMe)
+                    bubbleList(isMe: isMe, badge: true)
                 }
                 // 还没冒完就先不挂 token 和按钮。
                 if store.shown[message.id] == nil {
@@ -861,10 +869,10 @@ struct MessageRow: View {
 
     /// 一条消息的文字气泡（分条的话是好几个）。最后一个带小尖角：他的在左下，我的在右下。
     @ViewBuilder
-    private func bubbleList(isMe: Bool) -> some View {
+    private func bubbleList(isMe: Bool, badge: Bool) -> some View {
         let parts = message.bubbles
         // 他的还在排队冒的，只画已经露出来的那几个。
-        let visible = store.shown[message.id] ?? parts.count
+        let visible = min(store.shown[message.id] ?? parts.count, parts.count)
         ForEach(Array(parts.prefix(visible).enumerated()), id: \.offset) { index, text in
             Bubble(text: text, isMe: isMe, tail: true)
                 .modifier(BubbleEntrance(delay: store.entering.contains(message.id) ? 0 : nil, isMe: isMe))
@@ -872,6 +880,8 @@ struct MessageRow: View {
                 .contentShape(Rectangle())
                 .onTapGesture { onToggleActions() }
                 .contextMenu { menu(copying: text) }
+                .modifier(ReactionHost(message: message, isMe: isMe, reacting: $reacting,
+                                       active: badge && index == visible - 1))
         }
     }
 
@@ -921,6 +931,7 @@ struct MessageRow: View {
                     Task { await store.regenerate(message) }
                 }
                 .disabled(store.isReplying)
+                iconButton("face.smiling", "贴个表情") { reacting = true }
             }
             iconButton("trash", "删除消息") { onDelete(message) }
             Menu {
@@ -1007,6 +1018,15 @@ struct MessageRow: View {
                     Label("重新生成", systemImage: "arrow.clockwise")
                 }
                 .disabled(store.isReplying)
+                Button {
+                    // 等长按菜单收起来再弹，不然两个一起动，弹窗会被吞掉。
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(350))
+                        reacting = true
+                    }
+                } label: {
+                    Label("贴个表情", systemImage: "face.smiling")
+                }
             }
             Button {
                 onEdit(message)
@@ -1345,6 +1365,107 @@ struct ThinkingView: View {
     }
 }
 
+/// 消息角上的那个表情，和给他的消息挑表情的小弹窗，都挂在这条消息最后一个气泡（或最后一张图）上。
+struct ReactionHost: ViewModifier {
+    @EnvironmentObject private var store: ChatStore
+    let message: Message
+    let isMe: Bool
+    @Binding var reacting: Bool
+    let active: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if active {
+            content
+                // 挂在朝里的那个角：我的在左下，他的在右下，压住气泡边一点。
+                .overlay(alignment: isMe ? .bottomLeading : .bottomTrailing) {
+                    if !message.reaction.isEmpty {
+                        ReactionBadge(emoji: message.reaction)
+                            .id(message.reaction)
+                            .offset(x: isMe ? -6 : 6, y: 15)
+                            // 冒出来从六成大小弹到原样；撤掉时很快淡掉。
+                            .transition(.asymmetric(
+                                insertion: .scale(scale: 0.6).combined(with: .opacity),
+                                removal: .opacity.animation(.easeOut(duration: 0.12))))
+                    }
+                }
+                // 给挂出来的那半个表情留地方，不压到下面那一行。
+                .padding(.bottom, message.reaction.isEmpty ? 0 : 14)
+                .popover(isPresented: $reacting) {
+                    ReactionPicker(current: message.reaction) { emoji in
+                        reacting = false
+                        Task { await store.react(message, with: emoji) }
+                    }
+                    .presentationCompactAdaptation(.popover)
+                }
+        } else {
+            content
+        }
+    }
+}
+
+struct ReactionBadge: View {
+    let emoji: String
+
+    var body: some View {
+        Text(emoji)
+            .font(.system(size: 15))
+            .lineLimit(1)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 28, minHeight: 28)
+            .background(Capsule().fill(Theme.bubble))
+            .overlay(Capsule().stroke(Theme.bubbleBorder, lineWidth: 1))
+            .shadow(color: Color(red: 72/255, green: 54/255, blue: 64/255).opacity(0.16), radius: 5, y: 2)
+            .accessibilityLabel("表情 \(emoji)")
+    }
+}
+
+/// 给他的消息挑表情：常用的一排点一下就贴，别的表情在下面那格里打。贴着的那个再点一下是撤掉。
+struct ReactionPicker: View {
+    let current: String
+    let pick: (String) -> Void
+    @State private var other = ""
+
+    static let quick = ["❤️", "🥰", "😂", "🥺", "😭", "👍", "🔥", "✨"]
+
+    var body: some View {
+        // 贴着的不在常用里，就排在最前面，好点它撤掉。
+        let row = (current.isEmpty || Self.quick.contains(current) ? [] : [current]) + Self.quick
+        VStack(spacing: 10) {
+            HStack(spacing: 2) {
+                ForEach(row, id: \.self) { emoji in
+                    Button { pick(emoji) } label: {
+                        Text(emoji)
+                            .font(.system(size: 22))
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(emoji == current ? Theme.accent.opacity(0.28) : .clear))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(emoji == current ? "撤掉 \(emoji)" : "贴 \(emoji)")
+                }
+            }
+            TextField("别的表情", text: $other)
+                .font(.system(size: 13))
+                .multilineTextAlignment(.center)
+                .padding(.vertical, 7)
+                .padding(.horizontal, 12)
+                .background(Capsule().fill(Theme.dim.opacity(0.12)))
+                // 打进一个表情就贴上，不用再按什么。
+                .onChange(of: other) { _, text in
+                    if let emoji = Self.lastEmoji(text) { pick(emoji) }
+                }
+        }
+        .padding(12)
+    }
+
+    static func lastEmoji(_ text: String) -> String? {
+        guard let character = text.last, let first = character.unicodeScalars.first,
+              first.properties.isEmoji,
+              first.properties.isEmojiPresentation || character.unicodeScalars.count > 1 else { return nil }
+        return String(character)
+    }
+}
+
 struct ToolChip: View {
     let names: [String]
 
@@ -1476,6 +1597,10 @@ struct SlantedText: UIViewRepresentable {
         let style = NSMutableParagraphStyle()
         style.lineSpacing = Theme.bubbleLineSpacing
         let out = NSMutableAttributedString()
+        // *…* 里多是动作、旁白，比正文淡一些，退到后面。按字色原本的透明度再打六折。
+        var alpha: CGFloat = 1
+        color.getRed(nil, green: nil, blue: nil, alpha: &alpha)
+        let aside = color.withAlphaComponent(alpha * Theme.emphasisOpacity)
         for run in text.runs {
             let piece = String(text[run.range].characters)
             let intent = run.inlinePresentationIntent ?? []
@@ -1484,7 +1609,10 @@ struct SlantedText: UIViewRepresentable {
                 ? .monospacedSystemFont(ofSize: size - 1, weight: .regular)
                 : .systemFont(ofSize: size, weight: intent.contains(.stronglyEmphasized) ? .semibold : .regular)
             var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .paragraphStyle: style]
-            if intent.contains(.emphasized) { attrs[.obliqueness] = 0.2 }
+            if intent.contains(.emphasized) {
+                attrs[.obliqueness] = 0.2
+                attrs[.foregroundColor] = aside
+            }
             if run.link != nil {
                 attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
             }

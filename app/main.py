@@ -398,6 +398,77 @@ def sigillo_tool(chat_id: str, name: str, arguments: dict) -> str:
 
 
 # 小荷包：在淘宝替她挑东西。逛和选规格用浏览器（Playwright MCP），钱只走这四把工具。
+# 给她的消息贴一个表情，像 iMessage 的回应。每间聊天都有，心跳不给。
+REACT_TOOLS = [
+    {"type": "function", "function": {
+        "name": "React",
+        "description": (
+            "给 Morry 的消息贴一个表情（任意一个 emoji），贴在她那条消息的角上。"
+            "主要在她发图、或者说了让你心动的话时用，不是每条都贴。"
+            "一个表情就说够了的时候，可以只贴表情、这一轮不说话；想说话就照常回复。"
+            "一条消息只留一个表情，再贴会换掉前一个；emoji 传空串是撤掉。"
+            "back = 贴在她最近连着发的第几条上：0 是最新那条（默认），1 是它前一条，以此类推。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "emoji": {"type": "string", "description": "一个 emoji，比如 🥺"},
+            "back": {"type": "integer", "minimum": 0, "description": "0 = 她最新那条"},
+        }, "required": ["emoji"], "additionalProperties": False},
+    }},
+]
+
+
+def _reaction_snippet(text: str, limit: int = 40) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def react_tool(chat_id: str, arguments: dict) -> str:
+    emoji = db.clean_reaction(arguments.get("emoji"))
+    try:
+        back = max(0, int(arguments.get("back") or 0))
+    except (TypeError, ValueError):
+        raise ValueError("back 要是整数")
+    run = db.message_user_run(chat_id)
+    if not run:
+        raise ValueError("她还没有可以贴表情的消息")
+    if back >= len(run):
+        raise ValueError(f"她最近连着发了 {len(run)} 条，back 最大是 {len(run) - 1}")
+    target = run[back]
+    db.message_reaction_set(target["id"], emoji)
+    _emit(chat_id, {"type": "reaction", "message_id": target["id"], "emoji": emoji})
+    quote = _reaction_snippet(target["content"])
+    if not emoji:
+        return f"已撤掉她那条「{quote}」上的表情。"
+    return f"已在她那条「{quote}」上贴了 {emoji}。"
+
+
+REACTION_CONTEXT_ROWS = 30
+
+
+def _reaction_message(rows: list[dict]) -> list[dict]:
+    """最近几条消息上贴着的表情，当这一轮的临时信息递过去。
+
+    不写进那几条消息的正文：表情是后来贴上的，改了正文，Claude Code 认不出
+    已经递过去的那几轮，就得从头重讲；缓存的前缀也会跟着断。
+    """
+    lines = []
+    for row in rows[-REACTION_CONTEXT_ROWS:]:
+        emoji = str(row.get("reaction") or "")
+        if not emoji or row.get("role") not in {"user", "assistant"}:
+            continue
+        quote = _reaction_snippet(row.get("content"))
+        if row["role"] == "user":
+            lines.append(f"- You reacted {emoji} to her message \"{quote}\"")
+        else:
+            lines.append(f"- Morry reacted {emoji} to your message \"{quote}\"")
+    if not lines:
+        return []
+    return [{"role": "system", "content": (
+        "[Reactions] Emoji stuck on recent messages, like iMessage tapbacks; "
+        "one per message, a new one replaces the old.\n" + "\n".join(lines)
+    )}]
+
+
 SHOP_TOOLS = [
     {"type": "function", "function": {
         "name": "ShopWallet",
@@ -1749,6 +1820,9 @@ async def _chat_tools(chat_id: str, list_tools=None) -> tuple[list[dict], dict[s
         tools.extend(home_tools)
         for tool in home_tools:
             tool_map[tool["function"]["name"]] = "builtin:home"
+    tools.extend(REACT_TOOLS)
+    for tool in REACT_TOOLS:
+        tool_map[tool["function"]["name"]] = "builtin:react"
     if db.sigillo_enabled(chat_id):
         tools.extend(SIGILLO_TOOLS)
         for tool in SIGILLO_TOOLS:
@@ -1791,6 +1865,8 @@ async def _run_chat_tool(chat_id: str, name: str, server: object,
             return sigillo_tool(chat_id, name, arguments), False
         if server == "builtin:shop":
             return await shop_tool(chat_id, name, arguments), False
+        if server == "builtin:react":
+            return react_tool(chat_id, arguments), False
         if not server:
             raise ValueError("模型请求了未启用的 MCP 工具")
         result = await mcp_call_tool(server, name.split("__", 2)[-1], arguments)
@@ -2002,6 +2078,9 @@ def _heartbeat_tool_allowed(tool: dict, server: object) -> bool:
         return name in HEARTBEAT_READ_HOME_TOOLS
     if server == "builtin:shop":
         # 花钱的事只在她在场的对话里做，心跳一把都不给。
+        return False
+    if server == "builtin:react":
+        # 表情贴在她刚说的话上；心跳时她没在说话。
         return False
     return bool(server) and _heartbeat_read_tool(tool)
 
@@ -5800,6 +5879,21 @@ async def messages_version_restore(message_id: str, version_id: str):
     return result
 
 
+@app.put("/api/messages/{message_id}/reaction", dependencies=authed)
+async def message_reaction_put(message_id: str, payload: dict = Body(...)):
+    """她给 Cloudy 的一条消息贴表情；空串是撤掉。她自己的消息上的表情是 Cloudy 贴的，她改不了。"""
+    message = db.message_get(message_id)
+    if not message or message["role"] != "assistant":
+        raise HTTPException(404, "找不到这条回复")
+    try:
+        emoji = db.clean_reaction(payload.get("emoji"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    db.message_reaction_set(message_id, emoji)
+    _emit(message["chat_id"], {"type": "reaction", "message_id": message_id, "emoji": emoji})
+    return {"ok": True, "id": message_id, "reaction": emoji}
+
+
 @app.post("/api/messages/{message_id}/regenerate", dependencies=authed)
 async def messages_regenerate(message_id: str):
     message = db.message_get(message_id)
@@ -5823,6 +5917,11 @@ async def messages_regenerate(message_id: str):
     db.message_delete_many([reply_id for reply_id in reply_ids if reply_id != anchor["id"]])
     db.message_update(anchor["id"], "")
     db.message_thinking_update(anchor["id"], "")
+    # 上一版贴在她那几条上的表情也收回，重说的那版自己决定贴不贴。
+    for item in db.message_user_run(chat_id, before=int(anchor["rowid"])):
+        if item.get("reaction"):
+            db.message_reaction_set(item["id"], "")
+            _emit(chat_id, {"type": "reaction", "message_id": item["id"], "emoji": ""})
     _emit(chat_id, {
         "type": "system", "subtype": "regenerating",
         "message_id": anchor["id"], "message_ids": reply_ids,
@@ -6508,10 +6607,11 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                        "can look up earlier days.\n" + stopwatch_text,
         }]
     history_messages = _chat_history_messages_from_rows(history)
+    reaction_message = _reaction_message(history)
     stable_messages = instructions + format_preference + memory_message
     transient_messages = (
         private_message + memory_card_message + sigillo_message + device_message + focus_message
-        + day_brief_message
+        + day_brief_message + reaction_message
     )
     messages = None
     if cache_friendly:
@@ -6531,7 +6631,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             device_message + focus_message + day_brief_message + instructions
             + format_preference + private_message
             + memory_message + memory_card_message + sigillo_message
-            + history_messages
+            + history_messages + reaction_message
         )
     # 观影页的画面只在本次模型请求中出现，不把截帧或隐形提示写进聊天记录。
     # 这样本地视频不会离开浏览器，历史记录也仍然是用户真正说过的话。
@@ -6869,6 +6969,10 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         full = "".join(buf).strip()
         if full:
             db.message_update(current_message_id, full)
+        elif len(reply_message_ids) == 1 and db.message_reacted_only(msg_id):
+            # 只贴了个表情、没说话：不留一个空气泡。
+            db.message_delete(msg_id)
+            _emit(chat_id, {"type": "assistant_removed", "message_id": msg_id})
         cache_checkpoint_reached = _cache_history_checkpoint_reached(
             chat_id, cache_friendly and not cache_fallback_reason
         )

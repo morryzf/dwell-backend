@@ -642,6 +642,9 @@ def init_db():
             cx.execute("ALTER TABLE messages ADD COLUMN usage_json TEXT NOT NULL DEFAULT '{}'")
         if "voice" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN voice INTEGER NOT NULL DEFAULT 0")
+        # 贴在一条消息上的一个表情。她的消息上是 Cloudy 贴的，Cloudy 的消息上是她贴的。
+        if "reaction" not in message_cols:
+            cx.execute("ALTER TABLE messages ADD COLUMN reaction TEXT NOT NULL DEFAULT ''")
         usage_cols = {
             r["name"] for r in cx.execute("PRAGMA table_info(provider_usage_events)").fetchall()
         }
@@ -3628,6 +3631,7 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
             "origin": r["origin"],
             "display_split": bool(r["display_split"]),
             "voice": bool(r.get("voice")) if role == "assistant" else False,
+            "reaction": r.get("reaction") or "",
             "usage": usage,
             "tools": tools_by_message.get(r["id"], []) if role == "assistant" else [],
             "images": images_by_message.get(r["id"], []),
@@ -4058,6 +4062,51 @@ def tool_call_finish(tool_call_id: str, result: str, is_error: bool) -> bool:
     with conn() as cx:
         cur = cx.execute("UPDATE tool_calls SET result=?, is_error=? WHERE id=?", (result, int(is_error), tool_call_id))
     return cur.rowcount > 0
+
+
+REACTION_MAX = 16
+
+
+def clean_reaction(raw: object) -> str:
+    """一个表情，空串表示撤掉。带字母、数字、汉字或空白的都不算表情。"""
+    text = str(raw or "").strip()
+    if len(text) > REACTION_MAX or any(ch.isalnum() or ch.isspace() for ch in text):
+        raise ValueError("只能是一个表情")
+    return text
+
+
+def message_reaction_set(msg_id: str, emoji: str) -> dict | None:
+    """换掉这条消息上的表情（一条只留一个）；返回改后的消息，找不到是 None。"""
+    with conn() as cx:
+        cur = cx.execute("UPDATE messages SET reaction=? WHERE id=?", (emoji, msg_id))
+    return message_get(msg_id) if cur.rowcount else None
+
+
+def message_user_run(chat_id: str, before: int | None = None) -> list[dict]:
+    """她最近连着发的那几条，最新的在前。
+
+    往回走，跳过助手还在写的、或者空着的那几条；碰到助手真说过话的一条就停。
+    before 给了就只看那一行之前的（重新生成时用来找那一轮回的是哪几条）。
+    """
+    run: list[dict] = []
+    for row in reversed(message_list(chat_id, limit=40, before=before)):
+        if row["role"] == "user":
+            run.append(row)
+            if len(run) >= 8:
+                break
+        elif run and row["role"] == "assistant" and str(row.get("content") or "").strip():
+            break
+    return run
+
+
+def message_reacted_only(msg_id: str) -> bool:
+    """这条回复里成功贴过表情。正文空着时，这一轮就只是一个表情。"""
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT 1 FROM tool_calls WHERE assistant_message_id=? AND name='React' AND is_error=0 LIMIT 1",
+            (msg_id,),
+        ).fetchone()
+    return bool(row)
 
 
 def message_delete(msg_id: str) -> bool:

@@ -330,6 +330,9 @@ html[data-theme="dark"] .glass,
   
   #log .gu strong, .bubble strong { font-weight: 700; }
   #log .gu s, .bubble s { opacity: .55; }
+  /* *斜体* 在气泡里是「小声说」：比正文淡一截。跟着气泡自己的字色走，
+     自定义字色、暗色都不用另配；不用 opacity，免得连带里面的表情一起发灰 */
+  #log .gu em, #log .bubble em { font-style: italic; color: color-mix(in srgb, currentColor 60%, transparent); }
   .mdcode {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: .9em; padding: 1px 5px; border-radius: 5px;
@@ -1041,6 +1044,69 @@ html[data-theme="dark"] .composer {
   .msg-more.on { display: grid; }
   .msg-more button { padding: 9px 10px; border-radius: 8px; background: transparent; color: var(--text); text-align: left; font-size: 13px; white-space: nowrap; }
   .msg-more button:active { background: var(--panel); }
+  /* ---------- 表情回应（像 iMessage 的 tapback） ----------
+     一条消息只挂一个，挂在气泡底角、压住一点边：她的泡在右边，挂左下；Cloudy 的挂右下。 */
+  .row.has-reaction { padding-bottom: 12px; }
+  #log .row.has-reaction.actions-on { padding-bottom: 42px; }   /* 操作那排让到表情下面去 */
+  .react-badge {
+    position: absolute; z-index: 2; bottom: -13px;
+    min-width: 26px; height: 24px; padding: 0 5px; box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 12px; color: var(--text);
+    font: 15px/1 "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    font-style: normal; white-space: nowrap; -webkit-user-select: none; user-select: none;
+    background: color-mix(in srgb, var(--card) 92%, transparent);
+    border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+    box-shadow: 0 2px 8px rgba(72,54,64,.16);
+    -webkit-backdrop-filter: blur(12px) saturate(1.4); backdrop-filter: blur(12px) saturate(1.4);
+  }
+  .row.me .react-badge { left: -8px; transform-origin: 70% 20%; }          /* 从贴着气泡的那个角鼓出来 */
+  .row:not(.me) .react-badge { right: -8px; transform-origin: 30% 20%; }
+  .row:not(.me) .vb > .react-badge { right: 20px; }                        /* 右下角留给语音条的小 T */
+  .row:not(.me) .gu > .react-badge { cursor: pointer; }
+  .react-badge.pop { animation: reactPop 260ms cubic-bezier(.34,1.56,.64,1) both; }
+  .react-badge.out { animation: reactOut 120ms cubic-bezier(.23,1,.32,1) forwards; pointer-events: none; }
+  @keyframes reactPop { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
+  @keyframes reactOut { to { opacity: 0; transform: scale(.85); } }
+  /* 只发了图：表情挂在图片角上，不挂在外面那圈气泡上 */
+  #log .react-img { position: relative; display: block; width: fit-content; max-width: 100%; margin: 7px 0; }
+  #log .react-img > img.chatimg { margin: 0; }
+  /* 选表情的小浮层：挂在操作那排上面，和「更多」菜单同一个位置 */
+  .react-pick {
+    display: none; position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 46;
+    width: max-content; max-width: calc(100vw - 36px); box-sizing: border-box;
+    padding: 5px; border: 1px solid var(--line); border-radius: 16px;
+    background: var(--card); box-shadow: 0 8px 22px rgba(0,0,0,.16);
+    transform-origin: 12px 100%;
+  }
+  .react-pick.on { display: block; animation: reactPickIn 180ms cubic-bezier(.23,1,.32,1); }
+  @keyframes reactPickIn { from { opacity: 0; transform: translateY(4px) scale(.96); } }
+  .react-quick { display: flex; flex-wrap: wrap; gap: 2px; }
+  .react-opt {
+    width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%;
+    display: grid; place-items: center; background: transparent; cursor: pointer;
+    font: 20px/1 "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    transition: transform 140ms cubic-bezier(.23,1,.32,1), background 140ms ease;
+  }
+  .react-opt:active { transform: scale(.9); }
+  .react-opt.on { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+  @media (hover: hover) { .react-opt:not(.on):hover { background: var(--panel); } }
+  .react-other { display: flex; align-items: center; gap: 6px; margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line); }
+  .react-other input {
+    flex: 1; min-width: 0; width: 0; height: 30px; padding: 0 10px; box-sizing: border-box;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text);
+    font-size: 16px;   /* 小于 16 iPhone 一点就放大整页 */
+  }
+  .react-other button {
+    flex: none; height: 30px; padding: 0 11px; border: 0; border-radius: 10px;
+    background: var(--panel); color: var(--text); font-size: 13px; cursor: pointer;
+    transition: transform 140ms cubic-bezier(.23,1,.32,1);
+  }
+  .react-other button:active { transform: scale(.97); }
+  @media (prefers-reduced-motion: reduce) {
+    .react-badge.pop, .react-badge.out, .react-pick.on { animation: none; }
+    .react-opt, .react-other button { transition: none; }
+  }
   #messageSelectBar {
     position: fixed; z-index: 50; left: 50%; top: calc(env(safe-area-inset-top) + 10px); transform: translateX(-50%);
     display: none; align-items: center; gap: 8px; min-width: min(440px, calc(100vw - 24px));
@@ -5474,6 +5540,7 @@ function addMe(text, message) {
     if (message) attachMessageActions(b, message);
     lastBubble = b;
   }
+  if (message && message.reaction) setReactionBadge(lastBubble.parentElement, message.reaction, false);
   scroll(true);
   guEl = null; endThink(); closeGroup();
   return lastBubble;
@@ -5596,8 +5663,139 @@ function closeMessageActions(except) {
     actions.classList.remove('on'); actions.classList.remove('more-on');
     actions.parentElement?.classList.remove('actions-on');
     actions.querySelector('.msg-more')?.classList.remove('on');
+    actions.querySelector('.react-pick')?.classList.remove('on');
   });
 }
+
+/* ---------- 表情回应 ----------
+   一条消息只挂一个表情。她消息上的是 Cloudy 贴的（React 工具），Cloudy 消息上的是她贴的。
+   拆成好几个泡的消息，表情挂在最后一个泡上。 */
+const REACT_QUICK = ['❤️', '🥰', '😂', '🥺', '😭', '👍', '🔥', '✨'];
+const reactCalm = window.matchMedia('(prefers-reduced-motion: reduce)');
+function isHiddenTool(name) { return name === 'React'; }   // 贴表情是动作不是活儿，过程栏、状态那行都不提
+function reactionRows(messageId) {
+  return messageId ? [...log.querySelectorAll('.row[data-message-id="' + CSS.escape(messageId) + '"]')] : [];
+}
+/* 挂在哪：语音条收着时挂语音条；只发了图就挂在最后那张图的角上；其余挂气泡 */
+function reactionAnchor(rowEl) {
+  const vb = rowEl.querySelector(':scope > .vb');
+  if (vb && !rowEl.classList.contains('vt-open')) return vb;
+  const bubble = rowEl.querySelector(':scope > .gu, :scope > .bubble');
+  if (!bubble) return vb;
+  const imgs = bubble.querySelectorAll('img.chatimg');
+  const img = imgs[imgs.length - 1];
+  if (!img) return bubble;
+  if (img.parentElement.classList.contains('react-img')) return img.parentElement;
+  const words = [...bubble.childNodes]
+    .filter(n => !(n.classList && n.classList.contains('react-badge')))
+    .map(n => n.textContent).join('').trim();
+  if (words) return bubble;
+  const wrap = document.createElement('span');
+  wrap.className = 'react-img';
+  img.before(wrap);
+  wrap.appendChild(img);
+  return wrap;
+}
+/* 换一下挂的位置（语音条展开 / 收起文字时） */
+function rehangReaction(rowEl) {
+  const badge = rowEl && rowEl.querySelector('.react-badge:not(.out)');
+  if (!badge) return;
+  const anchor = reactionAnchor(rowEl);
+  if (anchor && badge.parentElement !== anchor) anchor.appendChild(badge);
+}
+function currentReaction(messageId) {
+  const rows = reactionRows(messageId);
+  const badge = rows.length ? rows[rows.length - 1].querySelector('.react-badge:not(.out)') : null;
+  return badge ? badge.dataset.emoji : '';
+}
+/* 只管一行：emoji 为空就摘掉。animate=实时来的才鼓一下；念历史时安安静静地就在那儿 */
+function setReactionBadge(rowEl, emoji, animate) {
+  if (!rowEl) return;
+  emoji = String(emoji || '');
+  const old = rowEl.querySelector('.react-badge:not(.out)');
+  if ((old ? old.dataset.emoji : '') === emoji) return;
+  const calm = !animate || reactCalm.matches;
+  if (!emoji) {
+    if (!old) { rowEl.classList.remove('has-reaction'); return; }
+    const drop = () => {
+      old.remove();
+      if (!rowEl.querySelector('.react-badge')) rowEl.classList.remove('has-reaction');
+    };
+    if (calm) { drop(); return; }
+    old.classList.remove('pop'); old.classList.add('out');
+    setTimeout(drop, 130);
+    return;
+  }
+  let badge = old;
+  if (!badge) {
+    const anchor = reactionAnchor(rowEl);
+    if (!anchor) return;
+    badge = document.createElement('span');
+    badge.className = 'react-badge';
+    badge.setAttribute('role', 'img');
+    // 点 Cloudy 消息上的表情 = 直接打开选表情那层，换一个或者撤掉
+    badge.addEventListener('click', event => {
+      const host = badge.closest('.row');
+      if (!host || !host._openReact || messageSelectionMode) return;
+      event.stopPropagation();
+      host._openReact();
+    });
+    anchor.appendChild(badge);
+  }
+  badge.dataset.emoji = emoji;
+  badge.textContent = emoji;
+  badge.setAttribute('aria-label', (rowEl.classList.contains('me') ? assistantName + ' 回应了 ' : '你回应了 ') + emoji);
+  rowEl.classList.add('has-reaction');
+  if (!calm) {
+    badge.classList.remove('pop');
+    void badge.offsetWidth;          // 换表情也要重新鼓一下：先摘掉动画，强制排一次版再挂回去
+    badge.classList.add('pop');
+  }
+}
+/* 整条消息：记账（行上挂着的那份 message）+ 画到最后一个泡上。屏幕上没这条就算了，重读历史时会带上 */
+function applyReaction(messageId, emoji, animate) {
+  const rows = reactionRows(messageId);
+  if (!rows.length) return false;
+  rows.forEach(r => { if (r._message) r._message.reaction = emoji || ''; });
+  rows.slice(0, -1).forEach(r => setReactionBadge(r, '', false));
+  setReactionBadge(rows[rows.length - 1], emoji, animate);
+  return true;
+}
+/* 「其它」那一格：只取第一个字形，而且得是表情（带字母数字的后端也不收） */
+function firstEmoji(text) {
+  const s = String(text || '').trim();
+  if (!s) return '';
+  let first = '';
+  try { first = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)][0].segment; }
+  catch (e) { first = Array.from(s)[0] || ''; }
+  if (/[\p{L}\p{N}\s]/u.test(first)) return '';
+  return /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(first) ? first : '';
+}
+/* 她给 Cloudy 的消息贴表情：先画上，失败再摘回去 */
+async function sendReaction(message, emoji) {
+  const prev = message.reaction || '';
+  if (prev === emoji) return;
+  applyReaction(message.id, emoji, true);
+  message.reaction = emoji;
+  try {
+    const r = await fetch('api/messages/' + encodeURIComponent(message.id) + '/reaction', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emoji }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.ok === false) throw new Error(d.detail || '没有贴上');
+  } catch (e) {
+    // 这期间要是又换过（别的设备、或者又点了一个），就别拿旧的去盖
+    if (currentReaction(message.id) === emoji) { applyReaction(message.id, prev, true); message.reaction = prev; }
+    note('（没贴上表情：' + e.message + '）', 'err');
+  }
+}
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  const open = document.querySelector('.react-pick.on');
+  if (!open) return;
+  open.classList.remove('on');
+  closeMessageActions();
+});
 let messageSelectionMode = false;
 const selectedMessageIds = new Set();
 const messageSelectBar = document.getElementById('messageSelectBar');
@@ -5663,8 +5861,10 @@ function attachMessageActions(el, message) {
   el._actionsAttached = true;
   const rowEl = el.parentElement;
   rowEl.dataset.messageId = message.id;
+  rowEl._message = message;            // 表情回应改的是这份，选表情那层也读这份
   const actions = document.createElement('div'); actions.className = 'msg-actions';
-  const close = () => { actions.classList.remove('on'); actions.classList.remove('more-on'); rowEl.classList.remove('actions-on'); actions.querySelector('.msg-more')?.classList.remove('on'); };
+  let picker = null;
+  const close = () => { actions.classList.remove('on'); actions.classList.remove('more-on'); rowEl.classList.remove('actions-on'); actions.querySelector('.msg-more')?.classList.remove('on'); picker?.classList.remove('on'); };
   const addAction = (icon, title, handler, danger) => {
     const button = document.createElement('button'); button.className = 'msg-action' + (danger ? ' danger' : '');
     button.title = title; button.setAttribute('aria-label', title); button.appendChild(icEl(icon, 18));
@@ -5677,7 +5877,57 @@ function attachMessageActions(el, message) {
     if (messageSelectionMode) { toggleMessageSelection(message.id); return; }
     const opening = !actions.classList.contains('on'); closeMessageActions(actions);
     actions.classList.toggle('on', opening); rowEl.classList.toggle('actions-on', opening);
+    if (!opening) picker?.classList.remove('on');
   });
+  // 只能给 Cloudy 的消息贴；她自己消息上的表情是 Cloudy 贴的，不归她改
+  if (message.role === 'assistant') {
+    picker = document.createElement('div'); picker.className = 'react-pick';
+    picker.setAttribute('role', 'dialog'); picker.setAttribute('aria-label', '回应这条消息');
+    const quick = document.createElement('div'); quick.className = 'react-quick';
+    const other = document.createElement('form'); other.className = 'react-other';
+    const otherIn = document.createElement('input');
+    otherIn.type = 'text'; otherIn.placeholder = '其它'; otherIn.maxLength = 16;
+    otherIn.setAttribute('aria-label', '输入一个表情'); otherIn.setAttribute('enterkeyhint', 'send'); otherIn.autocomplete = 'off';
+    const otherGo = document.createElement('button'); otherGo.type = 'submit'; otherGo.textContent = '贴上';
+    other.append(otherIn, otherGo);
+    picker.append(quick, other);
+    // 再点一下已经贴着的那个 = 撤掉
+    const choose = (emoji) => { close(); sendReaction(message, emoji === (message.reaction || '') ? '' : emoji); };
+    other.onsubmit = (event) => {
+      event.preventDefault();
+      const emoji = firstEmoji(otherIn.value);
+      if (!emoji) { note('（这里只收一个表情）', 'err'); return; }
+      otherIn.value = '';
+      choose(emoji);
+    };
+    const paintPicker = () => {
+      const cur = message.reaction || '';
+      quick.textContent = '';
+      // 贴着的不在常用那几个里（「其它」贴的），就排在最前面，一样能点掉
+      const list = cur && !REACT_QUICK.includes(cur) ? [cur, ...REACT_QUICK] : REACT_QUICK;
+      for (const emoji of list) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'react-opt' + (emoji === cur ? ' on' : '');
+        b.textContent = emoji;
+        b.setAttribute('aria-pressed', String(emoji === cur));
+        b.setAttribute('aria-label', emoji === cur ? '撤掉 ' + emoji : '回应 ' + emoji);
+        b.onclick = (event) => { event.stopPropagation(); choose(emoji); };
+        quick.appendChild(b);
+      }
+    };
+    const openPicker = () => {
+      closeMessageActions(actions); closeUsagePopovers();
+      actions.classList.add('on'); rowEl.classList.add('actions-on');
+      actions.querySelector('.msg-more')?.classList.remove('on'); actions.classList.remove('more-on');
+      paintPicker();
+      picker.classList.add('on');
+    };
+    rowEl._openReact = openPicker;
+    addAction('faceHappy', '回应', () => {
+      if (picker.classList.contains('on')) picker.classList.remove('on');
+      else openPicker();
+    });
+  }
   addAction('pen', '编辑消息', () => { close(); openMessageEditor(message); });
   if (message.role === 'assistant') {
     addAction('volume', '播放整轮回复', async () => { close(); await playTts(message.id, true); });
@@ -5725,12 +5975,13 @@ function attachMessageActions(el, message) {
       showChatHere(d.chat); note('（从这里开出了一条新分支）');
     } catch (e) { note('（没开成分支：' + e.message + '）', 'err'); }
   });
-  more.onclick = (event) => { event.stopPropagation(); const open = !moreMenu.classList.contains('on'); moreMenu.classList.toggle('on', open); actions.classList.toggle('more-on', open); };
+  more.onclick = (event) => { event.stopPropagation(); const open = !moreMenu.classList.contains('on'); moreMenu.classList.toggle('on', open); actions.classList.toggle('more-on', open); if (open) picker?.classList.remove('on'); };
   const sentAt = document.createElement('time');
   sentAt.className = 'msg-time';
   sentAt.dateTime = new Date((Number(message.at) || 0) * 1000).toISOString();
   sentAt.textContent = new Date((Number(message.at) || 0) * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
   actions.append(more, sentAt, moreMenu);
+  if (picker) actions.appendChild(picker);
   actions.onclick = event => event.stopPropagation();
   rowEl.appendChild(actions);
 }
@@ -6746,6 +6997,7 @@ function escapeHtml(s) {
 
 let replayingHistory = false;
 function addToolUse(part) {
+  if (isHiddenTool(part.name)) return;   // React：表情自己会挂到她消息上，这里不占一行
   if (!replayingHistory) petSet('typing');
   closeThink();
   toolInfo[part.id] = { name: part.name, input: part.input || {}, result: null, isError: false, done: false };
@@ -6897,7 +7149,12 @@ function renderSaid(msgs) {
         markToolDone(tool.id, !!tool.is_error, tool.result || '');
       }
       endThink();                    // 该说正文了，思考那段收工
+      // 只贴了个表情、一个字没说的那轮：后端本来就删了，万一还留着也别画个空泡
+      const reactedOnly = !String(m.text || '').trim() && !(m.images || []).length && !(m.files || []).length
+        && !m.voice && (m.tools || []).some(tool => isHiddenTool(tool.name));
+      if (reactedOnly) continue;
       const segments = Array.isArray(m.segments) && m.segments.length ? m.segments : [m.text];
+      let lastSeg = null;
       segments.forEach((text, index) => {
         const el = ensureGu();
         el._raw = text;
@@ -6912,8 +7169,10 @@ function renderSaid(msgs) {
         attachMessageActions(el, m);
         if (m.voice) voiceDecorate(el, m.id, 'ready');
         if (index === segments.length - 1) attachMessageUsage(el, m);
+        lastSeg = el;
         guEl = null;                   // 每段各归各位，编辑时仍指向同一条原消息
       });
+      if (m.reaction && lastSeg) setReactionBadge(lastSeg.parentElement, m.reaction, false);
       if (m.usage && m.usage.cache_checkpoint) addCacheCheckpointDivider(m.id);
     } else if (m.kind === 'think') {
       // 一轮思考在库里是好几条记录（想一段、歇一下、再想）。以前这里每条
@@ -7137,6 +7396,33 @@ function handle(d) {
   if (d.type === 'system' && d.subtype === 'voice_reply') { voiceNextId = d.message_id || ''; return; }
   if (d.type === 'tool_call' && d.tool) { addToolUse(d.tool); return; }
   if (d.type === 'tool_result') { markToolDone(d.tool_call_id, d.is_error, d.content); return; }
+  if (d.type === 'reaction') {
+    // 贴上 / 换掉 / 撤掉。实时来的鼓一下；屏幕上没这条（还没翻到）就等重读历史
+    applyReaction(d.message_id || '', d.emoji || '', true);
+    return;
+  }
+  if (d.type === 'assistant_removed') {
+    // 这一轮只贴了个表情、没说话：后端把那条空回复删了，给它留的泡也收走，
+    // 不留空泡，也不留光标那一下一下闪的
+    const id = d.message_id || '';
+    if (id) {
+      reactionRows(id).forEach(r => { turnBubbles = turnBubbles.filter(x => x !== r); r.remove(); });
+      log.querySelector('[data-proactive-for="' + CSS.escape(id) + '"]')?.remove();
+      if (voiceNextId === id) voiceNextId = '';
+    }
+    const blank = r => {
+      const g = r && r.querySelector(':scope > .gu');
+      return !!g && !String(g._raw || '').trim() && !g.querySelector('img');
+    };
+    if (guEl && blank(guEl.parentElement)) { guEl.parentElement.remove(); guEl = null; }
+    turnBubbles = turnBubbles.filter(r => {
+      if (!r.isConnected) return false;
+      if (blank(r)) { r.remove(); return false; }
+      return true;
+    });
+    scroll();
+    return;
+  }
   if (d.type === 'assistant_reset') {
     // 撞到重写规则被打回了：抹掉这一版，等它重说。
     // 思考面板不动——打回的理由记在那儿。
@@ -14227,6 +14513,7 @@ function voiceToggleText(bar, open) {
   const next = open == null ? !rowEl.classList.contains('vt-open') : !!open;
   rowEl.classList.toggle('vt-open', next);
   if (next) voiceOpenIds.add(bar.dataset.messageId); else voiceOpenIds.delete(bar.dataset.messageId);
+  rehangReaction(rowEl);               // 表情跟着露在外面的那块走：收着挂语音条，展开挂文字泡
   bar._text.setAttribute('aria-expanded', String(next));
   bar._text.setAttribute('aria-label', next ? '收起文字' : '展开文字');
   if (next) scroll();
