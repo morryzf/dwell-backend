@@ -480,6 +480,7 @@ struct MemoryCardView<Actions: View>: View {
     @ViewBuilder var actions: Actions
     var onSource: () -> Void = {}
     @Environment(\.memoryThreadTap) private var onThread
+    @State private var actionsOpen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -556,21 +557,43 @@ struct MemoryCardView<Actions: View>: View {
                     .foregroundStyle(Theme.dim)
             }
             if kind != .used {
-                if card.hasSource {
-                    Button(action: onSource) {
-                        Text("\(card.sourceLabel) · 看原文")
+                HStack(spacing: 8) {
+                    if card.hasSource {
+                        Button(action: onSource) {
+                            HStack(spacing: 3) {
+                                Text(card.sourceLabel)
+                                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                            }
                             .font(.system(size: 11.5))
                             .foregroundStyle(Theme.dim)
-                            .underline(color: Theme.dim.opacity(0.4))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(card.sourceLabel)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.dim)
                     }
-                    .buttonStyle(.plain)
-                } else {
-                    Text(card.sourceLabel)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.dim)
+                    Spacer(minLength: 0)
+                    // 正式记忆卡的那排按钮平时收着，点「⋯」再展开；待确认的要马上做决定，一直露着。
+                    if kind == .card {
+                        Button {
+                            withAnimation(.easeOut(duration: 0.2)) { actionsOpen.toggle() }
+                        } label: {
+                            Image(systemName: actionsOpen ? "chevron.up" : "ellipsis")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.dim)
+                                .frame(width: 34, height: 24)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(actionsOpen ? "收起操作" : "更多操作")
+                    }
                 }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) { actions }
+                if kind != .card || actionsOpen {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) { actions }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
@@ -770,12 +793,20 @@ struct MemoryCardEditor: View {
                 .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
             }
             if !card.thread.isEmpty {
-                // 一件事只有一张主卡：写清是什么事、跟谁有关、现在到哪一步；副卡记细节。
-                Picker("身份", selection: $card.threadRole) {
-                    Text("主卡").tag("main")
-                    Text("副卡").tag("detail")
+                // 一件事只有一张主卡：写清是什么事、跟谁有关、现在到哪一步；其余的都是副卡，记细节。
+                Toggle(isOn: Binding(get: { card.threadRole == "main" },
+                                     set: { card.threadRole = $0 ? "main" : "detail" })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("作为这件事的主卡").font(.system(size: 14)).foregroundStyle(Theme.text)
+                        Text(card.threadRole == "main" ? "写清是什么事、跟谁有关、现在到哪一步"
+                                                       : "现在是副卡，记这件事里的一个细节")
+                            .font(.system(size: 11.5)).foregroundStyle(Theme.dim)
+                    }
                 }
-                .pickerStyle(.segmented)
+                .tint(Theme.send)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
             }
 
             label("类型")
@@ -847,17 +878,23 @@ struct MemoryCardEditor: View {
             .foregroundStyle(Theme.dim)
     }
 
+    /// 跟「属于哪件事」同一个样子：字小一号，右边一个上下箭头。系统的菜单选择器改不了字号。
     private func picker(_ selection: Binding<String>, _ options: [MemoryChoice]) -> some View {
-        Picker("", selection: selection) {
-            ForEach(options) { choice in Text(choice.label).tag(choice.key) }
+        Menu {
+            Picker("", selection: selection) {
+                ForEach(options) { choice in Text(choice.label).tag(choice.key) }
+            }
+        } label: {
+            HStack {
+                Text(options.first { $0.key == selection.wrappedValue }?.label ?? selection.wrappedValue)
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 11)).foregroundStyle(Theme.dim)
+            }
+            .font(.system(size: 14))
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
         }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .tint(Theme.text)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
     }
 
     private static let dayFormat: DateFormatter = {

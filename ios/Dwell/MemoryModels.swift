@@ -18,7 +18,7 @@ enum MemoryTaxonomy {
         .init("identity", "身份信息"), .init("personality", "性格与习惯"), .init("about_me", "关于我"),
         .init("daily_life", "日常生活"), .init("place", "地点"), .init("food", "饮食"), .init("books", "书与阅读"),
         .init("work_creativity", "工作与创作"), .init("schedule", "日程"), .init("relationship", "关系与互动"),
-        .init("health_safety", "健康与安全"), .init("entertainment", "娱乐"), .init("family_friends", "家人与朋友"),
+        .init("health_safety", "健康与安全"), .init("entertainment", "娱乐"), .init("family_friends", "人际关系"),
         .init("nsfw", "亲密内容"), .init("other", "其他"),
     ]
     static let importance: [MemoryChoice] = [.init("high", "固定保留"), .init("normal", "普通"), .init("low", "可淡出")]
@@ -113,10 +113,9 @@ struct MemoryCard: Identifiable, Equatable {
 
     /// 跟网页的 memorySource 一样的说法。
     var sourceLabel: String {
-        if undated { return "来源：手动添加" }
-        if sourceStart == 0 && sourceEnd == 0 { return "来源：已有摘要分段" }
-        if !sourceRowids.isEmpty { return "来源：已标出原话" }
-        return sourceStart == sourceEnd ? "来源：1 条原消息" : "来源：整段原文"
+        if undated { return "手动添加" }
+        if sourceStart == 0 && sourceEnd == 0 { return "来自摘要分段" }
+        return "看原文"
     }
 
     /// 提交给后端的那几个字段。

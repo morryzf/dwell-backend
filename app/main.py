@@ -90,7 +90,7 @@ MEMORY_CARD_TOPICS = {
     "relationship": "关系与互动",
     "health_safety": "健康与安全",
     "entertainment": "娱乐",
-    "family_friends": "家人与朋友",
+    "family_friends": "人际关系",
     "nsfw": "亲密内容",
     "other": "其他",
 }
