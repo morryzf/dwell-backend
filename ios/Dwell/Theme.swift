@@ -43,6 +43,8 @@ enum Theme {
     /// 气泡里的字：14.5pt，行高 1.55。
     static let bubbleFont = Font.system(size: 14.5)
     static let bubbleLineSpacing: CGFloat = 5
+    /// *…* 里的字比正文淡多少：字色的六成。
+    static let emphasisOpacity: CGFloat = 0.6
 }
 
 extension Color {

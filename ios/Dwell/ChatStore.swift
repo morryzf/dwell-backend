@@ -272,6 +272,26 @@ final class ChatStore: ObservableObject {
         } catch { handle(error) }
     }
 
+    /// 给他的一条消息贴表情；再点同一个是撤掉。先在页面上换好，没存上再换回来。
+    func react(_ message: Message, with emoji: String) async {
+        let next = emoji == message.reaction ? "" : emoji
+        let before = message.reaction
+        setReaction(message.id, next)
+        do {
+            _ = try await api.request("PUT", "api/messages/\(message.id)/reaction", body: ["emoji": next])
+        } catch {
+            setReaction(message.id, before)
+            flash("表情没贴上，再试一次")
+        }
+    }
+
+    private func setReaction(_ id: String, _ emoji: String) {
+        guard let index = messages.firstIndex(where: { $0.id == id }), messages[index].reaction != emoji else { return }
+        // 冒出来带一点回弹；开了「减弱动态效果」就直接换上。
+        let motion: Animation? = UIAccessibility.isReduceMotionEnabled ? nil : .spring(duration: 0.32, bounce: 0.45)
+        withAnimation(motion) { messages[index].reaction = emoji }
+    }
+
     func edit(_ message: Message, to content: String) async {
         let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, text != message.text else { return }
@@ -527,7 +547,18 @@ final class ChatStore: ObservableObject {
         case "tool_call":
             let tool = event["tool"] as? [String: Any]
             let name = tool?["name"] as? String ?? ""
-            status = name.isEmpty ? "在用工具…" : "在用 \(name)…"
+            // 贴表情一下就好，表情自己会冒出来，不用报「在用」。
+            if name != "React" { status = name.isEmpty ? "在用工具…" : "在用 \(name)…" }
+
+        case "reaction":
+            if let id = event["message_id"] as? String {
+                setReaction(id, event["emoji"] as? String ?? "")
+            }
+
+        case "assistant_removed":
+            // 他只贴了个表情、没说话，这一轮的空气泡后端已经删了。
+            let id = event["message_id"] as? String ?? ""
+            messages.removeAll { $0.id == id }
 
         case "result":
             isReplying = false
