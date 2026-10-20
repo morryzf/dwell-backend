@@ -26,7 +26,16 @@ final class MemoryStore: ObservableObject {
     /// 只看某一件事的卡；空＝不按事件筛。
     @Published var thread = ""
     /// 卡池里有哪些事件、各几张。
-    @Published var threads: [(name: String, count: Int)] = []
+    @Published var threads: [(name: String, count: Int, hasMain: Bool)] = []
+    /// 存的时候发现这件事已经有主卡：问她要不要把原来那张改成副卡。
+    @Published var demoteAsk: DemoteAsk?
+
+    struct DemoteAsk: Identifiable {
+        let id = UUID()
+        let card: MemoryCard
+        let message: String
+        let isNew: Bool
+    }
     @Published var lastInjection: MemoryInjection?
     @Published var loadingCards = false
 
@@ -76,7 +85,7 @@ final class MemoryStore: ObservableObject {
             ])
             threads = (json["threads"] as? [[String: Any]] ?? []).compactMap { item in
                 guard let name = item["thread"] as? String, !name.isEmpty else { return nil }
-                return (name, item["count"] as? Int ?? 0)
+                return (name, item["count"] as? Int ?? 0, item["has_main"] as? Bool ?? false)
             }
             let page = (json["items"] as? [[String: Any]] ?? []).map(MemoryCard.init(json:))
             cards = reset ? page : cards + page
@@ -152,20 +161,42 @@ final class MemoryStore: ObservableObject {
 
     // MARK: - 记忆卡
 
-    func add(_ card: MemoryCard) async -> Bool {
+    /// demote：她已经同意把这件事原来的主卡改成副卡。
+    func add(_ card: MemoryCard, demote: Bool = false) async -> Bool {
         do {
-            _ = try await api.request("POST", "\(base)/memory-cards", body: card.payload)
+            var body = card.payload
+            if demote { body["demote_other"] = true }
+            _ = try await api.request("POST", "\(base)/memory-cards", body: body)
             await loadCards(reset: true)
             return true
+        } catch let error as APIError where error.status == 409 {
+            demoteAsk = DemoteAsk(card: card, message: error.message, isNew: true)
+            return false
         } catch { say(error); return false }
     }
 
-    func save(_ card: MemoryCard) async -> Bool {
+    func save(_ card: MemoryCard, demote: Bool = false) async -> Bool {
         do {
-            _ = try await api.request("PUT", "api/chats/\(card.chatID)/memory-cards/\(card.id)", body: card.payload)
+            var body = card.payload
+            if demote { body["demote_other"] = true }
+            _ = try await api.request("PUT", "api/chats/\(card.chatID)/memory-cards/\(card.id)", body: body)
             await loadCards(reset: true)
             return true
+        } catch let error as APIError where error.status == 409 {
+            demoteAsk = DemoteAsk(card: card, message: error.message, isNew: false)
+            return false
         } catch { say(error); return false }
+    }
+
+    /// 主卡的旧版本（主卡在原卡上更新，改之前的都留着）。
+    func history(_ card: MemoryCard) async -> [(text: String, reason: String, made: Date)] {
+        guard let json = try? await api.request("GET", "api/chats/\(card.chatID)/memory-cards/\(card.id)/history") else {
+            return []
+        }
+        return (json["items"] as? [[String: Any]] ?? []).map {
+            ($0["content"] as? String ?? "", $0["reason"] as? String ?? "",
+             Date(timeIntervalSince1970: TimeInterval($0["made"] as? Int ?? 0)))
+        }
     }
 
     func setStatus(_ card: MemoryCard, _ status: String) async {
