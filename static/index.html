@@ -3565,6 +3565,12 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .mc-badge { flex: none; padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent-soft) 17%, var(--card)); color: var(--text); font-size: 11.5px; white-space: nowrap; }
   .mc-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
   .mc-tag { padding: 4px 7px; border-radius: 8px; background: var(--card); color: var(--dim); font-size: 11.5px; }
+  /* 「主卡 · xx」：一件事的现状，染一点强调色和副卡分开 */
+  .mc-tag.mc-tag-main { background: color-mix(in srgb, var(--accent) 24%, var(--card)); color: var(--text); font-weight: 650; }
+  /* 补全建议里新加的那一段 */
+  .mc-added { padding: 0 2px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+  /* 主卡的旧版本，点「历史」摊在卡片下面 */
+  .mc-history { display: grid; gap: 9px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   .mc-source { margin-top: 9px; color: var(--dim); font-size: 11.5px; }
   .mc-source-link { padding: 0; color: var(--dim); font-size: 11.5px; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--dim) 45%, transparent); }
   .mc-source-link:active { opacity: .6; }
@@ -3602,6 +3608,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .mc-form { display: grid; gap: 11px; }
   .mc-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
   .mc-form label { display: grid; gap: 5px; color: var(--dim); font-size: 12px; min-width: 0; }
+  .mc-form [hidden] { display: none; }
   /* iPhone 的日期框自带最小宽度，不管格子多宽都撑出去。压回格子里，文字靠左。 */
   .mc-form-grid > * { min-width: 0; }
   .mc-form input[type="date"] { display: block; width: 100%; min-width: 0; max-width: 100%;
@@ -12595,8 +12602,10 @@ let memoryConsoleQuery = '';
 let memoryConsoleFilter = 'all';
 // 类别（健康与安全、日程……）；空＝全部类别。搜索框里打了还没搜的字另记，换筛选重画时别丢。
 let memoryConsoleTopic = '', memorySearchDraft = '';
-// 事件（追音音、搬家……）：点卡上的「事件：xx」只看这件事的卡；空＝不按事件筛。
+// 事件（追音音、搬家……）：点卡上的「主卡 · xx」「副卡 · xx」只看这件事的卡；空＝不按事件筛。
 let memoryConsoleThread = '';
+// 已有的事件名（[{thread, count, has_main}]），每次拿记忆卡时更新；编辑框里的事件下拉从这里列。
+let memoryThreads = [];
 // 右上角两个按钮：🔍 展开搜索和筛选，＋ 摊开一张空卡。都会切到「记忆卡」页。
 let memorySearchOpen = false, memoryWantsNewCard = false, memoryFocusSearch = false;
 // 记忆卡一次只拿一页（最近改过的在前）。卡一多，全拿下来再画，打开就慢；
@@ -12704,10 +12713,28 @@ function memoryCardForm(item, taxonomy, kind) {
     <div class="mc-form-grid"><label>类型<select class="ap-in" name="memory_type">${memoryOptions(taxonomy.types, item.memory_type)}</select></label><label>重要程度<select class="ap-in" name="importance">${memoryOptions(taxonomy.importance, item.importance)}</select></label></div>
     <div class="mc-form-grid"><label>保存时间<select class="ap-in" name="retention">${memoryOptions(taxonomy.retention, item.retention)}</select></label><label>有效至（仅“截至某日”需要）<input class="ap-in" name="valid_until" type="date" value="${instructionEsc(item.valid_until || '')}"></label></div>
     <label>主题（最多选 3 个）<span class="mc-topic-list">${topics}</span></label>
-    <label>事件（属于哪件持续的事，没有就空着）<input class="ap-in" name="thread" maxlength="40" placeholder="如：追音音" value="${instructionEsc(item.thread || '')}"></label>
+    ${memoryThreadPicker(item)}
     <div class="mc-actions"><button class="mc-btn primary" type="submit">${kind === 'draft' ? '采用这条' : kind === 'new' ? '添加' : '保存修改'}</button><button class="mc-btn quiet" type="button" data-memory-cancel>取消</button></div>
     <div class="ap-msg" data-memory-msg></div>
   </form>`;
+}
+// 这张卡在某件事里默认当主卡还是副卡：原来就在这件事里的照旧；
+// 那件事已经有主卡（又不是这张）就当副卡；还没有主卡就当主卡。
+function memoryThreadRoleFor(item, thread) {
+  if (thread && thread === (item.thread || '') && (item.thread_role === 'main' || item.thread_role === 'detail')) return item.thread_role;
+  const info = memoryThreads.find(t => t.thread === thread);
+  return info && info.has_main ? 'detail' : 'main';
+}
+// 事件不再手打：从已有的事件里挑，或者「新事件…」再起名字；挑了事件再选主卡/副卡。
+function memoryThreadPicker(item) {
+  const current = item.thread || '';
+  const names = memoryThreads.map(t => t.thread);
+  if (current && !names.includes(current)) names.unshift(current);
+  const options = names.map(name => `<option value="${instructionEsc(name)}"${name === current ? ' selected' : ''}>${instructionEsc(name)}</option>`).join('');
+  const role = memoryThreadRoleFor(item, current);
+  return `<div class="mc-form-grid"><label>事件（属于哪件持续的事）<select class="ap-in" name="thread_pick"><option value=""${current ? '' : ' selected'}>不属于任何事件</option>${options}<option value="" data-mc-new>新事件…</option></select></label>`
+    + `<label data-mc-role-wrap${current ? '' : ' hidden'}>在这件事里是<select class="ap-in" name="thread_role"><option value="main"${role === 'main' ? ' selected' : ''}>主卡（这件事现在怎样）</option><option value="detail"${role === 'detail' ? ' selected' : ''}>副卡（其中一个细节）</option></select></label></div>`
+    + `<label data-mc-new-wrap hidden>新事件的名字<input class="ap-in" name="thread_new" maxlength="40" placeholder="如：追音音"></label>`;
 }
 document.getElementById('memorySearchBtn').onclick = () => {
   memoryConsoleTab = 'cards';
@@ -12751,10 +12778,13 @@ function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
   const reviseLine = (reviseOf && reviseOf.content)
     ? `<div class="mc-retag">采用后，原卡会改成上面这样：<s>${instructionEsc(reviseOf.content)}</s></div>`
     : '';
-  // 事件标签点一下就只看这件事的卡。
+  // 事件标签写明是主卡还是副卡，点一下就只看这件事的卡（主卡排最前）。
+  const roleName = item.thread_role === 'main' ? '主卡' : item.thread_role === 'detail' ? '副卡' : '事件';
   const threadTag = item.thread
-    ? `<button type="button" class="mc-tag" data-mc-thread="${instructionEsc(item.thread)}">事件：${instructionEsc(item.thread)}</button>`
+    ? `<button type="button" class="mc-tag${item.thread_role === 'main' ? ' mc-tag-main' : ''}" data-mc-thread="${instructionEsc(item.thread)}">${roleName} · ${instructionEsc(item.thread)}</button>`
     : '';
+  // 补全建议多半是旧文字后面接上新进展：新加的那段标出来，不用逐字对照。
+  const contentHtml = (reviseOf && reviseOf.content) ? memoryAddedHtml(reviseOf.content, item.content) : instructionEsc(item.content || '');
   const topicTags = (item.topics || []).map(topic => `<span class="mc-tag">${instructionEsc((taxonomy.topics || {})[topic] || topic)}</span>`).join('');
   const importance = (taxonomy.importance || {})[item.importance] || item.importance;
   const retention = (taxonomy.retention || {})[item.retention] || item.retention;
@@ -12774,8 +12804,19 @@ function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
   if (kind === 'draft') actions = `<button class="mc-btn primary" data-memory-accept="${instructionEsc(item.id)}">采用</button><button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="draft">先修改</button>${(item.action === 'update' || item.action === 'revise') ? '' : `<button class="mc-btn quiet" data-memory-split="${instructionEsc(item.id)}" data-kind="draft">拆开</button>`}<button class="mc-btn quiet" data-memory-discard="${instructionEsc(item.id)}">忽略</button>`;
   else if (kind === 'used') actions = '';
   else if (archived) actions = `<button class="mc-btn" data-memory-restore="${instructionEsc(item.id)}">恢复</button><button class="mc-btn quiet danger" data-memory-delete-permanent="${instructionEsc(item.id)}">永久删除</button>`;
-  else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button><button class="mc-btn quiet" data-memory-complete="${instructionEsc(item.id)}">补全</button>${canShare ? `<button class="mc-btn quiet" data-memory-share="${instructionEsc(item.id)}">共享</button>` : ''}<button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
-  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${instructionEsc(item.content || '')}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${threadTag}${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${foreign ? `<span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span>` : ''}${sharedTag}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}${splitOf ? '<span class="mc-tag">拆分</span>' : ''}${replaceOf ? '<span class="mc-tag">更新旧卡</span>' : ''}${reviseOf ? '<span class="mc-tag">补全</span>' : ''}</div>${retagLine}${splitLine}${replaceLine}${reviseLine}${kind !== 'used' ? memorySourceHtml(item, kind) : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
+  else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button><button class="mc-btn quiet" data-memory-complete="${instructionEsc(item.id)}">补全</button>${item.thread_role === 'main' ? `<button class="mc-btn quiet" data-memory-history="${instructionEsc(item.id)}" aria-expanded="false">历史</button>` : ''}${canShare ? `<button class="mc-btn quiet" data-memory-share="${instructionEsc(item.id)}">共享</button>` : ''}<button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
+  return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${contentHtml}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${threadTag}${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${foreign ? `<span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span>` : ''}${sharedTag}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}${splitOf ? '<span class="mc-tag">拆分</span>' : ''}${replaceOf ? '<span class="mc-tag">更新旧卡</span>' : ''}${reviseOf ? '<span class="mc-tag">补全</span>' : ''}</div>${retagLine}${splitLine}${replaceLine}${reviseLine}${kind !== 'used' ? memorySourceHtml(item, kind) : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
+}
+// 新旧两段对一下：开头、结尾相同的部分照常显示，中间新写的那段包进 <mark>。按字（码点）比，不切坏 emoji。
+function memoryAddedHtml(oldText, newText) {
+  const a = Array.from(String(oldText || '')), b = Array.from(String(newText || ''));
+  const max = Math.min(a.length, b.length);
+  let start = 0, end = 0;
+  while (start < max && a[start] === b[start]) start++;
+  while (end < max - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++;
+  const added = b.slice(start, b.length - end).join('');
+  if (!added) return instructionEsc(b.join(''));
+  return instructionEsc(b.slice(0, start).join('')) + `<mark class="mc-added">${instructionEsc(added)}</mark>` + instructionEsc(b.slice(b.length - end).join(''));
 }
 function memoryEmpty(title, text, button) {
   return `<div class="mc-empty"><strong>${instructionEsc(title)}</strong>${instructionEsc(text)}${button || ''}</div>`;
@@ -12926,13 +12967,28 @@ function wireMemorySettings(chat, cardState, sigilloState, shopState) {
 
 function memoryReadForm(form) {
   const topics = [...form.querySelectorAll('.mc-topic input:checked')].map(input => input.value);
-  return {content:form.elements.content.value.trim(),memory_type:form.elements.memory_type.value,topics,importance:form.elements.importance.value,retention:form.elements.retention.value,valid_until:form.elements.valid_until.value || null,thread:(form.elements.thread ? form.elements.thread.value.trim() : '')};
+  // 事件：下拉里挑的，或者「新事件…」后面打的名字；不属于任何事件就 thread、thread_role 都空。
+  const pick = form.elements.thread_pick;
+  const isNew = !!(pick && pick.options[pick.selectedIndex] && pick.options[pick.selectedIndex].hasAttribute('data-mc-new'));
+  const thread = pick ? (isNew ? form.elements.thread_new.value.trim() : pick.value) : '';
+  return {content:form.elements.content.value.trim(),memory_type:form.elements.memory_type.value,topics,importance:form.elements.importance.value,retention:form.elements.retention.value,valid_until:form.elements.valid_until.value || null,thread,thread_role:thread ? form.elements.thread_role.value : ''};
 }
 async function memoryJson(url, options) {
   const response = await fetch(url, options);
   const data = await response.json();
-  if (!response.ok || !data.ok) throw new Error(data.detail || '操作没有完成');
+  if (!response.ok || !data.ok) { const error = new Error(data.detail || '操作没有完成'); error.status = response.status; throw error; }
   return data;
+}
+// 存卡：这件事已经有主卡时服务器回 409 并问一句；她点了确定，就带 demote_other 再发一次（原来那张改成副卡）。
+// 返回 {data, demoted}：demoted 时别的卡也变了，列表要整页重拿。
+async function memorySaveCard(url, method, payload) {
+  const send = body => memoryJson(url, {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  try { return {data: await send(payload), demoted: false}; }
+  catch (e) {
+    if (e.status !== 409) throw e;
+    if (!confirm(e.message)) throw new Error('这件事已经有主卡，没有保存。可以把这张选成副卡再存。');
+    return {data: await send({...payload, demote_other: true}), demoted: true};
+  }
 }
 function memoryCardReplace(card, item, taxonomy, kind, recentIds) {
   var tmp = document.createElement('div');
@@ -12956,7 +13012,7 @@ function removeMemoryCard(card, tabKey) {
 function wireMemoryCards(chat, cardState, allItems) {
   document.querySelectorAll('[data-memory-edit]').forEach(button => button.onclick = () => { const item=[...(cardState.drafts||[]),...allItems].find(value=>value.id===button.dataset.memoryEdit); const card=button.closest('.mc-card'); card.innerHTML=memoryCardForm(item,cardState.taxonomy,button.dataset.kind); wireMemoryCards(chat,cardState,allItems); });
   document.querySelectorAll('[data-memory-cancel]').forEach(button => button.onclick = () => { const form=button.closest('[data-memory-form]'); const item=[...(cardState.drafts||[]),...allItems].find(v=>v.id===form.dataset.memoryForm); const card=button.closest('.mc-card'); if(item){memoryCardReplace(card,item,cardState.taxonomy,form.dataset.kind==='draft'?'draft':'card');wireMemoryCards(chat,cardState,allItems);}else{loadLongContext();} });
-  document.querySelectorAll('[data-memory-form]').forEach(form => { form.querySelectorAll('.mc-topic input').forEach(input => input.onchange=()=>{ if(form.querySelectorAll('.mc-topic input:checked').length>3){ input.checked=false; const msg=form.querySelector('[data-memory-msg]'); msg.textContent='一条记忆最多选 3 个主题。'; msg.className='ap-msg on bad'; } }); form.onsubmit=async event=>{ event.preventDefault(); const msg=form.querySelector('[data-memory-msg]'); const payload=memoryReadForm(form); if(!payload.content){msg.textContent='记忆内容不能为空。';msg.className='ap-msg on bad';return;} msg.textContent='正在保存…';msg.className='ap-msg on'; try { if(form.dataset.kind==='new'){ await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); memoryConsoleTab='cards'; loadLongContext(); return; } const editing=form.dataset.kind==='draft'?null:allItems.find(v=>v.id===form.dataset.memoryForm);const base='api/chats/'+encodeURIComponent(memoryCardChatId(editing,chat)); const url=form.dataset.kind==='draft'?base+'/memory-card-drafts/'+encodeURIComponent(form.dataset.memoryForm)+'/accept':base+'/memory-cards/'+encodeURIComponent(form.dataset.memoryForm); await memoryJson(url,{method:form.dataset.kind==='draft'?'POST':'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const card=form.closest('.mc-card'); if(form.dataset.kind==='draft'){removeMemoryCard(card,'review');updateMemoryTabCount('cards',1);}else{const item=allItems.find(v=>v.id===form.dataset.memoryForm);if(item)Object.assign(item,payload);memoryCardReplace(card,item||payload,cardState.taxonomy,'card');wireMemoryCards(chat,cardState,allItems);} } catch(e){msg.textContent='没有保存：'+e.message;msg.className='ap-msg on bad';} }; });
+  document.querySelectorAll('[data-memory-form]').forEach(form => { form.querySelectorAll('.mc-topic input').forEach(input => input.onchange=()=>{ if(form.querySelectorAll('.mc-topic input:checked').length>3){ input.checked=false; const msg=form.querySelector('[data-memory-msg]'); msg.textContent='一条记忆最多选 3 个主题。'; msg.className='ap-msg on bad'; } }); const formItem=[...(cardState.drafts||[]),...allItems].find(v=>v.id===form.dataset.memoryForm)||{}; const pick=form.elements.thread_pick; if(pick)pick.onchange=()=>{ const opt=pick.options[pick.selectedIndex]; const isNew=opt.hasAttribute('data-mc-new'); form.querySelector('[data-mc-new-wrap]').hidden=!isNew; form.querySelector('[data-mc-role-wrap]').hidden=!isNew&&!pick.value; form.elements.thread_role.value=memoryThreadRoleFor(formItem,isNew?'':pick.value); if(isNew)form.elements.thread_new.focus(); }; form.onsubmit=async event=>{ event.preventDefault(); const msg=form.querySelector('[data-memory-msg]'); const payload=memoryReadForm(form); if(!payload.content){msg.textContent='记忆内容不能为空。';msg.className='ap-msg on bad';return;} if(pick&&!form.querySelector('[data-mc-new-wrap]').hidden&&!payload.thread){msg.textContent='给新事件起个名字。';msg.className='ap-msg on bad';return;} msg.textContent='正在保存…';msg.className='ap-msg on'; try { if(form.dataset.kind==='new'){ await memorySaveCard('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards','POST',payload); memoryConsoleTab='cards'; loadLongContext(); return; } const editing=form.dataset.kind==='draft'?null:allItems.find(v=>v.id===form.dataset.memoryForm);const base='api/chats/'+encodeURIComponent(memoryCardChatId(editing,chat)); const url=form.dataset.kind==='draft'?base+'/memory-card-drafts/'+encodeURIComponent(form.dataset.memoryForm)+'/accept':base+'/memory-cards/'+encodeURIComponent(form.dataset.memoryForm); const saved=await memorySaveCard(url,form.dataset.kind==='draft'?'POST':'PUT',payload); const card=form.closest('.mc-card'); if(form.dataset.kind==='draft'){removeMemoryCard(card,'review');updateMemoryTabCount('cards',1);}else{const item=allItems.find(v=>v.id===form.dataset.memoryForm); /* 换了事件或主副：别的卡、事件列表都可能跟着变，整页静默重拿 */ if(saved.demoted||!item||(item.thread||'')!==payload.thread||(item.thread_role||'')!==payload.thread_role){loadLongContext(true);return;} Object.assign(item,payload);memoryCardReplace(card,item,cardState.taxonomy,'card');wireMemoryCards(chat,cardState,allItems);} } catch(e){msg.textContent='没有保存：'+e.message;msg.className='ap-msg on bad';} }; });
   document.querySelectorAll('[data-memory-accept]').forEach(button => button.onclick=async()=>{ button.disabled=true; try { await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/'+encodeURIComponent(button.dataset.memoryAccept)+'/accept',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); removeMemoryCard(button.closest('.mc-card'),'review');updateMemoryTabCount('cards',1); } catch(e){button.disabled=false;alert('没有采用：'+e.message);} });
   document.querySelectorAll('[data-memory-discard]').forEach(button => button.onclick=async()=>{ if(!confirm('忽略这条候选记忆？'))return; try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/'+encodeURIComponent(button.dataset.memoryDiscard),{method:'DELETE'});removeMemoryCard(button.closest('.mc-card'),'review');}catch(e){alert('没有忽略：'+e.message);} });
   document.querySelectorAll('[data-memory-toggle]').forEach(button => button.onclick=async()=>{ const item=allItems.find(value=>value.id===button.dataset.memoryToggle); try{await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(item.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...item,status:button.dataset.status})});item.status=button.dataset.status;const card=button.closest('.mc-card');memoryCardReplace(card,item,cardState.taxonomy,'card');wireMemoryCards(chat,cardState,allItems);}catch(e){alert('没有修改：'+e.message);} });
@@ -12965,7 +13021,9 @@ function wireMemoryCards(chat, cardState, allItems) {
   document.querySelectorAll('[data-memory-source]').forEach(button => button.onclick = () => { const item=[...(cardState.drafts||[]),...allItems].find(value=>value.id===button.dataset.memorySource); openMemorySource(button.dataset.kind==='draft'?chat.id:memoryCardChatId(item,chat), button.dataset.kind, button.dataset.memorySource, item&&item.content); });
   document.querySelectorAll('[data-memory-split]').forEach(button => button.onclick=async()=>{ const draft=button.dataset.kind==='draft'; if(!confirm(draft?'让模型把这条按「一件事一张」拆开？\n拆出来的几条会替换这一条，仍然留在「待确认」里。':'让模型把这张卡按「一件事一张」拆开？\n拆出来的会放进「待确认」；你采用其中一条后，原卡才会收进归档（可恢复）。'))return; button.disabled=true; try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+(draft?'/memory-card-drafts/':'/memory-cards/')+encodeURIComponent(button.dataset.memorySplit)+'/split',{method:'POST'});memoryConsoleTab='review';loadLongContext();}catch(e){button.disabled=false;alert('没有开始拆：'+e.message);} });
   document.querySelectorAll('[data-memory-complete]').forEach(button => button.onclick=async()=>{ if(!confirm('让模型补全这张卡？\n会补上称呼、背景和所属事件，结果放进「待确认」；你采用后原卡才会改。'))return; button.disabled=true; try{const item=allItems.find(value=>value.id===button.dataset.memoryComplete);await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(button.dataset.memoryComplete)+'/complete',{method:'POST'});memoryConsoleTab='review';loadLongContext();}catch(e){button.disabled=false;alert('没有开始补全：'+e.message);} });
-  // 点「事件：xx」：回到记忆卡页，只看这件事的卡。
+  // 主卡的「历史」：在卡片下面摊开之前的每一版（新的在前），再点收起。
+  document.querySelectorAll('[data-memory-history]').forEach(button => button.onclick=async()=>{ const card=button.closest('.mc-card'); const open=card.querySelector('.mc-history'); if(open){open.remove();button.textContent='历史';button.setAttribute('aria-expanded','false');return;} const item=allItems.find(value=>value.id===button.dataset.memoryHistory); const box=document.createElement('div'); box.className='mc-history'; box.innerHTML='<div class="mc-retag">正在读取…</div>'; card.querySelector('.mc-card-view').appendChild(box); button.textContent='收起历史'; button.setAttribute('aria-expanded','true'); try{const d=await memoryJson('api/chats/'+encodeURIComponent(memoryCardChatId(item,chat))+'/memory-cards/'+encodeURIComponent(button.dataset.memoryHistory)+'/history',{cache:'no-store'}); const items=d.items||[]; box.innerHTML=items.length?items.map(v=>`<div><div class="mc-retag">${instructionEsc(memoryDate(v.made))}${v.reason?' · '+instructionEsc(v.reason):''}</div><div class="mc-content">${instructionEsc(v.content||'')}</div></div>`).join(''):'<div class="mc-retag">还没有旧版本</div>';}catch(e){box.innerHTML='<div class="mc-retag">没读到历史：'+instructionEsc(e.message)+'</div>';} });
+  // 点「主卡 · xx」「副卡 · xx」：回到记忆卡页，只看这件事的卡。
   document.querySelectorAll('[data-mc-thread]').forEach(tag => tag.onclick = () => { memoryConsoleThread = tag.dataset.mcThread; memoryConsoleTab = 'cards'; memoryCardLimit = MEMORY_PAGE; loadLongContext(true); });
   document.querySelectorAll('[data-memory-share]').forEach(button => button.onclick = async () => {
     const item = allItems.find(value => value.id === button.dataset.memoryShare);
@@ -12996,6 +13054,7 @@ async function loadLongContext(quiet) {
     const sigilloState=sigilloResponse.ok?await sigilloResponse.json().catch(()=>({ok:false})):{ok:false};
     const shopState=shopResponse.ok?await shopResponse.json().catch(()=>({ok:false})):{ok:false};
     if(!summaryResponse.ok||!summary.ok)throw new Error(summary.detail||'摘要没有读取到'); if(!modelResponse.ok||!model.ok)throw new Error(model.detail||'模型没有读取到'); if(!cardsResponse.ok||!cards.ok)throw new Error(cards.detail||'记忆卡没有读取到'); if(!embeddingResponse.ok||!embeddingModel.ok)throw new Error(embeddingModel.detail||'向量模型没有读取到');
+    if(Array.isArray(cards.threads))memoryThreads=cards.threads;   // 编辑框的事件下拉用
     const pageItems=cards.items||[], counts=cards.counts||{active:0,archived:0}, totalShown=Number(cards.total||0), drafts=cards.drafts||[], cardWorking=cards.state&&['queued','running'].includes(cards.state.status);
     const searching=!!(memoryConsoleQuery||'').trim()||memoryConsoleFilter!=='all'||!!memoryConsoleTopic||!!memoryConsoleThread;
     const recentIds=new Set(((cards.last_injection||{}).items||[]).map(item=>item.id));

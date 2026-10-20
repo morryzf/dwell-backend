@@ -5235,7 +5235,9 @@ async def memory_card_draft_accept(chat_id: str, draft_id: str, request: Request
             chosen[field] = payload[field]
     try:
         clean = _memory_card_clean(chosen)
-        card = db.memory_card_draft_accept(chat_id, draft_id, clean)
+        card = db.memory_card_draft_accept(chat_id, draft_id, {**clean, "demote_other": bool(payload.get("demote_other"))})
+    except db.ThreadMainExists as exc:
+        raise _main_exists(exc) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if draft.get("action") == "revise":

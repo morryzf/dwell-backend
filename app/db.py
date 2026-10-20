@@ -2968,7 +2968,7 @@ def memory_card_draft_accept(chat_id: str, draft_id: str, chosen: dict) -> dict:
             content = str(chosen["content"]).strip()[:2400]
             thread = str(chosen.get("thread") or "")[:40]
             role = str(chosen.get("thread_role") or "")[:10] if thread else ""
-            _settle_main(cx, pool, target_id, thread, role, False)
+            _settle_main(cx, pool, target_id, thread, role, bool(chosen.get("demote_other")))
             _remember_main_content(cx, target, content, "整理时更新" if draft["action"] == "revise" else "")
             cx.execute(
                 """UPDATE memory_cards SET content=?,memory_type=?,topics_json=?,importance=?,
