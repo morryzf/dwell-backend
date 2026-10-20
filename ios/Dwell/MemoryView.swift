@@ -11,6 +11,7 @@ struct MemoryView: View {
 
     @State private var searchOpen = false
     @State private var historyOf: MemoryCard?
+    @State private var timelineOf: MemoryCard?
     @State private var adding: MemoryCard?
     @State private var editing: MemoryCard?
     @State private var editingDraft: MemoryCard?
@@ -43,6 +44,10 @@ struct MemoryView: View {
             .sheet(item: $historyOf) { card in
                 MemoryHistorySheet(card: card, store: store)
             }
+            .sheet(item: $timelineOf) { card in
+                MemoryTimelineSheet(card: card, store: store)
+            }
+            .environment(\.memoryTimelineTap, { card in timelineOf = card })
             .confirmationDialog("这件事已经有主卡了", isPresented: Binding(get: { store.demoteAsk != nil },
                                                                      set: { if !$0 { store.demoteAsk = nil } }),
                                 titleVisibility: .visible, presenting: store.demoteAsk) { ask in
@@ -359,9 +364,12 @@ struct MemoryView: View {
                     .buttonStyle(MemoryButtonStyle(kind: .quiet))
             }
             // 单独读看不懂（只写了「那个女生」）的卡：让模型补上名字和事件，补好进待确认。
-            Button("补全") { Task { await store.completeCard(card) } }
-                .buttonStyle(MemoryButtonStyle(kind: .quiet))
-                .disabled(store.cardState.isBusy)
+            // 主卡是时间线，直接在时间线里改，不用补全。
+            if !card.isMain {
+                Button("补全") { Task { await store.completeCard(card) } }
+                    .buttonStyle(MemoryButtonStyle(kind: .quiet))
+                    .disabled(store.cardState.isBusy)
+            }
             if card.sharedFrom == nil && card.sharedCount == 0 {
                 Button("共享") { Task { await store.share(card) } }
                     .buttonStyle(MemoryButtonStyle(kind: .quiet))
@@ -424,7 +432,7 @@ struct MemoryView: View {
                             .buttonStyle(MemoryButtonStyle(kind: .primary))
                         Button("先修改") { editingDraft = draft }
                             .buttonStyle(MemoryButtonStyle(kind: .normal))
-                        if draft.action != "update" && draft.action != "revise" {
+                        if draft.action != "update" && draft.action != "revise" && draft.action != "append" {
                             Button("拆开") { Task { await store.splitDraft(draft) } }
                                 .buttonStyle(MemoryButtonStyle(kind: .quiet))
                         }
@@ -480,26 +488,67 @@ struct MemoryCardView<Actions: View>: View {
     @ViewBuilder var actions: Actions
     var onSource: () -> Void = {}
     @Environment(\.memoryThreadTap) private var onThread
+    @Environment(\.memoryTimelineTap) private var onTimeline
     @State private var actionsOpen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                Text(card.action == "revise" && target != nil
-                     ? Self.highlightAdded(card.content, comparedTo: target?.content ?? "")
-                     : AttributedString(card.content))
-                    .font(.system(size: 13))
-                    .lineSpacing(4)
-                    .foregroundStyle(Theme.bubbleText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                if kind != .used {
-                    Text(labels.type(card.memoryType))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.text)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(MemoryStyle.badge))
+            if kind == .draft && card.action == "append" {
+                // 给主卡加一步：哪件事、哪天，新的这一步整段都是新加的。
+                HStack(spacing: 6) {
+                    Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").font(.system(size: 10.5))
+                    Text("给主卡 · \(target?.thread ?? card.thread) 加一步")
+                    let day = TimelineNode(date: card.nodeDate, text: "").label
+                    if !day.isEmpty {
+                        Text("· " + day).foregroundStyle(Theme.dim)
+                    }
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.accent)
+            }
+            if kind != .draft, card.isMain, let latest = card.timeline.last {
+                // 主卡在列表里只露最新的一步，整条时间线点开看。
+                VStack(alignment: .leading, spacing: 5) {
+                    if !latest.label.isEmpty {
+                        Text(latest.label)
+                            .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(Theme.accent)
+                    }
+                    Text(latest.text)
+                        .font(.system(size: 13))
+                        .lineSpacing(4)
+                        .foregroundStyle(Theme.bubbleText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button { onTimeline(card) } label: {
+                        HStack(spacing: 3) {
+                            Text("时间线 · \(card.timeline.count) 步")
+                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
+                }
+            } else {
+                HStack(alignment: .top, spacing: 10) {
+                    Text(card.action == "revise" && target != nil
+                         ? Self.highlightAdded(card.content, comparedTo: target?.content ?? "")
+                         : card.action == "append" ? Self.highlightAdded(card.content, comparedTo: "")
+                         : AttributedString(card.content))
+                        .font(.system(size: 13))
+                        .lineSpacing(4)
+                        .foregroundStyle(Theme.bubbleText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                    if kind != .used {
+                        Text(labels.type(card.memoryType))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.text)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(MemoryStyle.badge))
+                    }
                 }
             }
             MemoryTagFlow(tags: tags)
@@ -618,6 +667,7 @@ struct MemoryCardView<Actions: View>: View {
         if kind == .draft && card.action == "split" { out.append("拆分") }
         if kind == .draft && card.action == "replace" { out.append("更新旧卡") }
         if kind == .draft && card.action == "revise" { out.append(card.isMain ? "更新主卡" : "补全") }
+        if kind == .draft && card.action == "append" { out.append("时间线") }
         return out
     }
 }
@@ -774,12 +824,21 @@ struct MemoryCardEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             label("记忆内容")
-            TextEditor(text: $card.content)
-                .font(.system(size: 14))
-                .frame(minHeight: 96)
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
+            if card.isMain && !card.timeline.isEmpty {
+                Text("主卡的内容是一条时间线，在「时间线」里一步一步改。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.dim)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
+            } else {
+                TextEditor(text: $card.content)
+                    .font(.system(size: 14))
+                    .frame(minHeight: 96)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
+            }
 
             label("属于哪件事")
             eventMenu
@@ -1130,5 +1189,200 @@ struct MemoryHistorySheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MemoryStyle.card))
+    }
+}
+
+private struct MemoryTimelineTapKey: EnvironmentKey {
+    static let defaultValue: (MemoryCard) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    /// 点主卡上的「时间线 ›」：打开整条时间线。
+    var memoryTimelineTap: (MemoryCard) -> Void {
+        get { self[MemoryTimelineTapKey.self] }
+        set { self[MemoryTimelineTapKey.self] = newValue }
+    }
+}
+
+/// 主卡的时间线：左边一条细线，每一步一个点，最新的那一步点是实心的；右边是日子和这一步发生了什么。
+/// 右上角「编辑」进到逐条改：改日子、改字、删一步、加一步。
+struct MemoryTimelineSheet: View {
+    @State var card: MemoryCard
+    @ObservedObject var store: MemoryStore
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var editing = false
+    @State private var nodes: [TimelineNode] = []
+    @State private var appeared = false
+    @State private var saving = false
+    @State private var showHistory = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("主卡 · \(card.thread)")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.bottom, 18)
+                    if editing { editor } else { timeline }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 30)
+            }
+            .background(PaperBackground())
+            .navigationTitle("时间线")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    if editing {
+                        Button("取消") { withAnimation(.easeOut(duration: 0.2)) { editing = false } }
+                    } else {
+                        Button("历史") { showHistory = true }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if editing {
+                        Button("保存") { Task { await save() } }
+                            .disabled(saving || nodes.allSatisfy { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+                    } else {
+                        Button("编辑") {
+                            nodes = card.timeline
+                            withAnimation(.easeOut(duration: 0.2)) { editing = true }
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showHistory) { MemoryHistorySheet(card: card, store: store) }
+            .onAppear {
+                // 一步一步浮出来：每步晚 40 毫秒，0.2 秒，只动透明度和位移。
+                if reduceMotion { appeared = true } else { withAnimation(.easeOut(duration: 0.2)) { appeared = true } }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private var timeline: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(card.timeline.enumerated()), id: \.offset) { index, node in
+                let last = index == card.timeline.count - 1
+                HStack(alignment: .top, spacing: 14) {
+                    // 左边那一栏：点 + 往下接到下一步的线。
+                    VStack(spacing: 0) {
+                        dot(newest: last)
+                            .padding(.top, 3)
+                        if !last {
+                            Rectangle()
+                                .fill(Theme.accent.opacity(0.22))
+                                .frame(width: 2)
+                                .frame(maxHeight: .infinity)
+                                .padding(.top, 4)
+                        }
+                    }
+                    .frame(width: 14)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(node.label.isEmpty ? "某天" : node.label)
+                            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(last ? Theme.accent : Theme.dim)
+                        Text(node.text)
+                            .font(.system(size: 14.5))
+                            .lineSpacing(5)
+                            .foregroundStyle(Theme.bubbleText)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.bottom, last ? 0 : 26)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .opacity(appeared ? 1 : 0)
+                .offset(y: appeared || reduceMotion ? 0 : 6)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2).delay(Double(index) * 0.04), value: appeared)
+            }
+            if card.timeline.isEmpty {
+                Text("还没有任何一步。点右上角「编辑」加一步。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.dim)
+            }
+        }
+    }
+
+    private func dot(newest: Bool) -> some View {
+        ZStack {
+            if newest {
+                Circle().fill(Theme.accent.opacity(0.18)).frame(width: 18, height: 18)
+                Circle().fill(Theme.accent).frame(width: 10, height: 10)
+            } else {
+                Circle().fill(MemoryStyle.card).frame(width: 10, height: 10)
+                Circle().strokeBorder(Theme.accent.opacity(0.7), lineWidth: 2).frame(width: 10, height: 10)
+            }
+        }
+        .frame(width: 14, height: 14)
+    }
+
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach($nodes) { $node in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        DatePicker("", selection: dateBinding($node.date), displayedComponents: .date)
+                            .labelsHidden()
+                            .environment(\.locale, Locale(identifier: "zh_CN"))
+                        Spacer()
+                        Button(role: .destructive) {
+                            withAnimation(.easeOut(duration: 0.2)) { nodes.removeAll { $0.id == node.id } }
+                        } label: {
+                            Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(MemoryStyle.danger)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("删掉这一步")
+                    }
+                    TextEditor(text: $node.text)
+                        .font(.system(size: 14))
+                        .frame(minHeight: 80)
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(MemoryStyle.field))
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MemoryStyle.card))
+            }
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    nodes.append(TimelineNode(date: Self.format.string(from: Date()), text: ""))
+                }
+            } label: {
+                Label("加一步", systemImage: "plus")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(MemoryButtonStyle(kind: .normal, large: true))
+            Text("保存时会按日子重新排好。改之前的那版会留在「历史」里。")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.dim)
+        }
+    }
+
+    private static let format: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private func dateBinding(_ text: Binding<String>) -> Binding<Date> {
+        Binding(get: { Self.format.date(from: text.wrappedValue) ?? Date() },
+                set: { text.wrappedValue = Self.format.string(from: $0) })
+    }
+
+    private func save() async {
+        saving = true
+        defer { saving = false }
+        let kept = nodes.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if let updated = await store.saveTimeline(card, kept) {
+            card = updated
+            withAnimation(.easeOut(duration: 0.2)) { editing = false }
+        }
     }
 }
