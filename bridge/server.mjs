@@ -8,6 +8,7 @@
 
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
+import { userInfo } from "node:os";
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
@@ -165,6 +166,18 @@ function withoutEnvToken() {
   return env;
 }
 
+// 拿不到额度几乎都是同一个原因：跑桥接的那个系统用户没有（或不再有）Claude 订阅登录。
+// 聊天用的是另一个令牌，所以聊天照常，只有用量页拿不到。直接说怎么修。
+function usageLoginHint(tried) {
+  let user = "";
+  try { user = userInfo().username; } catch { /* 读不到就不写用户名 */ }
+  const command = user && user !== "root" ? `sudo -iu ${user} claude` : "claude";
+  return `服务器上${user ? ` ${user} 用户` : ""}的 Claude 订阅登录不在了（多半是过期了），所以拿不到额度；聊天不受影响。`
+    + `修法：在服务器上运行 ${command}，输入 /login，选 1（Claude 订阅账号），`
+    + "按提示在浏览器里授权；看到标题下面写着你的订阅（比如 Claude Pro）就行，再回来点刷新。"
+    + `（试过的登录：${tried.join("、")}）`;
+}
+
 async function planUsage(force) {
   if (!force && usageCache && Date.now() - usageCache.at < USAGE_CACHE_MS) return usageCache.body;
   if (!usageInflight) {
@@ -185,10 +198,7 @@ async function planUsage(force) {
         }
         Object.assign(body, result);
         if (!body.available) {
-          body.error = "官方用量接口没有给出额度：试过的登录方式（" + tried.join("、") + "）都没有读取用量的权限。"
-            + (CHILD_ENV.CLAUDE_CODE_OAUTH_TOKEN
-              ? "桥接环境里的 CLAUDE_CODE_OAUTH_TOKEN 是 setup-token 生成的，只能聊天；要看额度，得用运行桥接的那个系统用户在 claude 里 /login 一次。"
-              : "");
+          body.error = usageLoginHint(tried);
         }
       } catch (error) {
         body.available = false;
@@ -315,7 +325,8 @@ const ENGLISH_ONLY_REASON = "This reply will be read aloud by an English voice, 
   + "with no Chinese at all. Don't mention the redo or explain; just give the new version.";
 
 // 这间聊天选了回复语言时的兜底。口径和 app/llm_client.py 的 reply_language_ok 一致：
-// 代码和链接不算；en 最多容得下三个汉字，zh 要以汉字为主。
+// 代码和链接不算；en 最多容得下 7 个汉字，zh 要以汉字为主。
+const EN_MAX_HAN = 7;
 const HAN_G = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/g;
 const LATIN_G = /[A-Za-z]/g;
 const CODE_OR_LINK_G = /```[\s\S]*?```|`[^`]*`|https?:\/\/\S+/g;
@@ -326,7 +337,7 @@ function replyLanguageOk(text, language) {
   const han = (body.match(HAN_G) || []).length;
   const latin = (body.match(LATIN_G) || []).length;
   if (!han && !latin) return true;
-  if (language === "en") return han <= 3 && latin >= han * 5 && latin > 0;
+  if (language === "en") return han <= EN_MAX_HAN;
   return han > 0 && han * 4 >= latin;
 }
 

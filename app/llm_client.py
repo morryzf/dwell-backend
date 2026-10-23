@@ -668,10 +668,14 @@ _LATIN_RE = re.compile(r"[A-Za-z]")
 _CODE_OR_LINK_RE = re.compile(r"```[\s\S]*?```|`[^`]*`|https?://\S+")
 
 
+# 英文回复里最多容得下几个汉字。
+EN_MAX_HAN = 7
+
+
 def reply_language_ok(text: str, language: str) -> bool:
     """这一版是不是要求的语言。和桥接那边同一套口径。
 
-    en：几乎不能有汉字——英文里偶尔带个中文名字可以（最多 3 个字，英文字母至少是它的五倍）。
+    en：英文里夹几个汉字（一个名字、一句口头禅）不打回，超过 7 个才算没说英文。
     zh：要以汉字为主——夹几个英文词没关系，英文字母不能比汉字的四倍还多。
     代码和链接不算。空回复不打回（多半是只调了工具）。
     """
@@ -683,7 +687,7 @@ def reply_language_ok(text: str, language: str) -> bool:
     if not han and not latin:
         return True
     if language == "en":
-        return han <= 3 and latin >= han * 5 and latin > 0
+        return han <= EN_MAX_HAN
     return han > 0 and han * 4 >= latin
 
 

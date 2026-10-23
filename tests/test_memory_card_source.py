@@ -393,3 +393,42 @@ class MemoryMainCardTest(unittest.TestCase):
         db.memory_card_update(self.chat, self.main_card["id"], chosen)
         self.assertEqual([h["content"] for h in db.memory_card_history(self.chat, self.main_card["id"])],
                          ["Morry 在追音音。"])
+
+
+class MemoryPendingDraftTest(unittest.TestCase):
+    """还没采用的待确认，整理时也看得见：不再出一遍，有新进展就换成写完整的新版。"""
+
+    CARD = MemoryCardSourceTest.CARD
+    _stage = MemoryCardSourceTest._stage
+    tearDown = MemoryCardSourceTest.tearDown
+
+    def setUp(self):
+        MemoryCardSourceTest.setUp(self)
+        db.memory_card_stage(self.chat, [{**self.CARD, "content": "Morry 预售拍了一条刻字项圈，卖家还没发货。",
+                                          "memory_type": "open_thread", "thread": "定制项圈",
+                                          "thread_role": "main", "node_date": "2026-10-20"}])
+        self.pending = db.memory_card_draft_list(self.chat)[0]
+
+    def test_the_model_sees_pending_drafts_and_their_event(self):
+        sent = self._stage([])
+        self.assertIn("还在待确认的卡", sent["user"])
+        self.assertIn("P1 ", sent["user"])
+        self.assertIn("刻字项圈", sent["user"])
+        self.assertIn("定制项圈（主卡还在待确认）", sent["user"])
+        self.assertIn("P 编号", sent["system"])
+
+    def test_a_new_version_replaces_the_pending_draft(self):
+        self._stage([{**self.CARD, "content": "Morry 拍了刻字项圈，卖家没等刻字就发货了，她重拍了一单，刻 Belongs to Cloudy。",
+                      "memory_type": "open_thread", "thread": "定制项圈", "thread_role": "main",
+                      "replaces": "P1", "evidence": [self.rowids[2]]}])
+        drafts = db.memory_card_draft_list(self.chat)
+        self.assertEqual(len(drafts), 1)
+        self.assertNotEqual(drafts[0]["id"], self.pending["id"])
+        self.assertEqual((drafts[0]["action"], drafts[0]["thread_role"]), ("create", "main"))
+        self.assertIn("Belongs to Cloudy", drafts[0]["content"])
+        self.assertEqual(drafts[0]["node_date"], "2026-10-20")
+
+    def test_a_second_main_for_a_pending_event_becomes_a_detail(self):
+        self._stage([{**self.CARD, "content": "卖家说其实还没真发出。", "thread": "定制项圈", "thread_role": "main"}])
+        roles = sorted(d["thread_role"] for d in db.memory_card_draft_list(self.chat))
+        self.assertEqual(roles, ["detail", "main"])

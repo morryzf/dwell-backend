@@ -2736,9 +2736,16 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
     now = int(time.time())
     inserted = 0
     pool = _memory_card_pool(chat_id)
-    # 这一趟里已经提出主卡的事件：同一趟又来一张主卡，就当副卡。
+    # 已经提出过主卡的事件（这一趟的，和还在待确认里的）：再来一张主卡，就当副卡。
     staged_mains: set[str] = set()
     with conn() as cx:
+        staged_mains.update(
+            row["thread"] for row in cx.execute(
+                "SELECT thread FROM memory_card_drafts WHERE chat_id=? AND action='create' "
+                "AND thread_role='main' AND thread<>''",
+                (chat_id,),
+            ).fetchall()
+        )
         existing = {
             re.sub(r"\s+", "", str(row["content"])).casefold()
             for row in cx.execute(
@@ -2768,8 +2775,17 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
             rowids_json, source_start, source_end = _source_fields(
                 proposal.get("source_rowids"), source_start, source_end
             )
-            thread = str(proposal.get("thread") or "")[:40]
+            # 写的是某条还没采用的待确认的完整新版：换掉那一条，它原本要改哪张卡也接过来。
+            superseded = None
+            if proposal.get("supersedes_draft_id"):
+                superseded = cx.execute(
+                    "SELECT * FROM memory_card_drafts WHERE id=? AND chat_id=?",
+                    (str(proposal["supersedes_draft_id"]), chat_id),
+                ).fetchone()
+            thread = str(proposal.get("thread") or (superseded["thread"] if superseded else "") or "")[:40]
             role = str(proposal.get("thread_role") or "")[:10] if thread else ""
+            if superseded and superseded["thread_role"] == "main" and superseded["thread"] == thread:
+                staged_mains.discard(thread)
             action, target = "create", None
             # 主卡一件事只有一张：已经有了，这张就是「在原主卡上更新」，不另起一张。
             main = _thread_main(cx, pool, thread) if thread else None
@@ -2788,6 +2804,14 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
                     (wanted, chat_id),
                 ).fetchone():
                     action, target = "replace", wanted
+            if superseded and action == "create" and superseded["action"] in {"update", "replace", "append"}:
+                action, target = superseded["action"], superseded["target_card_id"]
+            node_date = str(proposal.get("node_date") or "")[:10]
+            if superseded:
+                cx.execute("DELETE FROM memory_card_drafts WHERE id=?", (superseded["id"],))
+                # 这一步从哪天开始，按早的那条算。
+                dates = [d for d in (node_date, str(superseded["node_date"] or "")) if d]
+                node_date = min(dates) if dates else ""
             if role == "main":
                 staged_mains.add(thread)
             row = {
@@ -2801,7 +2825,7 @@ def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
                 "source_segment_id": segment_id, "source_start_rowid": source_start,
                 "source_end_rowid": source_end, "source_rowids_json": rowids_json, "made": now,
                 "thread": thread, "thread_role": role,
-                "node_date": str(proposal.get("node_date") or "")[:10],
+                "node_date": node_date,
             }
             _insert_draft(cx, row)
             existing.add(fingerprint)
