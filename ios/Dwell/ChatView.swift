@@ -874,14 +874,14 @@ struct MessageRow: View {
         // 他的还在排队冒的，只画已经露出来的那几个。
         let visible = min(store.shown[message.id] ?? parts.count, parts.count)
         ForEach(Array(parts.prefix(visible).enumerated()), id: \.offset) { index, text in
-            Bubble(text: text, isMe: isMe, tail: true)
+            Bubble(text: text, isMe: isMe, tail: true,
+                   reaction: ReactionHost(message: message, isMe: isMe, reacting: $reacting,
+                                          active: badge && index == visible - 1))
                 .modifier(BubbleEntrance(delay: store.entering.contains(message.id) ? 0 : nil, isMe: isMe))
                 .transition(BubbleEntrance.insertion(isMe: isMe))
                 .contentShape(Rectangle())
                 .onTapGesture { onToggleActions() }
                 .contextMenu { menu(copying: text) }
-                .modifier(ReactionHost(message: message, isMe: isMe, reacting: $reacting,
-                                       active: badge && index == visible - 1))
         }
     }
 
@@ -1218,6 +1218,8 @@ struct Bubble: View {
     var tail = false
     /// 只装三个点的气泡：他在打字。
     var typing = false
+    /// 角上挂的表情。要挂在气泡本身上，不能挂在外面那个 85% 宽的框上，不然会飘到框的边上去。
+    var reaction: ReactionHost? = nil
     @Environment(\.bubbleMaxWidth) private var maxWidth
     @Environment(\.colorScheme) private var scheme
     @Environment(\.assistantID) private var assistant
@@ -1269,6 +1271,7 @@ struct Bubble: View {
                     .overlay(shape.stroke(style.borderColor, lineWidth: style.borderWidth))
                     .shadow(color: Theme.bubbleShadow, radius: 10, y: 6)
             }
+            .modifier(OptionalModifier(modifier: reaction))
             // 自己说的靠右：这个框占满 85% 宽，气泡贴着框的右边。
             .frame(maxWidth: maxWidth, alignment: isMe ? .trailing : .leading)
             .fixedSize(horizontal: false, vertical: true)
@@ -1361,6 +1364,20 @@ struct ThinkingView: View {
                     .frame(maxWidth: maxWidth, alignment: .leading)
                     .textSelection(.enabled)
             }
+        }
+    }
+}
+
+/// 有就套上，没有就原样。
+struct OptionalModifier<M: ViewModifier>: ViewModifier {
+    let modifier: M?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let modifier {
+            content.modifier(modifier)
+        } else {
+            content
         }
     }
 }

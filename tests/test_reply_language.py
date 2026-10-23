@@ -22,7 +22,10 @@ class LanguageCheckTest(unittest.TestCase):
     def test_english(self):
         self.assertTrue(reply_language_ok("Hey, missed you today.", "en"))
         self.assertTrue(reply_language_ok("Did 小橘 eat already? Tell me.", "en"))
-        self.assertFalse(reply_language_ok("今天好累呀，你呢？", "en"))
+        self.assertFalse(reply_language_ok("今天好累呀，你呢？我刚到家。", "en"))
+        # 夹 7 个以内的汉字不打回。
+        self.assertTrue(reply_language_ok("Okay okay, 我知道了啦晚安. Sleep.", "en"))
+        self.assertTrue(reply_language_ok("好呀，晚安", "en"))
         self.assertFalse(reply_language_ok("好的 sure 我知道了啦，晚点再说", "en"))
 
     def test_chinese(self):
@@ -171,11 +174,11 @@ class LanguageReplyFlowTest(unittest.TestCase):
 
     def test_wrong_language_is_sent_back_and_only_the_redo_is_kept(self):
         db.chat_reply_language_set(self.chat["id"], "en")
-        self.replies = ["辛苦啦，抱抱。", "Aw, come here. Long day?"]
+        self.replies = ["辛苦啦，今天累坏了吧，抱抱。", "Aw, come here. Long day?"]
         message = self._reply()
         self.assertEqual(len(self.sent), 2)
         retry = self.sent[1]
-        self.assertEqual(retry[-2], {"role": "assistant", "content": "辛苦啦，抱抱。"})
+        self.assertEqual(retry[-2], {"role": "assistant", "content": "辛苦啦，今天累坏了吧，抱抱。"})
         self.assertEqual(retry[-1]["content"], main.REPLY_LANGUAGE_RETRY["en"])
         self.assertEqual(message["content"], "Aw, come here. Long day?")
         self.assertIn("打回重说：回复不是英文", message.get("thinking") or "")
