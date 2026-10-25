@@ -9,11 +9,17 @@ PDF 要嵌一个带中文的字体，不然中文全是方块。字体不进仓�
 data/fonts 里，以后一直用这份。都不行就报一句清楚的错，让模型换成 Word。
 可以用环境变量 DWELL_PDF_FONT 直接指一个字体文件。
 
-Word 在 iPhone 的浏览器里打不开（一片空白），所以另给一个「阅读视图」：
-docx_to_html 把排好的 Word 读回来，变成一页能看的网页。
+Excel（.xlsx）的内容写成一张或几张 Markdown 表格（表格上面的标题就是工作表名），
+或者直接写 CSV。数字存成数字、百分数存成百分比、「=」开头的是公式。
+
+Word 和 Excel 在 iPhone 的浏览器里都打不开（一片空白），所以另给一个「阅读视图」：
+docx_to_html / xlsx_to_html 把做好的文件读回来，变成一页能看的网页。
 """
 from __future__ import annotations
 
+import base64
+import csv
+import hashlib
 import html
 import io
 import os
@@ -40,8 +46,10 @@ TEXT_TYPES = {
 }
 DOC_TYPES = {
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "pdf": "application/pdf",
 }
+PREVIEW_TYPES = {"docx", "xlsx"}       # 这两种点卡片进阅读视图
 SUPPORTED = sorted(TEXT_TYPES) + sorted(DOC_TYPES)
 
 
@@ -77,6 +85,8 @@ def make_file(filename: object, content: object) -> tuple[str, str, bytes]:
         mime = TEXT_TYPES[ext]
     elif ext == "docx":
         data, mime = markdown_to_docx(text), DOC_TYPES["docx"]
+    elif ext == "xlsx":
+        data, mime = content_to_xlsx(text), DOC_TYPES["xlsx"]
     elif ext == "pdf":
         data, mime = markdown_to_pdf(text), DOC_TYPES["pdf"]
     else:
@@ -530,6 +540,10 @@ body { margin: 0; background: var(--bg); color: var(--ink);
 .bar { position: sticky; top: 0; display: flex; align-items: center; gap: 10px; padding: 12px 16px;
   background: color-mix(in srgb, var(--bg) 88%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   box-shadow: inset 0 -.5px 0 var(--line); }
+.bar a.back { flex: none; width: 34px; height: 34px; margin-left: -6px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; color: var(--ink); background: none;
+  font-size: 28px; font-weight: 400; line-height: 1; padding: 0 2px 4px 0; }
+.bar a.back:active { background: var(--code); }
 .bar b { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar a { flex: none; padding: 7px 14px; border-radius: 999px; background: var(--accent); color: #fff;
   font-size: 13px; font-weight: 600; text-decoration: none; }
@@ -543,7 +557,36 @@ code { background: var(--code); padding: 0 .3em; border-radius: 4px; font-size: 
 hr { border: 0; height: .5px; background: var(--line); margin: 1.4em 0; }
 .table { overflow-x: auto; } table { border-collapse: collapse; margin: .8em 0; font-size: 14px; }
 td, th { border: .5px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; } th { font-weight: 600; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.sheet-table td, .sheet-table th { white-space: nowrap; }
+.sheet-table td.long { white-space: normal; min-width: 14em; }
+.sheet-table td.formula { color: var(--dim); font: 13px Menlo, monospace; }
+h2.sheet { font-size: 1.05em; color: var(--dim); margin: 1.6em 0 .4em; }
 """
+
+# 返回键：从 dwell 里点进来的就退回去（聊天停在原来的地方）；别处开的就回 dwell 首页。
+# 页面不许跑别的脚本，只放行这一段（按内容的指纹认）。
+_BACK_SCRIPT = (
+    "document.getElementById('back').addEventListener('click',function(e){"
+    "var r=document.referrer;"
+    "if(r&&r.indexOf(location.origin+'/')===0){e.preventDefault();history.back();}});"
+)
+PREVIEW_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'sha256-"
+    + base64.b64encode(hashlib.sha256(_BACK_SCRIPT.encode()).digest()).decode() + "'"
+)
+
+
+def _preview_page(title: str, body: str, download_url: str, download_label: str) -> str:
+    name = html.escape(title)
+    return (
+        '<!doctype html><html lang="zh"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{name}</title><style>{_PREVIEW_CSS}</style></head><body>"
+        '<div class="bar"><a id="back" class="back" href="../../../" aria-label="返回">‹</a>'
+        f'<b>{name}</b><a href="{html.escape(download_url)}" download>{download_label}</a></div>'
+        f"<main>{body}</main><script>{_BACK_SCRIPT}</script></body></html>"
+    )
 
 
 def _docx_runs(paragraph) -> str:
@@ -626,14 +669,136 @@ def docx_to_html(data: bytes, title: str, download_url: str) -> str:
         else:
             parts.append("<p>" + body + "</p>")
     close_list()
-    name = html.escape(title)
-    return (
-        '<!doctype html><html lang="zh"><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f"<title>{name}</title><style>{_PREVIEW_CSS}</style></head><body>"
-        f'<div class="bar"><b>{name}</b><a href="{html.escape(download_url)}" download>下载 Word</a></div>'
-        "<main>" + "".join(parts) + "</main></body></html>"
-    )
+    return _preview_page(title, "".join(parts), download_url, "下载 Word")
+
+
+# ---------------------------------------------------------------- Excel
+
+_NUMBER = re.compile(r"^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$")
+_PERCENT = re.compile(r"^[-+]?(\d+(\.\d*)?|\.\d+)%$")
+_BAD_SHEET_CHARS = re.compile(r"[\[\]:*?/\\]")
+
+
+def _cell_value(raw: str):
+    """表格里的字变成单元格的值：数字、百分比、公式，其余原样是字。"""
+    text = raw.strip()
+    if text.startswith("="):
+        return text, None
+    if _NUMBER.match(text) and not (len(text) > 1 and text[0] == "0" and text[1].isdigit()):
+        # 0 开头的长串（电话、编号）留作文字，别把前导 0 吃掉
+        number = float(text)
+        return (int(number) if number.is_integer() and "." not in text and "e" not in text.lower() else number), None
+    if _PERCENT.match(text):
+        percent = float(text[:-1])
+        # 「0.##%」碰到整数会显示成「80.%」，整数和小数分开给格式
+        return percent / 100, ("0%" if percent.is_integer() else "0.0#%")
+    return text, None
+
+
+def _sheet_tables(text: str) -> list[tuple[str, list[list[str]]]]:
+    """拆出几张表：Markdown 表格优先（前面的标题当表名）；一张都没有就当 CSV 读。"""
+    sheets: list[tuple[str, list[list[str]]]] = []
+    title = ""
+    for block in blocks(text):
+        if block["type"] == "heading":
+            title = plain(block["text"])
+        elif block["type"] == "table":
+            sheets.append((title, [[plain(cell) for cell in row] for row in block["rows"]]))
+            title = ""
+    if sheets:
+        return sheets
+    lines = [line for line in text.replace("\r\n", "\n").split("\n") if line.strip()]
+    if not lines:
+        raise ValueError("Excel 的内容要写成表格（Markdown 表格或 CSV）")
+    delimiter = "\t" if "\t" in lines[0] else ","
+    rows = [row for row in csv.reader(lines, delimiter=delimiter)]
+    return [("", rows)]
+
+
+def _sheet_name(raw: str, index: int, used: set[str]) -> str:
+    name = _BAD_SHEET_CHARS.sub(" ", raw).strip().strip("'")[:31] or f"Sheet{index}"
+    base, n = name, 2
+    while name.lower() in used:
+        suffix = f" ({n})"
+        name = base[:31 - len(suffix)] + suffix
+        n += 1
+    used.add(name.lower())
+    return name
+
+
+def _display_width(value) -> int:
+    return sum(2 if ord(ch) > 0x2E80 else 1 for ch in str(value))
+
+
+def content_to_xlsx(text: str) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    used: set[str] = set()
+    header_fill = PatternFill("solid", fgColor="F6ECEF")
+    for index, (title, rows) in enumerate(_sheet_tables(text), 1):
+        sheet = workbook.create_sheet(_sheet_name(title, index, used))
+        widths: dict[int, int] = {}
+        for r, row in enumerate(rows, 1):
+            for c, raw in enumerate(row, 1):
+                value, number_format = _cell_value(str(raw)) if r > 1 else (str(raw).strip(), None)
+                cell = sheet.cell(row=r, column=c, value=value)
+                if number_format:
+                    cell.number_format = number_format
+                if r == 1:
+                    cell.font = Font(bold=True)
+                    cell.fill = header_fill
+                cell.alignment = Alignment(vertical="top", wrap_text=_display_width(value) > 50)
+                widths[c] = max(widths.get(c, 0), min(_display_width(value), 50))
+        for c, width in widths.items():
+            sheet.column_dimensions[get_column_letter(c)].width = max(8, width + 2)
+        if len(rows) > 1:
+            sheet.freeze_panes = "A2"
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+def xlsx_to_html(data: bytes, title: str, download_url: str) -> str:
+    """把 Excel 读回来排成网页：每张工作表一张表，第一行当表头。公式显示公式本身。"""
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(io.BytesIO(data), read_only=True)
+    parts: list[str] = []
+    many = len(workbook.worksheets) > 1
+    for sheet in workbook.worksheets:
+        if many:
+            parts.append('<h2 class="sheet">' + html.escape(sheet.title) + "</h2>")
+        rows = []
+        for r, row in enumerate(sheet.iter_rows(max_row=2000, values_only=False)):
+            cells = []
+            for cell in row:
+                value = cell.value
+                tag = "th" if r == 0 else "td"
+                classes = []
+                if r and isinstance(value, (int, float)):
+                    classes.append("num")
+                if isinstance(value, str) and value.startswith("="):
+                    classes.append("formula")
+                elif isinstance(value, str) and len(value) > 18:
+                    classes.append("long")
+                cls = f' class="{" ".join(classes)}"' if classes else ""
+                if value is None:
+                    shown = ""
+                elif isinstance(value, (int, float)) and "%" in (cell.number_format or ""):
+                    shown = f"{value * 100:.4g}%"
+                elif isinstance(value, float):
+                    shown = f"{value:.10g}"
+                else:
+                    shown = str(value)
+                cells.append(f"<{tag}{cls}>" + html.escape(shown) + f"</{tag}>")
+            rows.append("<tr>" + "".join(cells) + "</tr>")
+        parts.append('<div class="table"><table class="sheet-table">' + "".join(rows) + "</table></div>")
+    workbook.close()
+    return _preview_page(title, "".join(parts), download_url, "下载 Excel")
 
 
 if __name__ == "__main__" and "--ensure-font" in sys.argv:

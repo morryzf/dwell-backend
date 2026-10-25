@@ -66,6 +66,51 @@ class MakeFileTest(unittest.TestCase):
         bold = [run.text for p in document.paragraphs for run in p.runs if run.bold]
         self.assertIn("心理测量学", bold)
 
+    def test_xlsx_sheets_numbers_percent_formula_and_leading_zero(self):
+        import openpyxl
+
+        content = (
+            "## 学习时长\n\n| 周次 | 时长 | 完成度 | 电话 |\n|---|---|---|---|\n"
+            "| 1 | 6 | 80% | 013812345678 |\n| 2 | 8.5 | 12.5% | 1 |\n| 合计 | =SUM(B2:B3) | | |\n\n"
+            "## 学习时长\n\n| a |\n|---|\n| x |\n"
+        )
+        _, mime, data = file_make.make_file("记录.xlsx", content)
+        self.assertIn("spreadsheetml", mime)
+        book = openpyxl.load_workbook(io.BytesIO(data))
+        self.assertEqual(book.sheetnames, ["学习时长", "学习时长 (2)"])
+        sheet = book["学习时长"]
+        self.assertTrue(sheet["A1"].font.bold)
+        self.assertEqual(sheet.freeze_panes, "A2")
+        self.assertEqual((sheet["A2"].value, sheet["B3"].value), (1, 8.5))
+        self.assertEqual((sheet["C2"].value, sheet["C2"].number_format), (0.8, "0%"))
+        self.assertEqual(sheet["C3"].number_format, "0.0#%")
+        self.assertEqual(sheet["D2"].value, "013812345678")
+        self.assertEqual(sheet["B4"].value, "=SUM(B2:B3)")
+
+    def test_xlsx_from_csv_and_its_reading_view(self):
+        import openpyxl
+
+        _, _, data = file_make.make_file("分数.xlsx", "名字,分数\n小云,90\n小雨,85\n")
+        rows = [[c.value for c in r] for r in openpyxl.load_workbook(io.BytesIO(data)).active.iter_rows()]
+        self.assertEqual(rows, [["名字", "分数"], ["小云", 90], ["小雨", 85]])
+        page = file_make.xlsx_to_html(data, "分数.xlsx", "../x?download=1")
+        self.assertIn("<th>名字</th>", page)
+        self.assertIn('<td class="num">90</td>', page)
+        self.assertIn("下载 Excel", page)
+
+    def test_reading_view_back_button_is_the_only_script_allowed(self):
+        import base64
+        import hashlib
+        import re as regex
+
+        page = file_make.docx_to_html(file_make.make_file("a.docx", "字")[2], "a.docx", "../x?download=1")
+        self.assertIn('id="back"', page)
+        scripts = regex.findall(r"<script>(.*?)</script>", page, regex.S)
+        self.assertEqual(len(scripts), 1)
+        digest = base64.b64encode(hashlib.sha256(scripts[0].encode()).digest()).decode()
+        self.assertIn("'sha256-" + digest + "'", file_make.PREVIEW_CSP)
+        self.assertIn("default-src 'none'", file_make.PREVIEW_CSP)
+
     def test_pdf_embeds_chinese_text(self):
         if not file_make.find_cjk_font()[0]:
             self.skipTest("这台机器没有中文字体")
@@ -124,8 +169,8 @@ class MakeFileTest(unittest.TestCase):
         for piece in ("<h1>十月复习计划</h1>", "<b>心理测量学</b>", "<ul>", "<ol>",
                       "<blockquote>", "<table>", "<pre>", "<hr>", 'href="../x?download=1" download'):
             self.assertIn(piece, page)
-        self.assertNotIn("<script>", page)
-        self.assertIn("&lt;script&gt;", page)
+        self.assertNotIn("<script>alert", page)        # 模型写的脚本被转义；页面里只有返回键那一段
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", page)
 
     def test_bad_names_and_content(self):
         for name in ("没有扩展名", "病毒.exe"):
@@ -206,7 +251,7 @@ class FileToolFlowTest(unittest.TestCase):
         page = self.client.get("/api/files/" + docx_id + "/view")
         self.assertEqual(page.status_code, 200)
         self.assertIn("text/html", page.headers["content-type"])
-        self.assertIn("default-src 'none'", page.headers["content-security-policy"])
+        self.assertEqual(page.headers["content-security-policy"], file_make.PREVIEW_CSP)
         self.assertIn("十月复习计划", page.text)
         result, _ = asyncio.run(_run_chat_tool(
             self.chat["id"], FILE_TOOL_NAME, "builtin:file", {"filename": "a.txt", "content": "x"}))
@@ -220,7 +265,7 @@ class FileCardStaticTest(unittest.TestCase):
         html = (Path(__file__).resolve().parents[1] / "static" / "index.html").read_text(encoding="utf-8")
         self.assertIn("if (t.name === 'DwellFileCreate' && !isError) addGeneratedFileCard(t);", html)
         self.assertIn("save.href = 'api/files/' + encodeURIComponent(file.id) + '?download=1';", html)
-        self.assertIn("(ext === 'DOCX' ? '/view' : '')", html)
+        self.assertIn("(ext === 'DOCX' || ext === 'XLSX' ? '/view' : '')", html)
 
 
 if __name__ == "__main__":

@@ -427,13 +427,16 @@ FILE_TOOLS = [
             "document, export, or something to download or save — not for ordinary replies. "
             "The filename's extension decides the format: text formats (.txt .md .csv .json .html "
             "and code files) store `content` as-is; .docx (Word) and .pdf are typeset from `content` "
-            "written as Markdown (headings, paragraphs, lists, **bold**, quotes, code blocks, tables). "
+            "written as Markdown (headings, paragraphs, lists, **bold**, quotes, code blocks, tables); "
+            ".xlsx (Excel) takes one or more Markdown tables — a heading right above a table names "
+            "its sheet — or plain CSV; numbers become numbers, 12% becomes a percentage, and cells "
+            "starting with = are formulas. "
             "The file appears in the chat as a card the user can open or save, so after creating it "
             "just say briefly what it is — do not paste the whole content again."
         ),
         "parameters": {"type": "object", "properties": {
             "filename": {"type": "string", "description": "File name with extension, e.g. 复习计划.docx"},
-            "content": {"type": "string", "description": "Full file content (Markdown for .docx/.pdf)"},
+            "content": {"type": "string", "description": "Full file content (Markdown for .docx/.pdf, tables or CSV for .xlsx)"},
         }, "required": ["filename", "content"], "additionalProperties": False},
     }},
 ]
@@ -3152,18 +3155,18 @@ def _cal_response(extra: dict | None = None) -> dict:
 
 @app.get("/api/files/{file_id}/view", dependencies=authed)
 async def generated_file_view(file_id: str):
-    """Word 的阅读视图：iPhone 的浏览器直接打开 .docx 是一片空白，这里读回来排成网页。"""
+    """Word / Excel 的阅读视图：iPhone 的浏览器直接打开是一片空白，这里读回来排成网页。"""
     item = db.generated_file_get(file_id)
     if not item:
         raise HTTPException(404, "文件不在了")
-    if not item["name"].lower().endswith(".docx"):
+    ext = item["name"].rsplit(".", 1)[-1].lower()
+    if ext not in file_make.PREVIEW_TYPES:
         return RedirectResponse("../" + file_id, status_code=307)
-    page = await asyncio.to_thread(
-        file_make.docx_to_html, item["data"], item["name"], f"../{file_id}?download=1"
-    )
+    render = file_make.docx_to_html if ext == "docx" else file_make.xlsx_to_html
+    page = await asyncio.to_thread(render, item["data"], item["name"], f"../{file_id}?download=1")
     return HTMLResponse(page, headers={
-        # 页面是我们自己排的，内容都转义过；再加一道：不许跑脚本、不许加载外面的东西
-        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+        # 页面是我们自己排的，内容都转义过；再加一道：只许跑返回键那一小段，不许加载外面的东西
+        "Content-Security-Policy": file_make.PREVIEW_CSP,
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, max-age=3600",
     })
