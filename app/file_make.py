@@ -584,7 +584,9 @@ def _preview_page(title: str, body: str, download_url: str, download_label: str)
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f"<title>{name}</title><style>{_PREVIEW_CSS}</style></head><body>"
         '<div class="bar"><a id="back" class="back" href="../../../" aria-label="返回">‹</a>'
-        f'<b>{name}</b><a href="{html.escape(download_url)}" download>{download_label}</a></div>'
+        # 下载在新窗口开：加到主屏幕当 App 用时，同一个窗口里下载会被系统的「文件」页顶掉，
+        # 那页没有返回键；新窗口是 iPhone 自带的小浏览器，左上角有关闭，关了就回到这里
+        f'<b>{name}</b><a href="{html.escape(download_url)}" target="_blank" rel="noopener">{download_label}</a></div>'
         f"<main>{body}</main><script>{_BACK_SCRIPT}</script></body></html>"
     )
 
