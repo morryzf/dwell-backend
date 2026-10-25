@@ -4065,6 +4065,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   }
   .gen-file[data-ext="pdf"] .gen-file-badge { background: #c9778b; }
   .gen-file[data-ext="docx"] .gen-file-badge { background: #7f8fb8; }
+  .gen-file[data-ext="xlsx"] .gen-file-badge { background: #7aa58a; }
   .gen-file-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .gen-file-copy b { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gen-file-copy small { font-size: 11.5px; color: var(--dim); }
@@ -7083,8 +7084,8 @@ function addGeneratedFileCard(t) {
   card.dataset.ext = ext.toLowerCase();
   const open = document.createElement('a');
   open.className = 'gen-file-open';
-  // Word 在 iPhone 浏览器里直接打开是一片空白，点进阅读视图（里面有下载按钮）
-  open.href = 'api/files/' + encodeURIComponent(file.id) + (ext === 'DOCX' ? '/view' : '');
+  // Word、Excel 在 iPhone 浏览器里直接打开是一片空白，点进阅读视图（里面有返回和下载）
+  open.href = 'api/files/' + encodeURIComponent(file.id) + (ext === 'DOCX' || ext === 'XLSX' ? '/view' : '');
   open.target = '_blank'; open.rel = 'noopener';
   const badge = document.createElement('span'); badge.className = 'gen-file-badge'; badge.textContent = ext;
   const copy = document.createElement('span'); copy.className = 'gen-file-copy';
