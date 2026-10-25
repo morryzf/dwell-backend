@@ -77,13 +77,55 @@ class MakeFileTest(unittest.TestCase):
         self.assertIn("十月复习计划", text.replace("​", ""))
 
     def test_pdf_without_font_says_so(self):
-        original = file_make.find_cjk_font
+        original = file_make.find_cjk_font, file_make.ensure_cjk_font
         file_make.find_cjk_font = lambda: ("", "")
+        file_make.ensure_cjk_font = lambda timeout=90: ("", "")
         try:
             with self.assertRaisesRegex(ValueError, "中文字体"):
                 file_make.make_file("计划.pdf", "内容")
         finally:
-            file_make.find_cjk_font = original
+            file_make.find_cjk_font, file_make.ensure_cjk_font = original
+
+    def test_missing_font_is_downloaded_once_and_bad_downloads_are_rejected(self):
+        """系统没字体就下载到 data/fonts；第一个镜像给了个网页（不是字体）就换下一个。"""
+        calls = []
+
+        class Fake(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *exc): return False
+
+        def fake_urlopen(url, timeout=0):
+            calls.append(url)
+            if len(calls) == 1:
+                return Fake(b"<html>blocked</html>")
+            return Fake(b"OTTO" + b"\0" * 1_200_000)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = (file_make.FONT_DIR, list(file_make._FONT_CANDIDATES), file_make.urllib.request.urlopen)
+            file_make.FONT_DIR = Path(tmp)
+            file_make._FONT_CANDIDATES[:] = []
+            file_make.urllib.request.urlopen = fake_urlopen
+            try:
+                import os
+                os.environ.pop("DWELL_PDF_FONT", None)
+                regular, bold = file_make.ensure_cjk_font()
+                self.assertTrue(regular.endswith("NotoSansSC-Regular.otf"))
+                self.assertTrue(bold.endswith("NotoSansSC-Bold.otf"))
+                self.assertEqual(len(calls), 3)              # 第一个镜像不算数，换了一个；粗体一次成
+                self.assertEqual(file_make.ensure_cjk_font(), (regular, bold))
+                self.assertEqual(len(calls), 3)              # 下过了就不再下
+            finally:
+                file_make.FONT_DIR, candidates, file_make.urllib.request.urlopen = saved
+                file_make._FONT_CANDIDATES[:] = candidates
+
+    def test_word_reading_view_keeps_structure_and_escapes(self):
+        _, _, data = file_make.make_file("计划.docx", SAMPLE + "\n\n<script>alert(1)</script>\n")
+        page = file_make.docx_to_html(data, "计划.docx", "../x?download=1")
+        for piece in ("<h1>十月复习计划</h1>", "<b>心理测量学</b>", "<ul>", "<ol>",
+                      "<blockquote>", "<table>", "<pre>", "<hr>", 'href="../x?download=1" download'):
+            self.assertIn(piece, page)
+        self.assertNotIn("<script>", page)
+        self.assertIn("&lt;script&gt;", page)
 
     def test_bad_names_and_content(self):
         for name in ("没有扩展名", "病毒.exe"):
@@ -155,6 +197,22 @@ class FileToolFlowTest(unittest.TestCase):
 
     def test_missing_file_is_404(self):
         self.assertEqual(self.client.get("/api/files/nope").status_code, 404)
+        self.assertEqual(self.client.get("/api/files/nope/view").status_code, 404)
+
+    def test_word_opens_in_reading_view_others_go_straight_to_file(self):
+        result, _ = asyncio.run(_run_chat_tool(
+            self.chat["id"], FILE_TOOL_NAME, "builtin:file", {"filename": "计划.docx", "content": SAMPLE}))
+        docx_id = json.loads(result)["file"]["id"]
+        page = self.client.get("/api/files/" + docx_id + "/view")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("text/html", page.headers["content-type"])
+        self.assertIn("default-src 'none'", page.headers["content-security-policy"])
+        self.assertIn("十月复习计划", page.text)
+        result, _ = asyncio.run(_run_chat_tool(
+            self.chat["id"], FILE_TOOL_NAME, "builtin:file", {"filename": "a.txt", "content": "x"}))
+        txt_id = json.loads(result)["file"]["id"]
+        moved = self.client.get("/api/files/" + txt_id + "/view", follow_redirects=False)
+        self.assertEqual(moved.status_code, 307)
 
 
 class FileCardStaticTest(unittest.TestCase):
@@ -162,6 +220,7 @@ class FileCardStaticTest(unittest.TestCase):
         html = (Path(__file__).resolve().parents[1] / "static" / "index.html").read_text(encoding="utf-8")
         self.assertIn("if (t.name === 'DwellFileCreate' && !isError) addGeneratedFileCard(t);", html)
         self.assertIn("save.href = 'api/files/' + encodeURIComponent(file.id) + '?download=1';", html)
+        self.assertIn("(ext === 'DOCX' ? '/view' : '')", html)
 
 
 if __name__ == "__main__":

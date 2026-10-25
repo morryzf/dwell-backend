@@ -4,16 +4,24 @@
 docx 和 pdf 的内容按 Markdown 写——标题、段落、列表、粗体斜体、引用、代码块、
 分隔线、表格——这里照着排成真正的文档。
 
-PDF 要嵌一个带中文的字体，不然中文全是方块。字体不进仓库（几十 MB），用服务器
-系统里装着的：Noto CJK、文泉驿……找不到就报一句清楚的错，让模型换成 Word。
+PDF 要嵌一个带中文的字体，不然中文全是方块。字体不进仓库（十几 MB）：先用服务器
+系统里装着的（Noto CJK、文泉驿……）；没有就把思源黑体（Noto Sans SC）下载到
+data/fonts 里，以后一直用这份。都不行就报一句清楚的错，让模型换成 Word。
 可以用环境变量 DWELL_PDF_FONT 直接指一个字体文件。
+
+Word 在 iPhone 的浏览器里打不开（一片空白），所以另给一个「阅读视图」：
+docx_to_html 把排好的 Word 读回来，变成一页能看的网页。
 """
 from __future__ import annotations
 
+import html
 import io
 import os
 import re
+import sys
 import unicodedata
+import urllib.request
+from pathlib import Path
 
 MAX_CONTENT_CHARS = 400_000
 MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -294,6 +302,22 @@ _FONT_CANDIDATES = [
 ]
 
 
+FONT_DIR = Path(os.environ.get("DWELL_FONT_DIR", "./data/fonts"))
+_FONT_FILES = ("NotoSansSC-Regular.otf", "NotoSansSC-Bold.otf")
+# 国内服务器上哪个通不好说，挨个试。都是 Google 开源的思源黑体（OFL 授权）。
+_FONT_MIRRORS = (
+    "https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/SC/{name}",
+    "https://fastly.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/SC/{name}",
+    "https://gcore.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/SC/{name}",
+    "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/SC/{name}",
+)
+
+
+def _downloaded_font(name: str) -> str:
+    path = FONT_DIR / name
+    return str(path) if path.is_file() and path.stat().st_size > 1_000_000 else ""
+
+
 def find_cjk_font() -> tuple[str, str]:
     """(常规字体路径, 粗体字体路径)。找不到返回 ('', '')。"""
     forced = os.environ.get("DWELL_PDF_FONT", "").strip()
@@ -302,7 +326,37 @@ def find_cjk_font() -> tuple[str, str]:
     for regular, bold in _FONT_CANDIDATES:
         if os.path.isfile(regular):
             return regular, bold if bold and os.path.isfile(bold) else ""
+    regular = _downloaded_font(_FONT_FILES[0])
+    if regular:
+        return regular, _downloaded_font(_FONT_FILES[1])
     return "", ""
+
+
+def ensure_cjk_font(timeout: float = 90) -> tuple[str, str]:
+    """系统里没有中文字体就下载一份到 data/fonts。返回 find_cjk_font() 的结果。"""
+    found = find_cjk_font()
+    if found[0]:
+        return found
+    FONT_DIR.mkdir(parents=True, exist_ok=True)
+    for name in _FONT_FILES:
+        if _downloaded_font(name):
+            continue
+        for mirror in _FONT_MIRRORS:
+            url = mirror.format(name=name)
+            part = FONT_DIR / (name + ".part")
+            try:
+                with urllib.request.urlopen(url, timeout=timeout) as response, open(part, "wb") as out:
+                    while chunk := response.read(1 << 16):
+                        out.write(chunk)
+                with open(part, "rb") as check:
+                    head = check.read(4)
+                if head != b"OTTO" or part.stat().st_size < 1_000_000:
+                    raise ValueError("下下来的不是字体文件")
+                part.replace(FONT_DIR / name)
+                break
+            except Exception:
+                part.unlink(missing_ok=True)
+    return find_cjk_font()
 
 
 def _collection_index(path: str) -> int:
@@ -352,7 +406,9 @@ def markdown_to_pdf(text: str) -> bytes:
 
     regular, bold = find_cjk_font()
     if not regular:
-        raise ValueError("服务器上没有中文字体，PDF 排不出来。先做成 .docx，或者请她在服务器上跑一次 deploy.sh 装字体")
+        regular, bold = ensure_cjk_font()
+    if not regular:
+        raise ValueError("服务器上没有中文字体，也没能下载到，PDF 排不出来。先做成 .docx，或者请她在服务器上再跑一次 deploy.sh")
 
     pdf = FPDF(format="A4")
     pdf.set_margins(20, 20, 20)
@@ -461,3 +517,126 @@ def markdown_to_pdf(text: str) -> bytes:
             pdf.set_font("cjk", "", 11)
             pdf.ln(3)
     return bytes(pdf.output())
+
+
+# ---------------------------------------------------------------- Word 的阅读视图
+
+_PREVIEW_CSS = """
+:root { color-scheme: light dark; --ink:#2b2629; --dim:#8a7f84; --line:#e6dde1; --bg:#fbf8f9; --code:#f3edf0; --accent:#c9778b; }
+@media (prefers-color-scheme: dark) { :root { --ink:#f1e9ed; --dim:#a99ca2; --line:#4a4045; --bg:#211d1f; --code:#2e282b; --accent:#d896a6; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.75 -apple-system, "PingFang SC", "Noto Sans SC", sans-serif; -webkit-text-size-adjust: 100%; }
+.bar { position: sticky; top: 0; display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  box-shadow: inset 0 -.5px 0 var(--line); }
+.bar b { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar a { flex: none; padding: 7px 14px; border-radius: 999px; background: var(--accent); color: #fff;
+  font-size: 13px; font-weight: 600; text-decoration: none; }
+main { max-width: 720px; margin: 0 auto; padding: 18px 20px 60px; }
+h1, h2, h3, h4 { line-height: 1.35; margin: 1.3em 0 .5em; } h1 { font-size: 1.6em; } h2 { font-size: 1.3em; } h3 { font-size: 1.12em; }
+main > :first-child { margin-top: .4em; }
+p { margin: .55em 0; } ul, ol { padding-left: 1.4em; margin: .5em 0; } li { margin: .2em 0; }
+blockquote { margin: .8em 0; padding: .1em 0 .1em 1em; color: var(--dim); box-shadow: inset 2px 0 0 var(--line); }
+pre { white-space: pre-wrap; background: var(--code); padding: 10px 12px; border-radius: 10px; font: 13px/1.6 Menlo, monospace; }
+code { background: var(--code); padding: 0 .3em; border-radius: 4px; font-size: .9em; }
+hr { border: 0; height: .5px; background: var(--line); margin: 1.4em 0; }
+.table { overflow-x: auto; } table { border-collapse: collapse; margin: .8em 0; font-size: 14px; }
+td, th { border: .5px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; } th { font-weight: 600; }
+"""
+
+
+def _docx_runs(paragraph) -> str:
+    out = []
+    for run in paragraph.runs:
+        text = html.escape(run.text)
+        if not text:
+            continue
+        mono = (run.font.name or "") in {"Menlo", "Courier New", "Consolas"}
+        if mono:
+            text = "<code>" + text + "</code>"
+        if run.italic:
+            text = "<i>" + text + "</i>"
+        if run.bold:
+            text = "<b>" + text + "</b>"
+        out.append(text)
+    return "".join(out).replace("\n", "<br>")
+
+
+def docx_to_html(data: bytes, title: str, download_url: str) -> str:
+    """把 Word 读回来排成一页网页：标题、段落、列表、引用、代码、表格。"""
+    from docx import Document
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    doc = Document(io.BytesIO(data))
+    parts: list[str] = []
+    open_list = ""
+
+    def close_list():
+        nonlocal open_list
+        if open_list:
+            parts.append("</" + open_list + ">")
+            open_list = ""
+
+    for child in doc.element.body.iterchildren():
+        tag = child.tag.rsplit("}", 1)[-1]
+        if tag == "tbl":
+            close_list()
+            table = Table(child, doc)
+            rows = []
+            for r, row in enumerate(table.rows):
+                cell_tag = "th" if r == 0 else "td"
+                cells = "".join(
+                    f"<{cell_tag}>" + "<br>".join(_docx_runs(p) for p in cell.paragraphs) + f"</{cell_tag}>"
+                    for cell in row.cells
+                )
+                rows.append("<tr>" + cells + "</tr>")
+            parts.append('<div class="table"><table>' + "".join(rows) + "</table></div>")
+            continue
+        if tag != "p":
+            continue
+        paragraph = Paragraph(child, doc)
+        style = paragraph.style.name if paragraph.style is not None else ""
+        body = _docx_runs(paragraph)
+        if style.startswith("List"):
+            kind = "ol" if "Number" in style else "ul"
+            if open_list != kind:
+                close_list()
+                parts.append("<" + kind + ">")
+                open_list = kind
+            indent = ' style="margin-left:1.2em"' if style.rstrip().endswith(("2", "3")) else ""
+            parts.append(f"<li{indent}>" + body + "</li>")
+            continue
+        close_list()
+        if not body.strip():
+            continue
+        if style == "Title":
+            parts.append("<h1>" + body + "</h1>")
+        elif style.startswith("Heading"):
+            level = style.split()[-1]
+            level = level if level.isdigit() and 1 <= int(level) <= 4 else "4"
+            parts.append(f"<h{level}>" + body + f"</h{level}>")
+        elif style in {"Quote", "Intense Quote"}:
+            parts.append("<blockquote>" + body + "</blockquote>")
+        elif paragraph.text.strip() and set(paragraph.text.strip()) <= {"—", "-"}:
+            parts.append("<hr>")
+        elif body.startswith("<code>") and body.endswith("</code>") and body.count("<code>") == 1:
+            parts.append("<pre>" + body[6:-7] + "</pre>")
+        else:
+            parts.append("<p>" + body + "</p>")
+    close_list()
+    name = html.escape(title)
+    return (
+        '<!doctype html><html lang="zh"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{name}</title><style>{_PREVIEW_CSS}</style></head><body>"
+        f'<div class="bar"><b>{name}</b><a href="{html.escape(download_url)}" download>下载 Word</a></div>'
+        "<main>" + "".join(parts) + "</main></body></html>"
+    )
+
+
+if __name__ == "__main__" and "--ensure-font" in sys.argv:
+    regular, bold = ensure_cjk_font()
+    print(regular or "（没有中文字体，也没下载到）")
+    sys.exit(0 if regular else 1)
