@@ -167,7 +167,7 @@ class MakeFileTest(unittest.TestCase):
         _, _, data = file_make.make_file("计划.docx", SAMPLE + "\n\n<script>alert(1)</script>\n")
         page = file_make.docx_to_html(data, "计划.docx", "../x?download=1")
         for piece in ("<h1>十月复习计划</h1>", "<b>心理测量学</b>", "<ul>", "<ol>",
-                      "<blockquote>", "<table>", "<pre>", "<hr>", 'href="../x?download=1" download'):
+                      "<blockquote>", "<table>", "<pre>", "<hr>", 'href="../x?download=1" target="_blank"'):
             self.assertIn(piece, page)
         self.assertNotIn("<script>alert", page)        # 模型写的脚本被转义；页面里只有返回键那一段
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", page)

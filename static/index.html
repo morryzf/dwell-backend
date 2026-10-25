@@ -7096,7 +7096,9 @@ function addGeneratedFileCard(t) {
   const save = document.createElement('a');
   save.className = 'gen-file-save';
   save.href = 'api/files/' + encodeURIComponent(file.id) + '?download=1';
-  save.setAttribute('download', name);
+  // 新窗口开，不用 download 属性：当 App 用时同一个窗口里下载会被系统的「文件」页顶掉、
+  // 回不来；新窗口是 iPhone 自带的小浏览器，有关闭键
+  save.target = '_blank'; save.rel = 'noopener';
   save.setAttribute('aria-label', '下载 ' + name);
   save.title = '下载';
   save.appendChild(icEl('download', 17));
