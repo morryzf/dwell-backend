@@ -24,7 +24,7 @@ from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from . import auth, db, file_make, file_text, focus_log, home_mcp, memory_mcp, provider_secrets, push_service, shop, sigillo, study, subscription_usage
 from app.pet_assets import ensure_pet_assets
@@ -1963,7 +1963,8 @@ async def _run_chat_tool(chat_id: str, name: str, server: object,
         if server == "builtin:react":
             return react_tool(chat_id, arguments), False
         if server == "builtin:file":
-            return file_tool(chat_id, arguments), False
+            # 排 PDF 要好几秒（第一次还可能在下字体），放到线程里，别把整个服务卡住
+            return await asyncio.to_thread(file_tool, chat_id, arguments), False
         if not server:
             raise ValueError("模型请求了未启用的 MCP 工具")
         result = await mcp_call_tool(server, name.split("__", 2)[-1], arguments)
@@ -3147,6 +3148,25 @@ def _cal_response(extra: dict | None = None) -> dict:
     if extra:
         response.update(extra)
     return response
+
+
+@app.get("/api/files/{file_id}/view", dependencies=authed)
+async def generated_file_view(file_id: str):
+    """Word 的阅读视图：iPhone 的浏览器直接打开 .docx 是一片空白，这里读回来排成网页。"""
+    item = db.generated_file_get(file_id)
+    if not item:
+        raise HTTPException(404, "文件不在了")
+    if not item["name"].lower().endswith(".docx"):
+        return RedirectResponse("../" + file_id, status_code=307)
+    page = await asyncio.to_thread(
+        file_make.docx_to_html, item["data"], item["name"], f"../{file_id}?download=1"
+    )
+    return HTMLResponse(page, headers={
+        # 页面是我们自己排的，内容都转义过；再加一道：不许跑脚本、不许加载外面的东西
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, max-age=3600",
+    })
 
 
 @app.get("/api/files/{file_id}", dependencies=authed)

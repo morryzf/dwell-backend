@@ -13,18 +13,18 @@ git pull --ff-only
 echo "==> Python 依赖"
 .venv/bin/pip install -q -r requirements.txt
 
-# 模型做 PDF 要嵌中文字体，系统里没有就装一套（装不上不影响别的，只是 PDF 先做不了）
-if ! .venv/bin/python -c "import sys; from app.file_make import find_cjk_font; sys.exit(0 if find_cjk_font()[0] else 1)"; then
-	echo "==> 装 PDF 用的中文字体"
+# 模型做 PDF 要嵌中文字体。系统里没有就把思源黑体下到 data/fonts（不靠系统装包，
+# 哪种 Linux 都一样）；下不到再试系统的包管理器。都不行不影响部署，只是 PDF 先做不了。
+echo "==> PDF 用的中文字体"
+if ! .venv/bin/python -m app.file_make --ensure-font; then
 	if command -v apt-get >/dev/null; then
-		sudo apt-get install -y -q fonts-noto-cjk || echo "  字体没装上：PDF 暂时做不了，Word 和文字文件不受影响"
+		sudo apt-get update -q && sudo apt-get install -y -q fonts-noto-cjk || true
 	elif command -v dnf >/dev/null; then
-		sudo dnf install -y -q google-noto-sans-cjk-ttc-fonts || sudo dnf install -y -q google-noto-sans-cjk-fonts \
-			|| echo "  字体没装上：PDF 暂时做不了，Word 和文字文件不受影响"
+		sudo dnf install -y -q google-noto-sans-cjk-ttc-fonts || sudo dnf install -y -q google-noto-sans-cjk-fonts || true
 	elif command -v yum >/dev/null; then
-		sudo yum install -y -q google-noto-sans-cjk-ttc-fonts || sudo yum install -y -q wqy-microhei-fonts \
-			|| echo "  字体没装上：PDF 暂时做不了，Word 和文字文件不受影响"
+		sudo yum install -y -q google-noto-sans-cjk-ttc-fonts || sudo yum install -y -q wqy-microhei-fonts || true
 	fi
+	.venv/bin/python -m app.file_make --ensure-font || echo "  还是没有中文字体：PDF 暂时做不了，Word 和文字文件不受影响"
 fi
 
 if [ -d bridge/node_modules ]; then

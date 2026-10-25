@@ -7083,7 +7083,8 @@ function addGeneratedFileCard(t) {
   card.dataset.ext = ext.toLowerCase();
   const open = document.createElement('a');
   open.className = 'gen-file-open';
-  open.href = 'api/files/' + encodeURIComponent(file.id);
+  // Word 在 iPhone 浏览器里直接打开是一片空白，点进阅读视图（里面有下载按钮）
+  open.href = 'api/files/' + encodeURIComponent(file.id) + (ext === 'DOCX' ? '/view' : '');
   open.target = '_blank'; open.rel = 'noopener';
   const badge = document.createElement('span'); badge.className = 'gen-file-badge'; badge.textContent = ext;
   const copy = document.createElement('span'); copy.className = 'gen-file-copy';
