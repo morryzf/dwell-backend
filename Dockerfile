@@ -3,6 +3,9 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # 先只拷依赖清单再装，这样改代码不会让依赖层缓存失效
+# 模型做 PDF 要嵌中文字体
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

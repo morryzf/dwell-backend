@@ -20,13 +20,13 @@ from collections import Counter
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from . import auth, db, file_text, focus_log, home_mcp, memory_mcp, provider_secrets, push_service, shop, sigillo, study, subscription_usage
+from . import auth, db, file_make, file_text, focus_log, home_mcp, memory_mcp, provider_secrets, push_service, shop, sigillo, study, subscription_usage
 from app.pet_assets import ensure_pet_assets
 from app.agent_sdk_client import MEMORY_CARD_KEY, PROMPT_TAIL_KEY, clear_state as clear_agent_session
 from app.llm_client import prompt_cache_enabled, reply_language_ok, stream_chat
@@ -415,6 +415,46 @@ REACT_TOOLS = [
         }, "required": ["emoji"], "additionalProperties": False},
     }},
 ]
+
+
+# 做文件：她要「整理成文件」「导出」「做个文档」时，把内容存成能下载的文件，聊天里出一张卡片。
+FILE_TOOL_NAME = "DwellFileCreate"
+FILE_TOOLS = [
+    {"type": "function", "function": {
+        "name": FILE_TOOL_NAME,
+        "description": (
+            "Create a downloadable file for the user. Use it only when the user asks for a file, "
+            "document, export, or something to download or save — not for ordinary replies. "
+            "The filename's extension decides the format: text formats (.txt .md .csv .json .html "
+            "and code files) store `content` as-is; .docx (Word) and .pdf are typeset from `content` "
+            "written as Markdown (headings, paragraphs, lists, **bold**, quotes, code blocks, tables). "
+            "The file appears in the chat as a card the user can open or save, so after creating it "
+            "just say briefly what it is — do not paste the whole content again."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "filename": {"type": "string", "description": "File name with extension, e.g. 复习计划.docx"},
+            "content": {"type": "string", "description": "Full file content (Markdown for .docx/.pdf)"},
+        }, "required": ["filename", "content"], "additionalProperties": False},
+    }},
+]
+
+
+def file_tool(chat_id: str, arguments: dict) -> str:
+    name, mime, data = file_make.make_file(arguments.get("filename"), arguments.get("content"))
+    item = db.generated_file_add(chat_id, name, mime, data)
+    return json.dumps({"ok": True, "file": {
+        "id": item["id"], "name": item["name"], "mime": item["mime"], "size": item["size"],
+        "url": "api/files/" + item["id"],
+    }}, ensure_ascii=False)
+
+
+def _slim_file_tool_call(tool_call_id: str, name: str, arguments: dict, is_error: bool) -> None:
+    """文件做好了，正文已经在文件里；调用记录里只留文件名和字数，不再存第二份。"""
+    if name != FILE_TOOL_NAME or is_error or not isinstance(arguments, dict):
+        return
+    content = str(arguments.get("content") or "")
+    slim = {"filename": arguments.get("filename"), "content": f"（已存成文件，共 {len(content)} 字）"}
+    db.tool_call_slim_arguments(tool_call_id, json.dumps(slim, ensure_ascii=False))
 
 
 def _reaction_snippet(text: str, limit: int = 40) -> str:
@@ -1875,6 +1915,9 @@ async def _chat_tools(chat_id: str, list_tools=None) -> tuple[list[dict], dict[s
     tools.extend(REACT_TOOLS)
     for tool in REACT_TOOLS:
         tool_map[tool["function"]["name"]] = "builtin:react"
+    tools.extend(FILE_TOOLS)
+    for tool in FILE_TOOLS:
+        tool_map[tool["function"]["name"]] = "builtin:file"
     if db.sigillo_enabled(chat_id):
         tools.extend(SIGILLO_TOOLS)
         for tool in SIGILLO_TOOLS:
@@ -1919,6 +1962,8 @@ async def _run_chat_tool(chat_id: str, name: str, server: object,
             return await shop_tool(chat_id, name, arguments), False
         if server == "builtin:react":
             return react_tool(chat_id, arguments), False
+        if server == "builtin:file":
+            return file_tool(chat_id, arguments), False
         if not server:
             raise ValueError("模型请求了未启用的 MCP 工具")
         result = await mcp_call_tool(server, name.split("__", 2)[-1], arguments)
@@ -2133,6 +2178,9 @@ def _heartbeat_tool_allowed(tool: dict, server: object) -> bool:
         return False
     if server == "builtin:react":
         # 表情贴在她刚说的话上；心跳时她没在说话。
+        return False
+    if server == "builtin:file":
+        # 文件是她要了才做的。
         return False
     return bool(server) and _heartbeat_read_tool(tool)
 
@@ -3099,6 +3147,33 @@ def _cal_response(extra: dict | None = None) -> dict:
     if extra:
         response.update(extra)
     return response
+
+
+@app.get("/api/files/{file_id}", dependencies=authed)
+async def generated_file_get(file_id: str, download: bool = False):
+    """模型做的文件。默认在浏览器里直接打开（iPhone 上是预览），?download=1 是存下来。
+
+    文件内容是模型写的。HTML、XML 打开时关进沙盒（不跑脚本、不带登录态）；其余按声明的
+    类型给，不许浏览器自己猜。
+    """
+    item = db.generated_file_get(file_id)
+    if not item:
+        raise HTTPException(404, "文件不在了")
+    quoted = quote(item["name"], safe="")
+    fallback = "".join(ch if ch.isascii() and ch.isalnum() or ch in "._-" else "_" for ch in item["name"])
+    disposition = "attachment" if download else "inline"
+    mime = item["mime"]
+    if mime.startswith("text/") or mime in {"application/json", "application/xml"}:
+        mime += "; charset=utf-8"
+    headers = {
+        "Content-Disposition": f"{disposition}; filename=\"{fallback}\"; filename*=UTF-8''{quoted}",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, max-age=31536000, immutable",
+    }
+    if item["mime"] in {"text/html", "application/xml"}:
+        # 能跑脚本的只有这两种；PDF 别加，加了有的浏览器就不肯显示了
+        headers["Content-Security-Policy"] = "sandbox"
+    return Response(content=item["data"], media_type=mime, headers=headers)
 
 
 @app.get("/api/cal", dependencies=authed)
@@ -7012,6 +7087,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                     result, is_error = _tool_error_text(exc), True
                 else:
                     result, is_error = await _run_chat_tool(chat_id, name, server, arguments)
+                    _slim_file_tool_call(record["id"], name, arguments, is_error)
                 db.tool_call_finish(record["id"], result, is_error)
                 _emit(chat_id, {"type": "tool_result", "tool_call_id": record["id"], "is_error": is_error, "content": result})
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
@@ -7408,6 +7484,7 @@ async def home_mcp_endpoint(request: Request):
             }})
         result, is_error = await _run_chat_tool(chat_id, name, server, arguments)
         if record:
+            _slim_file_tool_call(record["id"], name, arguments, is_error)
             db.tool_call_finish(record["id"], result, is_error)
             _emit(chat_id, {"type": "tool_result", "tool_call_id": record["id"],
                             "is_error": is_error, "content": result})
