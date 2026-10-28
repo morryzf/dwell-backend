@@ -3487,9 +3487,8 @@ def memory_card_injection_enabled(chat_id: str) -> bool:
 
 
 def memory_card_injection_set(chat_id: str, enabled: bool) -> None:
+    # 关掉只是从这轮起不再递卡；已经递过的还留在会话里，不为它从头重读一遍（缓存也保住）。
     setting_set(f"memory_cards_enabled:{chat_id}", "1" if enabled else "0")
-    # 关掉之后不再递新的卡，但已经递出去的还在它脑子里——得重开一段会话。
-    memory_pool_touch()
 
 
 def memory_card_usage_record(

@@ -115,11 +115,11 @@ class MemoryPoolVersionTest(unittest.TestCase):
         db.memory_shared_set(self.chat, False)
         self.assertNotEqual(db.memory_pool_version(), before)
 
-    def test_the_injection_switch_moves_it(self):
-        # 关掉之后不再递新的卡，但已经递出去的还在它脑子里。
+    def test_the_injection_switch_leaves_it(self):
+        # 关掉只是这轮起不递卡，会话和缓存都留着。
         before = db.memory_pool_version()
         db.memory_card_injection_set(self.chat, False)
-        self.assertNotEqual(db.memory_pool_version(), before)
+        self.assertEqual(db.memory_pool_version(), before)
 
 
 class ResumeFollowsThePoolTest(unittest.TestCase):

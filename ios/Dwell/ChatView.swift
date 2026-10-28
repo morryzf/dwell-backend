@@ -1394,12 +1394,12 @@ struct ReactionHost: ViewModifier {
     func body(content: Content) -> some View {
         if active {
             content
-                // 挂在朝里的那个角：我的在左下，他的在右下，压住气泡边一点。
+                // 挂在朝里的那个角：我的在左下，他的在右下。往外探出大半个，只压住气泡的圆角，不挡字。
                 .overlay(alignment: isMe ? .bottomLeading : .bottomTrailing) {
                     if !message.reaction.isEmpty {
                         ReactionBadge(emoji: message.reaction)
                             .id(message.reaction)
-                            .offset(x: isMe ? -6 : 6, y: 15)
+                            .offset(x: isMe ? -15 : 15, y: 19)
                             // 冒出来从六成大小弹到原样；撤掉时很快淡掉。
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.6).combined(with: .opacity),
@@ -1407,7 +1407,7 @@ struct ReactionHost: ViewModifier {
                     }
                 }
                 // 给挂出来的那半个表情留地方，不压到下面那一行。
-                .padding(.bottom, message.reaction.isEmpty ? 0 : 14)
+                .padding(.bottom, message.reaction.isEmpty ? 0 : 18)
                 .popover(isPresented: $reacting) {
                     ReactionPicker(current: message.reaction) { emoji in
                         reacting = false

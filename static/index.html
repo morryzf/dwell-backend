@@ -1046,10 +1046,10 @@ html[data-theme="dark"] .composer {
   .msg-more button:active { background: var(--panel); }
   /* ---------- 表情回应（像 iMessage 的 tapback） ----------
      一条消息只挂一个，挂在气泡底角、压住一点边：她的泡在右边，挂左下；Cloudy 的挂右下。 */
-  .row.has-reaction { padding-bottom: 12px; }
+  .row.has-reaction { padding-bottom: 16px; }
   #log .row.has-reaction.actions-on { padding-bottom: 42px; }   /* 操作那排让到表情下面去 */
   .react-badge {
-    position: absolute; z-index: 2; bottom: -13px;
+    position: absolute; z-index: 2; bottom: -17px;
     min-width: 26px; height: 24px; padding: 0 5px; box-sizing: border-box;
     display: inline-flex; align-items: center; justify-content: center;
     border-radius: 12px; color: var(--text);
@@ -1060,8 +1060,8 @@ html[data-theme="dark"] .composer {
     box-shadow: 0 2px 8px rgba(72,54,64,.16);
     -webkit-backdrop-filter: blur(12px) saturate(1.4); backdrop-filter: blur(12px) saturate(1.4);
   }
-  .row.me .react-badge { left: -8px; transform-origin: 70% 20%; }          /* 从贴着气泡的那个角鼓出来 */
-  .row:not(.me) .react-badge { right: -8px; transform-origin: 30% 20%; }
+  .row.me .react-badge { left: -16px; transform-origin: 70% 20%; }          /* 从贴着气泡的那个角鼓出来 */
+  .row:not(.me) .react-badge { right: -16px; transform-origin: 30% 20%; }
   .row:not(.me) .vb > .react-badge { right: 20px; }                        /* 右下角留给语音条的小 T */
   .row:not(.me) .gu > .react-badge { cursor: pointer; }
   .react-badge.pop { animation: reactPop 260ms cubic-bezier(.34,1.56,.64,1) both; }
