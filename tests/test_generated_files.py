@@ -105,6 +105,8 @@ class MakeFileTest(unittest.TestCase):
 
         page = file_make.docx_to_html(file_make.make_file("a.docx", "字")[2], "a.docx", "../x?download=1")
         self.assertIn('id="back"', page)
+        self.assertIn('id="dl"', page)
+        self.assertIn('id="dlnote" class="dlnote" hidden', page)
         scripts = regex.findall(r"<script>(.*?)</script>", page, regex.S)
         self.assertEqual(len(scripts), 1)
         digest = base64.b64encode(hashlib.sha256(scripts[0].encode()).digest()).decode()

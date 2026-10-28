@@ -7071,6 +7071,9 @@ function fileSizeText(bytes) {
   if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
   return (n / 1024 / 1024).toFixed(1) + ' MB';
 }
+function runningAsHomeScreenApp() {
+  return navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+}
 function addGeneratedFileCard(t) {
   let file = null;
   try { file = JSON.parse(t.result || '{}').file; } catch (e) {}
@@ -7099,6 +7102,12 @@ function addGeneratedFileCard(t) {
   // 新窗口开，不用 download 属性：当 App 用时同一个窗口里下载会被系统的「文件」页顶掉、
   // 回不来；新窗口是 iPhone 自带的小浏览器，有关闭键
   save.target = '_blank'; save.rel = 'noopener';
+  save.onclick = event => {
+    // 加到主屏幕当 App 用时 iPhone 下载不了（新窗口一片空白），只给一句提示
+    if (!runningAsHomeScreenApp()) return;
+    event.preventDefault();
+    note('（主屏幕上的 dwell 下载不了文件，在 Safari 里打开 dwell 再点下载）');
+  };
   save.setAttribute('aria-label', '下载 ' + name);
   save.title = '下载';
   save.appendChild(icEl('download', 17));
