@@ -67,6 +67,8 @@ struct Message: Identifiable, Equatable {
     var usage: MessageUsage
     /// 贴在这条上的一个表情：我的消息上是他贴的，他的消息上是我贴的。没有是空串。
     var reaction: String
+    /// 我发这条时亲手挑的记忆卡。那一轮他只看到这几张。
+    var memoryPicks: [MemoryPick]
 
     init(json: [String: Any]) {
         id = json["id"] as? String ?? UUID().uuidString
@@ -88,6 +90,7 @@ struct Message: Identifiable, Equatable {
         voice = json["voice"] as? Bool ?? false
         usage = MessageUsage(json: json["usage"] as? [String: Any] ?? [:])
         reaction = json["reaction"] as? String ?? ""
+        memoryPicks = (json["memory_picks"] as? [[String: Any]] ?? []).map(MemoryPick.init(json:))
     }
 
     init(id: String, kind: Kind, text: String, images: [String] = [], at: Date = Date()) {
@@ -104,6 +107,7 @@ struct Message: Identifiable, Equatable {
         self.voice = false
         self.usage = MessageUsage(json: [:])
         self.reaction = ""
+        self.memoryPicks = []
     }
 
     var isLocal: Bool { id.hasPrefix("local-") }
@@ -121,6 +125,32 @@ struct Message: Identifiable, Equatable {
 
     /// 什么都没有的空占位（比如回复还没开始写的那条），不画。
     var isEmpty: Bool { bubbles.isEmpty && images.isEmpty }
+}
+
+/// 发消息时亲手挑的一张记忆卡，消息下面那行「带了几张记忆」点开看的就是这些。
+struct MemoryPick: Identifiable, Equatable {
+    let id: String
+    let content: String
+    let thread: String
+    let isMain: Bool
+    /// 这张卡后来删掉了。
+    let missing: Bool
+
+    init(json: [String: Any]) {
+        id = json["id"] as? String ?? UUID().uuidString
+        content = json["content"] as? String ?? ""
+        thread = json["thread"] as? String ?? ""
+        isMain = (json["thread_role"] as? String) == "main"
+        missing = json["missing"] as? Bool ?? false
+    }
+
+    init(card: MemoryCard) {
+        id = card.id
+        content = card.content
+        thread = card.thread
+        isMain = card.isMain
+        missing = false
+    }
 }
 
 /// 网页气泡右下角那行「23,726 tokens」，点开是明细。

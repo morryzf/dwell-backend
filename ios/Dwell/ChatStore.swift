@@ -251,18 +251,45 @@ final class ChatStore: ObservableObject {
         let shown = text.isEmpty && images.isEmpty
             ? "（发来了文件：" + files.map(\.name).joined(separator: "、") + "）" : text
         let localID = "local-\(UUID().uuidString)"
-        messages.append(Message(id: localID, kind: .me, text: shown, images: images.map(\.previewDataURL)))
+        // 挑好的记忆卡只管这一条：发出去就清空，没发成再放回去。
+        let picks = pickedCards
+        pickedCards = []
+        var local = Message(id: localID, kind: .me, text: shown, images: images.map(\.previewDataURL))
+        local.memoryPicks = picks.map(MemoryPick.init(card:))
+        messages.append(local)
         markEntering(localID)
         isReplying = true
         status = ""
         do {
             try await api.send(text: text, chatID: chatID, images: images, files: files,
-                               voice: voiceMode, replyLanguage: replyLanguage)
+                               voice: voiceMode, replyLanguage: replyLanguage,
+                               memoryCardIDs: picks.map(\.id))
         } catch {
             isReplying = false
             messages.removeAll { $0.isLocal }
+            pickedCards = picks
             handle(error)
         }
+    }
+
+    // MARK: 亲手挑的记忆卡
+
+    /// 下一条消息要带上的记忆卡。那一轮他只看到这几张，不再自动找。
+    @Published var pickedCards: [MemoryCard] = []
+    static let maxPicks = 12
+
+    func isPicked(_ card: MemoryCard) -> Bool { pickedCards.contains { $0.id == card.id } }
+
+    /// 挑上或取消；满了挑不上时返回 false。
+    @discardableResult
+    func togglePick(_ card: MemoryCard) -> Bool {
+        if isPicked(card) {
+            pickedCards.removeAll { $0.id == card.id }
+            return true
+        }
+        guard pickedCards.count < Self.maxPicks else { return false }
+        pickedCards.append(card)
+        return true
     }
 
     func regenerate(_ message: Message) async {
@@ -496,8 +523,10 @@ final class ChatStore: ObservableObject {
             let id = event["message_id"] as? String ?? UUID().uuidString
             if !messages.contains(where: { $0.id == id }) {
                 let at = Date(timeIntervalSince1970: TimeInterval(event["at"] as? Int ?? 0))
-                messages.append(Message(id: id, kind: .me, text: event["text"] as? String ?? "",
-                                        images: event["images"] as? [String] ?? [], at: at))
+                var mine = Message(id: id, kind: .me, text: event["text"] as? String ?? "",
+                                   images: event["images"] as? [String] ?? [], at: at)
+                mine.memoryPicks = (event["memory_picks"] as? [[String: Any]] ?? []).map(MemoryPick.init(json:))
+                messages.append(mine)
             }
             isReplying = true
 
