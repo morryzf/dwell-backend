@@ -486,6 +486,23 @@ html[data-theme="dark"] .composer {
     background: rgba(0,0,0,.55); color: #fff;
     display: flex; align-items: center; justify-content: center;
   }
+  /* 她亲手挑的记忆卡：输入框上面一排小签，只跟下一条消息走 */
+  #memPickStrip { display: none; gap: 6px; padding-bottom: 8px; flex-wrap: wrap; }
+  #memPickStrip .mp-chip {
+    display: inline-flex; align-items: center; gap: 2px; max-width: 100%;
+    height: 26px; padding: 0 2px 0 9px; border-radius: 13px;
+    background: var(--panel); border: 1px solid var(--line);
+    color: var(--text); font-size: 12.5px; white-space: nowrap;
+  }
+  #memPickStrip .mp-chip > span { overflow: hidden; text-overflow: ellipsis; }
+  #memPickStrip .mp-chip.fresh { animation: mpIn 180ms cubic-bezier(.23,1,.32,1) both; }
+  #memPickStrip .mp-chip .x {
+    flex: none; width: 22px; height: 22px; border-radius: 50%; color: var(--dim);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #memPickStrip .mp-chip .x:active { background: color-mix(in srgb, var(--text) 8%, transparent); }
+  @keyframes mpIn { from { opacity: 0; transform: scale(.94); } }
+  @media (prefers-reduced-motion: reduce) { #memPickStrip .mp-chip.fresh { animation: none; } }
   #box {
     width: 100%; border: 0; outline: 0; resize: none; background: transparent;
     color: var(--text); font: inherit; line-height: 1.6;
@@ -1068,6 +1085,90 @@ html[data-theme="dark"] .composer {
   .react-badge.out { animation: reactOut 120ms cubic-bezier(.23,1,.32,1) forwards; pointer-events: none; }
   @keyframes reactPop { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
   @keyframes reactOut { to { opacity: 0; transform: scale(.85); } }
+  /* ---------- 她这条带了哪几张记忆 ----------
+     气泡下面一行浅字，靠右；点开是一小串卡片内容。行本来是横排的，这里折一行放到气泡底下。
+     有表情时表情挂在气泡底角往下伸 17px，这行字要让过去，行底的那段让位就不用了。 */
+  .row.me.has-mem-picks { flex-wrap: wrap; }
+  .mem-picks { flex: 0 0 100%; display: flex; flex-direction: column; align-items: flex-end; margin-top: 3px; }
+  .row.has-reaction .mem-picks { margin-top: 19px; }
+  .row.has-reaction.has-mem-picks:not(.actions-on) { padding-bottom: 2px; }
+  .mem-picks-note {
+    padding: 3px 4px; border-radius: 8px; background: transparent;
+    color: var(--dim); font-size: 12px; line-height: 1.4; opacity: .85;
+    transition: opacity 150ms ease;
+  }
+  .mem-picks-note:active { opacity: .55; }
+  .mem-picks-note .chev { display: inline-block; margin-left: 2px; transition: transform 200ms cubic-bezier(.23,1,.32,1); }
+  .mem-picks-note[aria-expanded="true"] .chev { transform: rotate(90deg); }
+  .mem-picks-list {
+    display: grid; gap: 6px; box-sizing: border-box; max-width: 85%; margin-top: 4px; padding: 8px 11px;
+    border-radius: 12px; background: color-mix(in srgb, var(--panel) 80%, transparent);
+    border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+    font-size: 12.5px; line-height: 1.5; color: var(--text);
+    transform-origin: top right; animation: mpIn 180ms cubic-bezier(.23,1,.32,1) both;
+  }
+  .mem-picks-list > div { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .mem-picks-list > div + div { padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+  .mem-picks-list .mp-thread { color: var(--dim); font-size: 11.5px; margin-right: 5px; }
+  .mem-picks-list .gone { color: var(--dim); font-style: italic; }
+  @media (prefers-reduced-motion: reduce) {
+    .mem-picks-list { animation: none; }
+    .mem-picks-note .chev { transition: none; }
+  }
+  /* ---------- 带记忆：挑卡的弹层 ---------- */
+  #memPickSheet .sheet { height: min(86vh, 720px); }
+  #memPickSheet .mp-tools { flex: none; display: flex; gap: 8px; padding: 0 20px 10px; }
+  #memPickSheet .mp-search { flex: 1; min-width: 0; padding-left: 10px; }
+  #memPickSheet .mp-search > .ic { flex: none; width: 16px; height: 16px; color: var(--dim); }
+  #memPickThread {
+    flex: none; max-width: 38%; height: 42px; padding: 0 10px; border: none; border-radius: 14px;
+    background: var(--card); box-shadow: inset 0 0 0 .5px var(--line); color: var(--text); font-size: 14px;
+  }
+  #memPickSheet .body { padding-bottom: 12px; }
+  #memPickList { display: grid; gap: 8px; }
+  .mp-card {
+    position: relative; display: block; width: 100%; box-sizing: border-box; text-align: left;
+    padding: 11px 40px 11px 13px; border-radius: 14px; color: var(--text);
+    background: var(--card); border: 1px solid var(--line);
+    transition: background-color 160ms ease, border-color 160ms ease, transform 120ms cubic-bezier(.23,1,.32,1);
+  }
+  .mp-card:active { transform: scale(.99); }
+  .mp-card[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--accent) 12%, var(--card));
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  }
+  .mp-card .mp-text {
+    font-size: 14px; line-height: 1.5; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .mp-card .mp-tag {
+    display: inline-block; margin-top: 6px; padding: 2px 7px; border-radius: 7px;
+    background: var(--panel); color: var(--dim); font-size: 11.5px;
+  }
+  .mp-card .mp-check {
+    position: absolute; top: 11px; right: 11px; width: 20px; height: 20px; border-radius: 50%;
+    box-sizing: border-box; border: 1.5px solid var(--line); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    transition: background-color 160ms ease, border-color 160ms ease;
+  }
+  .mp-card .mp-check .ic { width: 12px; height: 12px; opacity: 0; transform: scale(.6); transition: opacity 160ms ease, transform 200ms cubic-bezier(.23,1,.32,1); }
+  .mp-card[aria-pressed="true"] .mp-check { background: var(--accent); border-color: var(--accent); }
+  .mp-card[aria-pressed="true"] .mp-check .ic { opacity: 1; transform: scale(1); }
+  @media (prefers-reduced-motion: reduce) { .mp-card, .mp-card .mp-check, .mp-card .mp-check .ic { transition: none; } }
+  .mp-empty { padding: 28px 8px; text-align: center; color: var(--dim); font-size: 14px; }
+  .mp-more-btn { width: 100%; margin-top: 10px; padding: 10px; border-radius: 12px; background: var(--panel); color: var(--dim); font-size: 13.5px; }
+  #memPickSheet .mp-foot {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 10px 20px calc(12px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+  }
+  #memPickSheet .mp-foot .mp-count { flex: 1; color: var(--dim); font-size: 13px; }
+  #memPickGo {
+    min-width: 112px; height: 40px; padding: 0 18px; border-radius: 20px;
+    background: var(--accent); color: #fff; font-size: 15px; font-weight: 600;
+    transition: transform 120ms cubic-bezier(.23,1,.32,1);
+  }
+  #memPickGo:active { transform: scale(.97); }
   /* 只发了图：表情挂在图片角上，不挂在外面那圈气泡上 */
   #log .react-img { position: relative; display: block; width: fit-content; max-width: 100%; margin: 7px 0; }
   #log .react-img > img.chatimg { margin: 0; }
@@ -4574,6 +4675,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
       <path class="cache-glow-hit" id="cacheGlowHit" pathLength="100"></path>
     </svg>
     <span class="cache-glow-hint" id="cacheGlowHint" role="status" aria-live="polite"></span>
+    <div id="memPickStrip" aria-label="下一条要带的记忆"></div>
     <div id="attachStrip"></div>
     <textarea id="box" rows="1" placeholder="说点什么…" autocomplete="off"></textarea>
     <div class="ctlrow">
@@ -5161,6 +5263,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
         <button class="addbig" id="photoBtn"><span class="ic" data-i="image"></span>Photos</button>
       </div>
       <button class="addrow" id="fileBtn"><span class="ic" data-i="filePlus"></span>Add files</button>
+      <button class="addrow" id="memPickBtn"><span class="ic" data-i="note"></span>带记忆</button>
       <div class="addrow langrow" id="langRow"><span class="ic" data-i="languages"></span>回复语言
         <div class="tts-seg" id="langSeg" role="radiogroup" aria-label="回复语言">
           <button data-lang="auto" role="radio">自动</button>
@@ -5168,6 +5271,27 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
           <button data-lang="en" role="radio">English</button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- 带记忆：她自己挑几张记忆卡，跟下一条消息一起给 Cloudy -->
+<div class="sheetWrap" id="memPickSheet">
+  <div class="shade" data-close="memPick"></div>
+  <div class="sheet" role="dialog" aria-label="带记忆">
+    <div class="head">
+      <button class="hbtn" data-close="memPick" aria-label="关闭"><span class="ic" data-i="x"></span></button>
+      <div class="ht">带记忆</div>
+      <div class="hspace"></div>
+    </div>
+    <div class="mp-tools">
+      <label class="mc-search-box mp-search"><span class="ic" data-i="search"></span><input id="memPickQ" type="search" enterkeyhint="search" placeholder="搜索记忆内容" autocomplete="off"></label>
+      <select id="memPickThread" aria-label="按事件筛选"><option value="">全部</option></select>
+    </div>
+    <div class="body" id="memPickBody"><div id="memPickList"></div></div>
+    <div class="mp-foot">
+      <span class="mp-count" id="memPickCount"></span>
+      <button id="memPickGo" type="button">带上 0 张</button>
     </div>
   </div>
 </div>
@@ -5575,6 +5699,7 @@ function addMe(text, message) {
     lastBubble = b;
   }
   if (message && message.reaction) setReactionBadge(lastBubble.parentElement, message.reaction, false);
+  if (message && message.memory_picks) attachMemoryPicks(lastBubble.parentElement, message.memory_picks);
   scroll(true);
   guEl = null; endThink(); closeGroup();
   return lastBubble;
@@ -7462,11 +7587,13 @@ function handle(d) {
   lastEventAt = Date.now();
   if (d.type === 'echo') {
     if (armedFresh) setArmed(false);
-    addMe(d.text, { id: d.message_id, role: 'user', text: d.text, at: d.at, images: d.images || [], files: d.files || [] });
+    addMe(d.text, { id: d.message_id, role: 'user', text: d.text, at: d.at, images: d.images || [], files: d.files || [], memory_picks: d.memory_picks || [] });
     turnBubbles = [];
     petSet('thinking');
     return;
   }
+  // 换了窗口：挑的卡是上一间的，不带过去
+  if (d.type === 'system' && (d.subtype === 'newchat' || d.subtype === 'switched')) { memPicks = []; renderMemPickStrip(); }
   if (d.type === 'system' && d.subtype === 'newchat') { loadChatModel(); setArmed(false); log.innerHTML = ''; guEl = null; turnBubbles = []; earliestSeq = null; olderBtn = null; note(d.text); return; }
   if (d.type === 'system' && d.subtype === 'switched') { loadChatModel(); setArmed(false); log.innerHTML = ''; guEl = null; turnBubbles = []; earliestSeq = null; olderBtn = null; note(d.text); return; }
   if (d.type === 'system' && d.subtype === 'regenerating') {
@@ -7906,6 +8033,101 @@ function renderStrip() {
   });
 }
 
+/* ---------- 带记忆：她亲手挑的卡，只跟下一条消息走 ----------
+   每张记 {id, content, thread, thread_role, memory_type}；发出去就清，没发出去还回来。 */
+const MEM_PICK_MAX = 12;
+let memPicks = [];
+let memPickShown = new Set();      // 已经画过的签不再淡入，只有新来的那张动一下
+const memPickStrip = document.getElementById('memPickStrip');
+function memPickOf(item) {
+  return { id: item.id, content: item.content || '', thread: item.thread || '', thread_role: item.thread_role || '', memory_type: item.memory_type || '' };
+}
+/* 签上写什么：有事件写事件名，没有就取内容前十个字（按字取，不切坏 emoji） */
+function memPickLabel(item) {
+  if (item.thread) return item.thread;
+  const chars = Array.from(String(item.content || '').replace(/\s+/g, ' ').trim());
+  return chars.length > 10 ? chars.slice(0, 10).join('') + '…' : chars.join('');
+}
+/* 主卡 · 事件 / 副卡 · 事件，和记忆控制台卡上那个标签一个说法 */
+function memPickTag(item) {
+  if (!item.thread) return '';
+  return (item.thread_role === 'main' ? '主卡' : item.thread_role === 'detail' ? '副卡' : '事件') + ' · ' + item.thread;
+}
+function renderMemPickStrip() {
+  memPickStrip.textContent = '';
+  memPickStrip.style.display = memPicks.length ? 'flex' : 'none';
+  const seen = new Set();
+  memPicks.forEach(item => {
+    seen.add(item.id);
+    const chip = document.createElement('div');
+    chip.className = 'mp-chip' + (memPickShown.has(item.id) ? '' : ' fresh');
+    chip.title = item.content;
+    const label = document.createElement('span');
+    label.textContent = '🗒️ ' + memPickLabel(item);
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'x';
+    x.setAttribute('aria-label', '不带这张');
+    x.appendChild(icEl('x', 11));
+    x.onclick = () => { memPicks = memPicks.filter(v => v.id !== item.id); renderMemPickStrip(); };
+    chip.append(label, x);
+    memPickStrip.appendChild(chip);
+  });
+  memPickShown = seen;
+}
+/* 从记忆控制台那边塞一张进来。返回 false = 满了 */
+function memPickAdd(item) {
+  if (!item || !item.id) return false;
+  if (!memPicks.some(v => v.id === item.id)) {
+    if (memPicks.length >= MEM_PICK_MAX) { toast('最多带 ' + MEM_PICK_MAX + ' 张', '', 'note'); return false; }
+    memPicks.push(memPickOf(item));
+    renderMemPickStrip();
+  }
+  toast('下一条消息会带上这张', '', 'note');
+  return true;
+}
+
+/* 她消息底下那行「带了 N 张记忆」，点开看是哪几张。消息拆成几个泡时挂在最后一个泡那行。 */
+function attachMemoryPicks(rowEl, picks) {
+  if (!rowEl || !Array.isArray(picks) || !picks.length) return;
+  rowEl.querySelector(':scope > .mem-picks')?.remove();
+  rowEl.classList.add('has-mem-picks');
+  const wrap = document.createElement('div');
+  wrap.className = 'mem-picks';
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'mem-picks-note';
+  btn.setAttribute('aria-expanded', 'false');
+  btn.textContent = '🗒️ 带了 ' + picks.length + ' 张记忆';
+  const chev = document.createElement('span');
+  chev.className = 'chev'; chev.textContent = '›';
+  btn.appendChild(chev);
+  btn.onclick = event => {
+    event.stopPropagation();
+    const open = wrap.querySelector('.mem-picks-list');
+    if (open) { open.remove(); btn.setAttribute('aria-expanded', 'false'); return; }
+    const list = document.createElement('div');
+    list.className = 'mem-picks-list';
+    picks.forEach(p => {
+      const line = document.createElement('div');
+      if (p.missing) {
+        line.className = 'gone';
+        line.textContent = '这张卡已经删掉了';
+      } else {
+        const tag = memPickTag(p);
+        if (tag) { const t = document.createElement('span'); t.className = 'mp-thread'; t.textContent = tag; line.appendChild(t); }
+        line.appendChild(document.createTextNode(p.content || ''));
+      }
+      list.appendChild(line);
+    });
+    const wasBottom = atBottom();
+    wrap.appendChild(list);
+    btn.setAttribute('aria-expanded', 'true');
+    // 贴底时点开最后那条，往下长出来的部分别躲到输入卡后面
+    if (wasBottom) scroll(true);
+  };
+  wrap.appendChild(btn);
+  rowEl.appendChild(wrap);
+}
+
 let guBusy = false;
 const DOING = [
   ["办着呢","Accomplishing"], ["动手了","Actioning"], ["落地中","Actualizing"], ["搭骨架","Architecting"],
@@ -8102,6 +8324,11 @@ async function send() {
   if (outgoingAttachments.length) payload.attachments = outgoingAttachments;
   attachments = [];
   renderStrip();
+  // 她挑的记忆卡只管这一条
+  const outgoingPicks = memPicks;
+  if (outgoingPicks.length) payload.memory_card_ids = outgoingPicks.map(v => v.id);
+  memPicks = [];
+  renderMemPickStrip();
   try {
     const response = await fetch('api/send', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -8110,6 +8337,9 @@ async function send() {
     if (!response.ok || !data.ok) throw new Error(data.detail || '没有送出去');
   } catch (e) {
     attachments = outgoingAttachments.concat(attachments);
+    // 没送出去：挑的卡还回来（这期间又加的排在后面，去重，不超过上限）
+    memPicks = outgoingPicks.concat(memPicks.filter(v => !outgoingPicks.some(o => o.id === v.id))).slice(0, MEM_PICK_MAX);
+    renderMemPickStrip();
     box.value = text; box.dispatchEvent(new Event('input'));
     renderStrip(); setBusy(false);
     if (previousCacheEnd > Date.now()) {
@@ -8495,6 +8725,7 @@ const sheets = {
   usage: document.getElementById('usageSheet'),
   model: document.getElementById('modelSheet'),
   add: document.getElementById('addSheet'),
+  memPick: document.getElementById('memPickSheet'),
   tool: toolSheet,
   think: document.getElementById('thinkSheet'),
   todo: document.getElementById('todoSheet'),
@@ -13224,7 +13455,7 @@ function memoryCardView(item, taxonomy, kind, recentIds, currentById) {
   if (kind === 'draft') actions = `<button class="mc-btn primary" data-memory-accept="${instructionEsc(item.id)}">采用</button><button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="draft">先修改</button>${(item.action === 'update' || item.action === 'revise' || item.action === 'append') ? '' : `<button class="mc-btn quiet" data-memory-split="${instructionEsc(item.id)}" data-kind="draft">拆开</button>`}<button class="mc-btn quiet" data-memory-discard="${instructionEsc(item.id)}">忽略</button>`;
   else if (kind === 'used') actions = '';
   else if (archived) actions = `<button class="mc-btn" data-memory-restore="${instructionEsc(item.id)}">恢复</button><button class="mc-btn quiet danger" data-memory-delete-permanent="${instructionEsc(item.id)}">永久删除</button>`;
-  else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button>${item.thread_role === 'main' ? '' : `<button class="mc-btn quiet" data-memory-complete="${instructionEsc(item.id)}">补全</button>`}${item.thread_role === 'main' ? `<button class="mc-btn quiet" data-memory-history="${instructionEsc(item.id)}" aria-expanded="false">历史</button>` : ''}${canShare ? `<button class="mc-btn quiet" data-memory-share="${instructionEsc(item.id)}">共享</button>` : ''}<button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
+  else actions = `<button class="mc-btn" data-memory-edit="${instructionEsc(item.id)}" data-kind="card">编辑</button><button class="mc-btn quiet" data-memory-pick="${instructionEsc(item.id)}">带进下一条消息</button>${item.thread_role === 'main' ? '' : `<button class="mc-btn quiet" data-memory-complete="${instructionEsc(item.id)}">补全</button>`}${item.thread_role === 'main' ? `<button class="mc-btn quiet" data-memory-history="${instructionEsc(item.id)}" aria-expanded="false">历史</button>` : ''}${canShare ? `<button class="mc-btn quiet" data-memory-share="${instructionEsc(item.id)}">共享</button>` : ''}<button class="mc-btn quiet" data-memory-toggle="${instructionEsc(item.id)}" data-status="${hidden ? 'active' : 'hidden'}">${hidden ? '重新启用' : '暂时隐藏'}</button><button class="mc-btn quiet danger" data-memory-archive="${instructionEsc(item.id)}">归档</button>`;
   return `<article class="mc-card${hidden ? ' hidden' : ''}${kind === 'used' ? ' mc-used' : ''}" data-memory-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-content">${contentHtml}</div>${kind !== 'used' ? `<span class="mc-badge">${instructionEsc(type)}</span>` : ''}</div><div class="mc-meta">${threadTag}${topicTags}<span class="mc-tag">${instructionEsc(importance)}</span><span class="mc-tag">${instructionEsc(retention)}${until}</span>${hidden ? '<span class="mc-tag">已隐藏</span>' : ''}${foreign ? `<span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span>` : ''}${sharedTag}${recentlyUsed ? '<span class="mc-tag">最近带入</span>' : ''}${retagOf ? '<span class="mc-tag">重新分类</span>' : ''}${splitOf ? '<span class="mc-tag">拆分</span>' : ''}${replaceOf ? '<span class="mc-tag">更新旧卡</span>' : ''}${reviseOf ? '<span class="mc-tag">补全</span>' : ''}${isAppend ? '<span class="mc-tag">时间线</span>' : ''}</div>${retagLine}${splitLine}${replaceLine}${reviseLine}${kind !== 'used' ? memorySourceHtml(item, kind) : ''}${actions ? `<div class="mc-actions">${actions}</div>` : ''}</div></article>`;
 }
 // 新旧两段对一下：开头、结尾相同的部分照常显示，中间新写的那段包进 <mark>。按字（码点）比，不切坏 emoji。
@@ -13526,6 +13757,8 @@ function wireMemoryCards(chat, cardState, allItems) {
   document.querySelectorAll('[data-memory-timeline]').forEach(button => button.onclick = () => { const item=allItems.find(value=>value.id===button.dataset.memoryTimeline); if(item)memoryTimelineToggle(button.closest('.mc-card'),item,chat,cardState,allItems,true); });
   // 点「主卡 · xx」「副卡 · xx」：回到记忆卡页，只看这件事的卡。
   document.querySelectorAll('[data-mc-thread]').forEach(tag => tag.onclick = () => { memoryConsoleThread = tag.dataset.mcThread; memoryConsoleTab = 'cards'; memoryCardLimit = MEMORY_PAGE; loadLongContext(true); });
+  // 带进下一条消息：放到输入框上面那排签里，发下一条时一起给 Cloudy
+  document.querySelectorAll('[data-memory-pick]').forEach(button => button.onclick = () => { memPickAdd(allItems.find(value => value.id === button.dataset.memoryPick)); });
   document.querySelectorAll('[data-memory-share]').forEach(button => button.onclick = async () => {
     const item = allItems.find(value => value.id === button.dataset.memoryShare);
     if (!item) return;
@@ -15124,6 +15357,153 @@ const fFile = document.getElementById('fFile');
 document.getElementById('cameraBtn').onclick = () => fCamera.click();
 document.getElementById('photoBtn').onclick = () => fPhoto.click();
 document.getElementById('fileBtn').onclick = () => fFile.click();
+
+/* ---------- 带记忆：挑卡的弹层 ----------
+   只列「可被挑选」的卡（filter=active），搜索和按事件筛都在服务器上做，一次拿 30 张，往下翻再拿。
+   弹层里点的是草稿，按「带上 N 张」才算数；直接关掉就当没改。 */
+const MEM_PICK_PAGE = 30;
+const memPickState = { chatId: '', q: '', thread: '', items: [], total: 0, loading: false, seq: 0, draft: [], timer: 0, error: '' };
+const memPickQ = document.getElementById('memPickQ');
+const memPickThread = document.getElementById('memPickThread');
+const memPickList = document.getElementById('memPickList');
+const memPickGo = document.getElementById('memPickGo');
+const memPickCount = document.getElementById('memPickCount');
+let memPickMore = null, memPickWatch = null;
+
+function memPickSyncFoot() {
+  const n = memPickState.draft.length;
+  memPickGo.textContent = n ? '带上 ' + n + ' 张' : (memPicks.length ? '都不带了' : '带上 0 张');
+  memPickGo.disabled = !n && !memPicks.length;
+  memPickGo.style.opacity = memPickGo.disabled ? '.5' : '';
+  memPickCount.textContent = n ? '最多 ' + MEM_PICK_MAX + ' 张' : '点卡片选上';
+}
+function memPickCard(item) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'mp-card';
+  b.setAttribute('aria-pressed', String(memPickState.draft.some(v => v.id === item.id)));
+  const text = document.createElement('div');
+  text.className = 'mp-text'; text.textContent = item.content || '';
+  b.appendChild(text);
+  const tag = memPickTag(item);
+  if (tag) { const t = document.createElement('span'); t.className = 'mp-tag'; t.textContent = tag; b.appendChild(t); }
+  const check = document.createElement('span');
+  check.className = 'mp-check'; check.setAttribute('aria-hidden', 'true');
+  check.appendChild(icEl('check', 12));
+  b.appendChild(check);
+  b.onclick = () => {
+    const on = memPickState.draft.some(v => v.id === item.id);
+    if (on) memPickState.draft = memPickState.draft.filter(v => v.id !== item.id);
+    else {
+      if (memPickState.draft.length >= MEM_PICK_MAX) { toast('最多带 ' + MEM_PICK_MAX + ' 张', '', 'note'); return; }
+      memPickState.draft.push(memPickOf(item));
+    }
+    b.setAttribute('aria-pressed', String(!on));
+    memPickSyncFoot();
+  };
+  return b;
+}
+function memPickRender() {
+  const st = memPickState;
+  memPickList.textContent = '';
+  if (memPickWatch) { memPickWatch.disconnect(); memPickWatch = null; }
+  memPickMore = null;
+  if (!st.items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'mp-empty';
+    empty.textContent = st.loading ? '正在拿记忆卡…' : st.error ? '没拿到记忆卡：' + st.error
+      : (st.q || st.thread) ? '没有符合条件的记忆' : '还没有可以带的记忆卡';
+    memPickList.appendChild(empty);
+    return;
+  }
+  st.items.forEach(item => memPickList.appendChild(memPickCard(item)));
+  if (st.items.length < st.total) {
+    memPickMore = document.createElement('button');
+    memPickMore.type = 'button'; memPickMore.className = 'mp-more-btn';
+    memPickMore.textContent = st.loading ? '正在拿…' : '更多 · 还有 ' + (st.total - st.items.length) + ' 张';
+    memPickMore.onclick = () => memPickLoad(true);
+    memPickList.appendChild(memPickMore);
+    // 翻到底自己接着拿，按钮留着当后手
+    if ('IntersectionObserver' in window) {
+      memPickWatch = new IntersectionObserver(entries => {
+        if (entries.some(e => e.isIntersecting)) memPickLoad(true);
+      }, { root: document.getElementById('memPickBody'), rootMargin: '0px 0px 160px 0px' });
+      memPickWatch.observe(memPickMore);
+    }
+  }
+}
+function memPickFillThreads(threads) {
+  if (!Array.isArray(threads)) return;
+  const keep = memPickState.thread;
+  memPickThread.textContent = '';
+  const all = document.createElement('option');
+  all.value = ''; all.textContent = '全部';
+  memPickThread.appendChild(all);
+  const names = threads.map(t => t.thread).filter(Boolean);
+  if (keep && !names.includes(keep)) names.unshift(keep);
+  names.forEach(name => {
+    const o = document.createElement('option');
+    o.value = name; o.textContent = name;
+    memPickThread.appendChild(o);
+  });
+  memPickThread.value = keep;
+}
+async function memPickLoad(more) {
+  const st = memPickState;
+  if (more && (st.loading || st.items.length >= st.total)) return;
+  const seq = ++st.seq;
+  st.loading = true; st.error = '';
+  if (!more) { st.items = []; st.total = 0; }
+  if (memPickMore) memPickMore.textContent = '正在拿…';
+  else if (!more) memPickRender();
+  try {
+    if (!st.chatId) {
+      const chat = await currentChatForMemory();
+      if (!chat) throw new Error('还没有打开聊天');
+      st.chatId = chat.id;
+    }
+    const url = 'api/chats/' + encodeURIComponent(st.chatId) + '/memory-cards?limit=' + MEM_PICK_PAGE
+      + '&offset=' + (more ? st.items.length : 0) + '&q=' + encodeURIComponent(st.q)
+      + '&filter=active&thread=' + encodeURIComponent(st.thread);
+    const d = await memoryJson(url, { cache: 'no-store' });
+    if (seq !== st.seq) return;
+    const have = new Set(st.items.map(v => v.id));
+    st.items = st.items.concat((d.items || []).filter(v => v && v.id && !have.has(v.id)));
+    st.total = Number(d.total || 0);
+    memPickFillThreads(d.threads);
+  } catch (e) {
+    if (seq !== st.seq) return;
+    st.error = e.message || '请再试一次';
+  }
+  st.loading = false;
+  memPickRender();
+}
+function openMemPick() {
+  sheets.add.classList.remove('open');
+  const st = memPickState;
+  st.draft = memPicks.slice();
+  st.chatId = '';            // 每次打开都认一下当前是哪间
+  memPickSyncFoot();
+  sheets.memPick.classList.add('open');
+  memPickLoad(false);
+}
+document.getElementById('memPickBtn').onclick = openMemPick;
+memPickQ.addEventListener('input', () => {
+  clearTimeout(memPickState.timer);
+  memPickState.timer = setTimeout(() => {
+    const q = memPickQ.value.trim();
+    if (q === memPickState.q) return;
+    memPickState.q = q;
+    memPickLoad(false);
+  }, 250);
+});
+memPickQ.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); memPickQ.blur(); } });
+memPickThread.onchange = () => { memPickState.thread = memPickThread.value; memPickLoad(false); };
+memPickGo.onclick = () => {
+  memPicks = memPickState.draft.slice(0, MEM_PICK_MAX);
+  renderMemPickStrip();
+  clearSheetKeyboardOffset(sheets.memPick);
+  sheets.memPick.classList.remove('open');
+};
 
 const TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|log|ya?ml|xml|html?|css|js|ts|py|sh|ini|conf|toml|sql|srt|vtt)$/i;
 function isPlainText(f) {

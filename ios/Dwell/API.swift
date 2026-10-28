@@ -135,7 +135,7 @@ final class API {
     }
 
     func send(text: String, chatID: String, images: [PendingImage] = [], files: [PendingFile] = [],
-              voice: Bool? = nil, replyLanguage: String? = nil) async throws {
+              voice: Bool? = nil, replyLanguage: String? = nil, memoryCardIDs: [String] = []) async throws {
         var body: [String: Any] = [
             "text": text,
             "chat_id": chatID,
@@ -149,6 +149,7 @@ final class API {
         }
         attachments += files.map(\.payload)
         if !attachments.isEmpty { body["attachments"] = attachments }
+        if !memoryCardIDs.isEmpty { body["memory_card_ids"] = memoryCardIDs }
         _ = try await request("POST", "api/send", body: body)
     }
 

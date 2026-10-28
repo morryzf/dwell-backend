@@ -13,6 +13,8 @@ struct AddContextSheet: View {
     let maxImages: Int
     let onCamera: () -> Void
     let onFiles: () -> Void
+    /// 去挑记忆卡带进这条消息。
+    let onMemory: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -38,6 +40,12 @@ struct AddContextSheet: View {
                     onFiles()
                 } label: {
                     row("doc.badge.plus", "Add files")
+                }
+                Button {
+                    dismiss()
+                    onMemory()
+                } label: {
+                    row("note.text", store.pickedCards.isEmpty ? "带记忆" : "带记忆 · 已选 \(store.pickedCards.count) 张")
                 }
                 HStack(spacing: 12) {
                     Image(systemName: "character.bubble").font(.system(size: 17))

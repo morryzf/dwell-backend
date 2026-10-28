@@ -4,6 +4,8 @@ import SwiftUI
 /// 四个页签（记忆卡 / 待确认 / 摘要 / 设置），下面是卡片。
 struct MemoryView: View {
     @StateObject private var store: MemoryStore
+    /// 聊天那边：「带进下一条消息」把卡放进输入框上面。
+    @EnvironmentObject private var chat: ChatStore
     @State private var leaving: [String: Edge] = [:]
     @Environment(\.dismiss) private var dismiss
 
@@ -358,6 +360,17 @@ struct MemoryView: View {
         } else {
             Button("编辑") { editing = card }
                 .buttonStyle(MemoryButtonStyle(kind: .normal))
+            Button(chat.isPicked(card) ? "已带上" : "带进下一条") {
+                if chat.isPicked(card) {
+                    chat.togglePick(card)
+                    store.toast = "下一条消息不带这张了"
+                } else if chat.togglePick(card) {
+                    store.toast = "下一条消息会带上这张"
+                } else {
+                    store.toast = "最多带 \(ChatStore.maxPicks) 张"
+                }
+            }
+            .buttonStyle(MemoryButtonStyle(kind: .quiet))
             if card.isMain {
                 // 主卡在原卡上更新，之前的每一版都能翻。
                 Button("历史") { historyOf = card }

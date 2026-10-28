@@ -6621,6 +6621,16 @@ def _cache_friendly_chat_messages(stable: list[dict], transient: list[dict],
     return stable + history[:-1] + [current]
 
 
+def _memory_picks_for_reply(chat_id: str, msg_id: str) -> list[str]:
+    """这一轮回的是她连着发的那几条；她在这几条上挑过的卡，按发的先后、去重。"""
+    message = db.message_get(msg_id)
+    if not message:
+        return []
+    run = db.message_user_run(chat_id, before=int(message["rowid"]))
+    picks = [i for row in reversed(run) for i in db.message_memory_picks(row)]
+    return list(dict.fromkeys(picks))[:db.MEMORY_PICKS_MAX]
+
+
 async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = None,
                         proactive_watch: bool = False, device_time: dict | None = None,
                         focus_context: dict | None = None,
@@ -6664,14 +6674,19 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     assistant_label = db.assistant_name(db.chat_assistant(chat_id))
     memory_query = _memory_card_query(history, watch_context, assistant_label)
     selected_memory_cards = []
-    if db.memory_card_injection_enabled(chat_id):
+    # 她这一轮亲手挑了卡：就给这几张，不再自动找，也不顺带别的（按需记忆关着也给）。
+    picked_ids = _memory_picks_for_reply(chat_id, msg_id)
+    if picked_ids:
+        pool = {card["id"]: card for card in db.memory_card_embeddings(chat_id)}
+        selected_memory_cards = [pool[i] for i in picked_ids if i in pool]
+    elif db.memory_card_injection_enabled(chat_id):
         query_emb = await _embed_text(memory_query)
         selected_memory_cards = select_memory_cards(
             db.memory_card_embeddings(chat_id), memory_query, limit=5,
             now=db.cn_now().replace(tzinfo=None),
             query_embedding=query_emb,
         )
-    if selected_memory_cards:
+    if selected_memory_cards and not picked_ids:
         selected_memory_cards = _with_thread_mains(selected_memory_cards, db.memory_card_embeddings(chat_id))
     # 同一件事的几张卡按发生的先后排：先看到早的，再看到后来怎样了，不会把旧情况当成现在。
     selected_memory_cards.sort(key=lambda card: _memory_card_date(card) or "9999")
@@ -7237,6 +7252,15 @@ async def send(request: Request):
             db.chat_reply_language_set(chat_id, payload["reply_language"])
 
     user_message = db.message_add(chat_id, "user", saved_text)
+    # 她亲手挑的记忆卡：只认卡池里还在的，最多 12 张，按她挑的顺序。
+    raw_picks = payload.get("memory_card_ids") or []
+    picks = []
+    if isinstance(raw_picks, list) and raw_picks:
+        wanted = list(dict.fromkeys(str(i) for i in raw_picks if i))[:db.MEMORY_PICKS_MAX]
+        alive = {c["id"] for c in db.memory_cards_by_id(chat_id, wanted) if c.get("status") != "archived"}
+        picks = [i for i in wanted if i in alive]
+        if picks:
+            db.message_memory_picks_set(user_message["id"], picks)
     previews = [
         item["preview_url"] for item in attachments
         if len(item["preview_url"]) <= 700_000
@@ -7253,6 +7277,8 @@ async def send(request: Request):
         "files": [item["name"] for item in text_files],
         "message_id": user_message["id"],
         "at": user_message["made"],
+        "memory_picks": db.memory_picks_brief(chat_id, [db.message_get(user_message["id"])]).get(
+            user_message["id"], []),
     })
 
     placeholder = db.message_add(chat_id, "assistant", "")

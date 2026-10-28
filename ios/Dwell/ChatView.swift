@@ -20,6 +20,7 @@ struct ChatView: View {
     @State private var preparingImages = false
     @State private var pendingFiles: [PendingFile] = []
     @State private var showAdd = false
+    @State private var showMemoryPick = false
     @State private var showCamera = false
     @State private var showFiles = false
     @State private var showInstructions = false
@@ -92,7 +93,9 @@ struct ChatView: View {
         .sheet(isPresented: $showMemory, onDismiss: {
             Task { await store.refreshMemoryBadge() }
         }) {
-            MemoryView(chatID: store.chatID, chatTitle: headerTitle).glassSheet()
+            MemoryView(chatID: store.chatID, chatTitle: headerTitle)
+                .environmentObject(store)
+                .glassSheet()
         }
         .sheet(isPresented: $showSearch) {
             SearchSheet().environmentObject(store)
@@ -129,9 +132,21 @@ struct ChatView: View {
             AddContextSheet(pickedItems: $pickedItems,
                             maxImages: max(1, maxImages - pendingImages.count),
                             onCamera: { showCamera = true },
-                            onFiles: { showFiles = true })
+                            onFiles: { showFiles = true },
+                            onMemory: {
+                                // 等这张收起来再开下一张，不然会被吞掉。
+                                Task {
+                                    try? await Task.sleep(for: .milliseconds(400))
+                                    showMemoryPick = true
+                                }
+                            })
                 .environmentObject(store)
-                .presentationDetents([.height(380)])
+                .presentationDetents([.height(450)])
+        }
+        .sheet(isPresented: $showMemoryPick) {
+            MemoryPickSheet(chatID: store.chatID)
+                .environmentObject(store)
+                .presentationDetents([.large])
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker { image in
@@ -347,6 +362,9 @@ struct ChatView: View {
                     .overlay(Capsule().stroke(Theme.chipBorder, lineWidth: 1))
             }
             VStack(alignment: .leading, spacing: 4) {
+                if !store.pickedCards.isEmpty {
+                    pickedStrip
+                }
                 if !pendingImages.isEmpty || !pendingFiles.isEmpty || preparingImages {
                     attachmentStrip
                 }
@@ -420,6 +438,42 @@ struct ChatView: View {
             .accessibilityLabel("切换模型")
             Spacer(minLength: 4)
             sendButton
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 这条消息要带上的记忆卡：一张一个小胶囊，点一下回去改，× 去掉。
+    private var pickedStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(store.pickedCards) { card in
+                    HStack(spacing: 5) {
+                        Text("🗒️").font(.system(size: 11))
+                        Text(MemoryPickSheet.shortLabel(card))
+                            .lineLimit(1)
+                            .frame(maxWidth: 120, alignment: .leading)
+                        Button {
+                            withAnimation(.easeOut(duration: 0.18)) { _ = store.togglePick(card) }
+                        } label: {
+                            Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(Theme.dim)
+                                .frame(width: 18, height: 18)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("不带这张")
+                    }
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.chipText)
+                    .padding(.leading, 9)
+                    .padding(.trailing, 3)
+                    .frame(height: 28)
+                    .background(Capsule().fill(Theme.chip))
+                    .overlay(Capsule().stroke(Theme.chipBorder, lineWidth: 1))
+                    .onTapGesture { showMemoryPick = true }
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                }
+            }
+            .padding(.horizontal, 2)
         }
         .buttonStyle(.plain)
     }
@@ -854,6 +908,9 @@ struct MessageRow: View {
                     .modifier(ReactionHost(message: message, isMe: isMe, reacting: $reacting, active: true))
                 } else {
                     bubbleList(isMe: isMe, badge: true)
+                }
+                if isMe && !message.memoryPicks.isEmpty {
+                    MemoryPicksNote(picks: message.memoryPicks)
                 }
                 // 还没冒完就先不挂 token 和按钮。
                 if store.shown[message.id] == nil {

@@ -658,6 +658,9 @@ def init_db():
         # 贴在一条消息上的一个表情。她的消息上是 Cloudy 贴的，Cloudy 的消息上是她贴的。
         if "reaction" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN reaction TEXT NOT NULL DEFAULT ''")
+        # 她发这条时亲手挑的记忆卡（id 列表）：那一轮只给模型看这几张。
+        if "memory_picks" not in message_cols:
+            cx.execute("ALTER TABLE messages ADD COLUMN memory_picks TEXT NOT NULL DEFAULT '[]'")
         usage_cols = {
             r["name"] for r in cx.execute("PRAGMA table_info(provider_usage_events)").fetchall()
         }
@@ -3668,6 +3671,7 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
         for tool in tool_rows:
             item = dict(tool)
             tools_by_message.setdefault(item["assistant_message_id"], []).append(item)
+    picks_by_message = memory_picks_brief(chat_id, rows)
     msgs = []
     for r in rows:
         role = r["role"]
@@ -3692,6 +3696,7 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
             "display_split": bool(r["display_split"]),
             "voice": bool(r.get("voice")) if role == "assistant" else False,
             "reaction": r.get("reaction") or "",
+            "memory_picks": picks_by_message.get(r["id"], []) if role == "user" else [],
             "usage": usage,
             "tools": tools_by_message.get(r["id"], []) if role == "assistant" else [],
             "images": images_by_message.get(r["id"], []),
@@ -4122,6 +4127,44 @@ def tool_call_finish(tool_call_id: str, result: str, is_error: bool) -> bool:
     with conn() as cx:
         cur = cx.execute("UPDATE tool_calls SET result=?, is_error=? WHERE id=?", (result, int(is_error), tool_call_id))
     return cur.rowcount > 0
+
+
+MEMORY_PICKS_MAX = 12
+
+
+def message_memory_picks(row: dict) -> list[str]:
+    try:
+        picks = json.loads(row.get("memory_picks") or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return [str(p) for p in picks if p] if isinstance(picks, list) else []
+
+
+def message_memory_picks_set(msg_id: str, card_ids: list[str]) -> None:
+    with conn() as cx:
+        cx.execute("UPDATE messages SET memory_picks=? WHERE id=?",
+                   (json.dumps(card_ids[:MEMORY_PICKS_MAX]), msg_id))
+
+
+def memory_picks_brief(chat_id: str, rows: list[dict]) -> dict[str, list[dict]]:
+    """消息下面那行「带了几张记忆」要的：每张的 id、正文、事件。卡后来删了就标出来。"""
+    wanted = {r["id"]: message_memory_picks(r) for r in rows if r.get("role") == "user"}
+    all_ids = [i for ids in wanted.values() for i in ids]
+    if not all_ids:
+        return {}
+    found = {card["id"]: card for card in memory_cards_by_id(chat_id, list(dict.fromkeys(all_ids)))}
+    brief = {}
+    for msg_id, ids in wanted.items():
+        if not ids:
+            continue
+        brief[msg_id] = [
+            {"id": i, "content": found[i]["content"], "thread": found[i].get("thread") or "",
+             "thread_role": found[i].get("thread_role") or "", "memory_type": found[i].get("memory_type") or "",
+             "missing": False} if i in found else
+            {"id": i, "content": "", "thread": "", "thread_role": "", "memory_type": "", "missing": True}
+            for i in ids
+        ]
+    return brief
 
 
 REACTION_MAX = 16
