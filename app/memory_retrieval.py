@@ -136,25 +136,31 @@ def _hint_hit(hints, normalized_query: str, query_terms: set[str]) -> bool:
     return False
 
 
-def _keyword_score(card: dict, query: str, query_terms: set[str]) -> float:
+def _keyword_parts(card: dict, query: str, query_terms: set[str]) -> dict:
+    """关键词这一路的分数，连同是怎么得来的：哪些词对上了、哪些话题对上了。"""
     content = str(card.get("content") or "").strip()
     if not content:
-        return 0.0
+        return {"score": 0.0, "shared": [], "topics": [], "type_hit": False}
     content_terms = _terms(content)
     shared = query_terms & content_terms
     score = sum(1.6 if len(term) >= 3 else 1.0 for term in shared)
     normalized_query, normalized_content = _normalized(query), _normalized(content)
     if len(normalized_content) >= 4 and normalized_content in normalized_query:
         score += 5.0
-    topic_hits = 0
+    topics = []
     for topic in card.get("topics") or []:
         if _hint_hit(TOPIC_HINTS.get(str(topic), ()), normalized_query, query_terms):
-            topic_hits += 1
-    score += min(2, topic_hits) * 2.4
+            topics.append(str(topic))
+    score += min(2, len(topics)) * 2.4
     memory_type = str(card.get("memory_type") or "")
-    if _hint_hit(TYPE_HINTS.get(memory_type, ()), normalized_query, query_terms):
+    type_hit = _hint_hit(TYPE_HINTS.get(memory_type, ()), normalized_query, query_terms)
+    if type_hit:
         score += 1.4
-    return round(score, 4)
+    return {"score": round(score, 4), "shared": sorted(shared), "topics": topics, "type_hit": type_hit}
+
+
+def _keyword_score(card: dict, query: str, query_terms: set[str]) -> float:
+    return _keyword_parts(card, query, query_terms)["score"]
 
 
 # ---- Importance / freshness boost (shared by both paths) ----
@@ -206,6 +212,22 @@ def select_memory_cards(
     Uses RRF to fuse vector and keyword rankings when both are available.
     Falls back to keyword-only when no query embedding is provided.
     """
+    ranked = rank_memory_cards(cards, context, now=now, query_embedding=query_embedding)
+    return ranked[: max(0, min(int(cap), int(limit)))]
+
+
+def rank_memory_cards(
+    cards: list[dict],
+    context: str,
+    *,
+    now: datetime | None = None,
+    query_embedding: list[float] | None = None,
+    explain: bool = False,
+) -> list[dict]:
+    """All matching cards, best first. ``explain`` adds ``recall_why`` to each:
+    the vector similarity, the shared terms, the topics that matched — what the
+    召回演练 page shows next to every card.
+    """
     now = now or datetime.now()
     query = str(context or "").strip()
     if not query:
@@ -213,6 +235,7 @@ def select_memory_cards(
     query_terms = _terms(query)
 
     valid_cards: dict[str, dict] = {}
+    why: dict[str, dict] = {}
     vec_scores: list[tuple[str, float]] = []
     kw_scores: list[tuple[str, float]] = []
 
@@ -224,14 +247,17 @@ def select_memory_cards(
             continue
         valid_cards[cid] = card
 
-        kw = _keyword_score(card, query, query_terms)
+        parts = _keyword_parts(card, query, query_terms)
+        kw = parts["score"]
         if kw > 0:
             kw_scores.append((cid, kw))
 
-        if query_embedding:
-            vs = _vector_score(card, query_embedding)
-            if vs > 0:
-                vec_scores.append((cid, vs))
+        vs = _vector_score(card, query_embedding) if query_embedding else 0.0
+        if vs > 0:
+            vec_scores.append((cid, vs))
+        if explain:
+            why[cid] = {"vector": vs, "keyword": kw, "shared": parts["shared"],
+                        "topics": parts["topics"], "type_hit": parts["type_hit"]}
 
     if not kw_scores and not vec_scores:
         return []
@@ -248,8 +274,13 @@ def select_memory_cards(
         if cid in kw_rank:
             rrf += 1.0 / (_RRF_K + kw_rank[cid])
         card = valid_cards[cid]
-        score = rrf + _meta_boost(card, now) * 0.001
-        ranked.append({**card, "selection_score": round(score, 6)})
+        boost = _meta_boost(card, now)
+        score = rrf + boost * 0.001
+        item = {**card, "selection_score": round(score, 6)}
+        if explain:
+            item["recall_why"] = {**why[cid], "boost": round(boost, 3),
+                                  "vector_rank": vec_rank.get(cid), "keyword_rank": kw_rank.get(cid)}
+        ranked.append(item)
 
     ranked.sort(
         key=lambda item: (
@@ -259,4 +290,4 @@ def select_memory_cards(
             str(item.get("id") or ""),
         )
     )
-    return ranked[: max(0, min(int(cap), int(limit)))]
+    return ranked

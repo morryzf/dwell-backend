@@ -3527,14 +3527,23 @@ def memory_card_usage_record(
             )
 
 
-def memory_card_last_injection(chat_id: str) -> dict | None:
+def memory_card_last_injection(chat_id: str, response_message_id: str = "") -> dict | None:
+    """最近一次带了哪些卡；给了 response_message_id 就是那一条回复带的。"""
     with conn() as cx:
-        latest = cx.execute(
-            """SELECT response_message_id,MAX(used_at) AS used_at
-               FROM memory_card_uses WHERE chat_id=? GROUP BY response_message_id
-               ORDER BY used_at DESC LIMIT 1""",
-            (chat_id,),
-        ).fetchone()
+        if response_message_id:
+            latest = cx.execute(
+                """SELECT response_message_id,MAX(used_at) AS used_at
+                   FROM memory_card_uses WHERE chat_id=? AND response_message_id=?
+                   GROUP BY response_message_id""",
+                (chat_id, response_message_id),
+            ).fetchone()
+        else:
+            latest = cx.execute(
+                """SELECT response_message_id,MAX(used_at) AS used_at
+                   FROM memory_card_uses WHERE chat_id=? GROUP BY response_message_id
+                   ORDER BY used_at DESC LIMIT 1""",
+                (chat_id,),
+            ).fetchone()
         if not latest:
             return None
         rows = cx.execute(
