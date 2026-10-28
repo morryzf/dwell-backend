@@ -453,7 +453,7 @@ struct ChatView: View {
                             .lineLimit(1)
                             .frame(maxWidth: 120, alignment: .leading)
                         Button {
-                            withAnimation(.easeOut(duration: 0.18)) { store.togglePick(card) }
+                            withAnimation(.easeOut(duration: 0.18)) { _ = store.togglePick(card) }
                         } label: {
                             Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(Theme.dim)
