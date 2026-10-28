@@ -545,6 +545,9 @@ body { margin: 0; background: var(--bg); color: var(--ink);
   font-size: 28px; font-weight: 400; line-height: 1; padding: 0 2px 4px 0; }
 .bar a.back:active { background: var(--code); }
 .bar b { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dlnote { margin: 12px 16px 0; padding: 10px 14px; border-radius: 12px; background: var(--code);
+  color: var(--ink); font-size: 13.5px; line-height: 1.55; }
+.dlnote[hidden] { display: none; }
 .bar a { flex: none; padding: 7px 14px; border-radius: 999px; background: var(--accent); color: #fff;
   font-size: 13px; font-weight: 600; text-decoration: none; }
 main { max-width: 720px; margin: 0 auto; padding: 18px 20px 60px; }
@@ -564,12 +567,17 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 h2.sheet { font-size: 1.05em; color: var(--dim); margin: 1.6em 0 .4em; }
 """
 
-# 返回键：从 dwell 里点进来的就退回去（聊天停在原来的地方）；别处开的就回 dwell 首页。
-# 页面不许跑别的脚本，只放行这一段（按内容的指纹认）。
+# 页面上唯一一段脚本，CSP 按它的指纹放行，别的一律不许跑：
+# · 返回键：从 dwell 里点进来的就退回去（聊天停在原来的地方）；别处开的就回 dwell 首页。
+# · 下载键：加到主屏幕当 App 用时 iPhone 下载不了（新窗口一片空白），点了只出一句提示，
+#   让她去 Safari 里开 dwell 再下；在浏览器里照常下载。
 _BACK_SCRIPT = (
     "document.getElementById('back').addEventListener('click',function(e){"
     "var r=document.referrer;"
     "if(r&&r.indexOf(location.origin+'/')===0){e.preventDefault();history.back();}});"
+    "document.getElementById('dl').addEventListener('click',function(e){"
+    "if(navigator.standalone===true||matchMedia('(display-mode: standalone)').matches){"
+    "e.preventDefault();document.getElementById('dlnote').hidden=false;}});"
 )
 PREVIEW_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'sha256-"
@@ -586,7 +594,8 @@ def _preview_page(title: str, body: str, download_url: str, download_label: str)
         '<div class="bar"><a id="back" class="back" href="../../../" aria-label="返回">‹</a>'
         # 下载在新窗口开：加到主屏幕当 App 用时，同一个窗口里下载会被系统的「文件」页顶掉，
         # 那页没有返回键；新窗口是 iPhone 自带的小浏览器，左上角有关闭，关了就回到这里
-        f'<b>{name}</b><a href="{html.escape(download_url)}" target="_blank" rel="noopener">{download_label}</a></div>'
+        f'<b>{name}</b><a id="dl" href="{html.escape(download_url)}" target="_blank" rel="noopener">{download_label}</a></div>'
+        '<div id="dlnote" class="dlnote" hidden>主屏幕上的 dwell 下载不了文件。在 Safari 里打开 dwell，再点下载。</div>'
         f"<main>{body}</main><script>{_BACK_SCRIPT}</script></body></html>"
     )
 
