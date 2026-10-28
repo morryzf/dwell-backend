@@ -33,7 +33,7 @@ from app.llm_client import prompt_cache_enabled, reply_language_ok, stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
 from app.web_tools import WebToolError, web_fetch, web_search
 from app.kelivo_import import KelivoImportError, import_conversation as kelivo_import_conversation, preview as kelivo_preview
-from app.memory_retrieval import select_memory_cards
+from app.memory_retrieval import rank_memory_cards, select_memory_cards
 from app.embedding_client import get_embedding, get_embeddings_batch, last_error as embedding_last_error
 from app.openrouter_usage import build_utc_cost_series, fetch_openrouter_snapshot, parse_usd_cny_rate
 
@@ -5325,6 +5325,102 @@ async def memory_cards_get(chat_id: str, include_archived: bool = False, limit: 
         "last_injection": db.memory_card_last_injection(chat_id),
         "selection_policy": {"maximum_cards": 5, "requires_relevance": True},
         "injected_into_chat": db.memory_card_injection_enabled(chat_id),
+    }
+
+
+RECALL_PICKED = 5
+RECALL_NEAR = 5
+
+
+def _recall_reasons(card: dict) -> list[str]:
+    """演练页每张卡底下那行小字：它为什么被找出来。"""
+    why = card.get("recall_why") or {}
+    reasons = []
+    vector = float(why.get("vector") or 0)
+    if vector >= 0.6:
+        reasons.append("意思很接近")
+    elif vector > 0:
+        reasons.append("意思有点接近")
+    shared = sorted(why.get("shared") or [], key=lambda t: (-len(t), t))
+    # 「项圈刻」「项圈」都对上时只留长的那个。
+    words = []
+    for term in shared:
+        if not any(term in kept for kept in words):
+            words.append(term)
+    if words:
+        reasons.append("都提到了" + "".join(f"「{w}」" for w in words[:3]))
+    topics = [MEMORY_CARD_TOPICS.get(t, t) for t in why.get("topics") or []]
+    if topics:
+        reasons.append("话题对上了：" + "、".join(topics))
+    if why.get("type_hit"):
+        reasons.append("像是在问" + MEMORY_CARD_TYPES.get(str(card.get("memory_type")), "这类卡"))
+    if card.get("importance") == "high":
+        reasons.append("重要卡，加了一点分")
+    return reasons
+
+
+def _recall_card(card: dict, top: float, rank: int | None = None, reasons: list[str] | None = None) -> dict:
+    """整张卡（演练页能直接拿去编辑、带进下一条），加上名次、相对强弱和理由。"""
+    score = float(card.get("selection_score") or 0)
+    item = {k: v for k, v in card.items() if k not in {"embedding", "recall_why", "selection_score"}}
+    return {
+        **item,
+        "rank": rank, "strength": round(score / top, 3) if top > 0 and score else 0,
+        "reasons": _recall_reasons(card) if reasons is None else reasons,
+    }
+
+
+@app.post("/api/chats/{chat_id}/memory-recall/rehearse", dependencies=authed)
+async def memory_recall_rehearse(chat_id: str, payload: dict = Body(default={})):
+    """召回演练：拿一句话照聊天时的办法找一遍卡，说出每张为什么被找出来。
+
+    只是查，不发给模型、不记进「最近一次带入」、不动任何卡。message_id 是某一次
+    回复：从那一轮出发，前文按那时候的算，还能对比那时真带了哪几张。
+    """
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    message_id = str(payload.get("message_id") or "")
+    then = db.memory_card_last_injection(chat_id, message_id) if message_id else \
+        db.memory_card_last_injection(chat_id)
+    anchor = db.message_get(then["response_message_id"]) if then else None
+    if message_id and (not anchor or anchor["chat_id"] != chat_id):
+        anchor = db.message_get(message_id)
+        if not anchor or anchor["chat_id"] != chat_id:
+            raise HTTPException(404, "找不到这条回复")
+    rows = db.message_list(chat_id, limit=12, before=int(anchor["rowid"]) if anchor else None)
+    rows = [r for r in rows if r.get("content") and r.get("role") in {"user", "assistant"}]
+    # 她那一轮说的话：没改过就是原话；改过就用改的，前文照旧。
+    said = []
+    while rows and rows[-1]["role"] == "user":
+        said.insert(0, rows.pop())
+    original = "\n".join(str(r["content"]) for r in said).strip()
+    text = str(payload.get("text") if payload.get("text") is not None else original).strip()[:2000]
+    if not text:
+        return {"ok": True, "text": "", "original": original, "query": "", "borrowed": False,
+                "vector": False, "picked": [], "mains": [], "near": [], "then": None,
+                "injection_enabled": db.memory_card_injection_enabled(chat_id)}
+    assistant_label = db.assistant_name(db.chat_assistant(chat_id))
+    query = _memory_card_query([*rows, {"role": "user", "content": text}], None, assistant_label)
+    # 太短的话（「那后来呢」）真聊天时会连上前两句一起找。
+    borrowed = len(re.sub(r"\s+", "", text)) < 6 and len(rows) > 0
+    embedding = await _embed_text(query)
+    pool = db.memory_card_embeddings(chat_id)
+    ranked = rank_memory_cards(pool, query, now=db.cn_now().replace(tzinfo=None),
+                               query_embedding=embedding, explain=True)
+    top = float(ranked[0]["selection_score"]) if ranked else 0
+    picked = ranked[:RECALL_PICKED]
+    mains = _with_thread_mains(picked, pool)[len(picked):]
+    return {
+        "ok": True, "text": text, "original": original, "query": query, "borrowed": borrowed,
+        "vector": bool(embedding),
+        "picked": [_recall_card(c, top, i) for i, c in enumerate(picked, 1)],
+        "mains": [_recall_card(c, top, None, ["同一件事的主卡，顺带进来的"]) for c in mains],
+        "near": [_recall_card(c, top, i) for i, c in enumerate(ranked[RECALL_PICKED:RECALL_PICKED + RECALL_NEAR],
+                                                                  RECALL_PICKED + 1)],
+        "then": {"at": then["used_at"], "message_id": then["response_message_id"],
+                 "items": [{"id": i["id"], "content": i.get("content") or ""} for i in then["items"]]}
+        if then else None,
+        "injection_enabled": db.memory_card_injection_enabled(chat_id),
     }
 
 

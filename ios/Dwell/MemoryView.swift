@@ -193,21 +193,27 @@ struct MemoryView: View {
 
     @ViewBuilder
     private var cardsPanel: some View {
-        if let injection = store.lastInjection {
-            DisclosureGroup {
-                VStack(spacing: 10) {
-                    ForEach(injection.items) { card in
-                        MemoryCardView(card: card, labels: store.labels, kind: .used, currentChatID: store.chatID)
-                    }
+        // 点进去是单独一页「召回演练」：从这一轮出发，看会带上哪几张、为什么，改一句话再找。
+        NavigationLink {
+            RecallRehearsalView(store: store)
+        } label: {
+            HStack(spacing: 6) {
+                if let injection = store.lastInjection {
+                    Text("最近一次带入 · \(injection.usedAt.formatted(date: .abbreviated, time: .shortened)) · \(injection.items.count) 条")
+                        .lineLimit(1)
+                        .foregroundStyle(Theme.dim)
                 }
-                .padding(.top, 8)
-            } label: {
-                Text("最近一次带入 · \(injection.usedAt.formatted(date: .abbreviated, time: .shortened)) · \(injection.items.count) 条")
-                    .font(.system(size: 13))
+                Spacer(minLength: 4)
+                Text("召回演练")
+                    .foregroundStyle(Theme.text)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.dim)
             }
-            .tint(Theme.dim)
+            .font(.system(size: 13))
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         if searchOpen { searchPanel }
         if let draft = adding {
             MemoryCardEditor(card: draft, title: "添加记忆卡", saveLabel: "添加", events: eventChoices) { card in
