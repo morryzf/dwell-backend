@@ -17,6 +17,7 @@ import httpx
 from . import db
 from .llm_client import _usage_dict, content_texts
 from .provider_secrets import SecretConfigurationError, decrypt_api_key
+from .reply_marks import strip_marks
 
 BRIDGE_PATH = "/v1/chat/stream"
 
@@ -260,7 +261,7 @@ def plan_turn(state: dict | None, model_id: str, system: str,
     said = state.get("reply")
     if not isinstance(said, str):
         return "", turns
-    said = _squash(said)
+    said = _squash(strip_marks(said))
 
     # 从后往前找锚点：越靠后越可能是它，重复的短句也就不容易认错。
     for end in range(len(turns), size - 1, -1):
@@ -269,12 +270,20 @@ def plan_turn(state: dict | None, model_id: str, system: str,
         fresh = turns[end:]
         # 它自己那条回复它本来就记着，别再抄回去。但只跳过真是它这段会话里说的：
         # 主动消息是心跳在另一段会话里写的，这段会话从没见过，跳过去它就读不到自己发过什么。
-        while fresh and fresh[0][0] == SPEAKER_ASSISTANT and _squash(fresh[0][1]) in said:
+        while fresh and fresh[0][0] == SPEAKER_ASSISTANT and _squash(_drop_quote_line(fresh[0][1])) in said:
             fresh = fresh[1:]
         if not fresh:
             return "", turns
         return sid, fresh
     return "", turns
+
+
+def _drop_quote_line(text: str) -> str:
+    """Dwell 给引用了别的话的那条，前面加了一行「（引用 … 的话：…）」；它自己说的时候没有这行。"""
+    text = str(text or "")
+    if text.startswith("（引用 "):
+        return text.split("\n", 1)[1] if "\n" in text else ""
+    return text
 
 
 def _squash(text: str) -> str:

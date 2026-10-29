@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .provider_secrets import SecretConfigurationError, decrypt_api_key
+from .reply_marks import strip_marks
 
 
 def _part_texts(value) -> list[str]:
@@ -681,7 +682,8 @@ def reply_language_ok(text: str, language: str) -> bool:
     """
     if language not in {"en", "zh"}:
         return True
-    body = _CODE_OR_LINK_RE.sub(" ", str(text or ""))
+    # 回复里的 [[react:…]] [[quote:…]] 记号会被摘掉，引用里的中文不算她这轮说的话。
+    body = _CODE_OR_LINK_RE.sub(" ", strip_marks(str(text or "")))
     han = len(_HAN_RE.findall(body)) + len(_KANA_HANGUL_RE.findall(body))
     latin = len(_LATIN_RE.findall(body))
     if not han and not latin:

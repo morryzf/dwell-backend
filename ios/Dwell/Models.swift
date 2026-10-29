@@ -69,6 +69,8 @@ struct Message: Identifiable, Equatable {
     var reaction: String
     /// 我发这条时亲手挑的记忆卡。那一轮他只看到这几张。
     var memoryPicks: [MemoryPick]
+    /// 这条引用了哪一条（原话副本），画在气泡上方。
+    var quote: MessageQuote?
 
     init(json: [String: Any]) {
         id = json["id"] as? String ?? UUID().uuidString
@@ -91,6 +93,7 @@ struct Message: Identifiable, Equatable {
         usage = MessageUsage(json: json["usage"] as? [String: Any] ?? [:])
         reaction = json["reaction"] as? String ?? ""
         memoryPicks = (json["memory_picks"] as? [[String: Any]] ?? []).map(MemoryPick.init(json:))
+        quote = (json["quote"] as? [String: Any]).flatMap(MessageQuote.init(json:))
     }
 
     init(id: String, kind: Kind, text: String, images: [String] = [], at: Date = Date()) {
@@ -108,6 +111,7 @@ struct Message: Identifiable, Equatable {
         self.usage = MessageUsage(json: [:])
         self.reaction = ""
         self.memoryPicks = []
+        self.quote = nil
     }
 
     var isLocal: Bool { id.hasPrefix("local-") }
@@ -125,6 +129,38 @@ struct Message: Identifiable, Equatable {
 
     /// 什么都没有的空占位（比如回复还没开始写的那条），不画。
     var isEmpty: Bool { bubbles.isEmpty && images.isEmpty }
+}
+
+/// 被引用的那条：id、谁说的、原话副本、什么时候，还有它的第一张图（还在的话）。
+struct MessageQuote: Equatable {
+    let messageID: String
+    let role: String
+    let content: String
+    let made: Date
+    let image: String
+
+    init?(json: [String: Any]) {
+        guard let id = json["message_id"] as? String, !id.isEmpty else { return nil }
+        messageID = id
+        role = json["role"] as? String ?? "user"
+        content = json["content"] as? String ?? ""
+        made = Date(timeIntervalSince1970: TimeInterval(json["made"] as? Int ?? 0))
+        image = json["image"] as? String ?? ""
+    }
+
+    init(message: Message) {
+        messageID = message.id
+        role = message.kind == .me ? "user" : "assistant"
+        content = message.text
+        made = message.at
+        image = message.images.first ?? ""
+    }
+
+    /// 引用块里那一行字：只发了图的写「[图片]」。
+    var preview: String {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty || text == "（发来了一张图片）" ? "[图片]" : text
+    }
 }
 
 /// 发消息时亲手挑的一张记忆卡，消息下面那行「带了几张记忆」点开看的就是这些。

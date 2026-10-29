@@ -26,7 +26,7 @@ import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
-from . import auth, db, file_make, file_text, focus_log, home_mcp, memory_mcp, provider_secrets, push_service, shop, sigillo, study, subscription_usage
+from . import auth, db, file_make, file_text, focus_log, home_mcp, memory_mcp, provider_secrets, push_service, reply_marks, shop, sigillo, study, subscription_usage
 from app.pet_assets import ensure_pet_assets
 from app.agent_sdk_client import MEMORY_CARD_KEY, PROMPT_TAIL_KEY, clear_state as clear_agent_session
 from app.llm_client import prompt_cache_enabled, reply_language_ok, stream_chat
@@ -1705,6 +1705,19 @@ def _heartbeat_daily_count(now: datetime, assistant: str = "cloudy") -> int:
     return _setting_int(_hb_key("wake_count_today", assistant), 0, 0, 999)
 
 
+REPLY_MARKS_GUIDE = (
+    "【回复里的小记号】下面两种记号可以直接写在回复里，系统会处理掉，Morry 看不到记号本身。\n"
+    "[[react:一个emoji]]：给 Morry 最新那条消息贴一个表情，像 iMessage 的回应。"
+    "主要在她发图、或者说了让你心动的话时用，不是每条都贴；一个表情就说够了的时候，"
+    "整条回复可以只写这一个记号、不说话。贴她前一条写 [[react:emoji|1]]，再前一条写 |2。"
+    "一条消息只留一个表情，再贴会换掉前一个。\n"
+    "[[quote:那条消息里连着的几个字]]：引用之前的一条消息（她的或你自己说过的），显示在你这条回复上方。"
+    "只在回应她某句具体的、又不是她刚说的那句话时用。冒号后面照抄那条消息里连续的五到十五个字，"
+    "系统会找到那一条；放在回复开头，一条回复最多引用一次。\n"
+    "她引用了哪一句，会写成「（引用 … 的话：…）」放在她那句话前面。"
+)
+
+
 def _chat_stable_message_parts(
     chat_id: str,
 ) -> tuple[bool, list[dict], list[dict], list[dict]]:
@@ -1724,6 +1737,8 @@ def _chat_stable_message_parts(
             "content": "【Morry校正过的回复节奏】Morry多次只调整了你的换行而没有改动措辞。"
                        "今后有多个独立想法时请用独立段落表达；不要用单个空格把完整句子串在一起。",
         }]
+    # 贴表情、引用不做成工具：写在回复里的记号，系统边说边处理（见 reply_marks）。
+    format_preference = format_preference + [{"role": "system", "content": REPLY_MARKS_GUIDE}]
     overview = _chat_overview(chat_id)
     memory_messages = []
     if overview.strip():
@@ -1743,9 +1758,37 @@ def _chat_stable_messages(chat_id: str) -> list[dict]:
     return instructions + format_preference + memory_messages
 
 
+QUOTE_CONTEXT_CHARS = 300
+
+
+def _quote_prefix(row: dict, assistant_name: str) -> str:
+    """这条引用了哪句：一行「（引用 Cloudy 10月20日 的话：……）」放在这条前面，每轮都一样。"""
+    quote = db.message_quote(row)
+    if not quote:
+        return ""
+    who = "Morry" if quote.get("role") == "user" else assistant_name
+    when = ""
+    if quote.get("made"):
+        day = datetime.fromtimestamp(int(quote["made"]), db.CN_TZ)
+        when = f" {day.month}月{day.day}日"
+    text = " ".join(str(quote.get("content") or "").split())
+    if len(text) > QUOTE_CONTEXT_CHARS:
+        text = text[:QUOTE_CONTEXT_CHARS] + "…"
+    return f"（引用 {who}{when} 的话：{text}）\n"
+
+
 def _chat_history_messages_from_rows(rows: list[dict]) -> list[dict]:
+    names: dict[str, str] = {}
+
+    def name(chat_id: str) -> str:
+        if chat_id not in names:
+            names[chat_id] = db.assistant_name(db.chat_assistant(chat_id)) if chat_id else "Cloudy"
+        return names[chat_id]
+
     return [
-        {"role": item["role"], "content": item["content"]}
+        {"role": item["role"],
+         "content": _quote_prefix(item, name(str(item.get("chat_id") or ""))) + item["content"]
+         if item.get("quote_json") else item["content"]}
         for item in rows
         if item.get("content") and item.get("role") in {"user", "assistant", "system"}
     ]
@@ -1915,9 +1958,6 @@ async def _chat_tools(chat_id: str, list_tools=None) -> tuple[list[dict], dict[s
         tools.extend(home_tools)
         for tool in home_tools:
             tool_map[tool["function"]["name"]] = "builtin:home"
-    tools.extend(REACT_TOOLS)
-    for tool in REACT_TOOLS:
-        tool_map[tool["function"]["name"]] = "builtin:react"
     tools.extend(FILE_TOOLS)
     for tool in FILE_TOOLS:
         tool_map[tool["function"]["name"]] = "builtin:file"
@@ -2321,11 +2361,23 @@ async def _heartbeat_once(force: bool = False, assistant: str = "cloudy") -> dic
                 db.setting_set(key("heartbeat_last_status"), "quiet")
                 return {"ok": True, "status": "quiet"}
 
+            # 主动消息里也可能写了记号：引用照样挂上，贴表情就不贴了（她没在说话）。
+            heartbeat_marks = reply_marks.MarkFilter()
+            text = (heartbeat_marks.feed(text) + heartbeat_marks.flush()).strip()
+            heartbeat_quote = next((value for kind, value in heartbeat_marks.take() if kind == "quote"), "")
+            if not text:
+                db.setting_set(key("heartbeat_last_status"), "quiet")
+                return {"ok": True, "status": "quiet"}
             text = text[:3000]
             if _heartbeat_is_repeat(chat_id, text):
                 db.setting_set(key("heartbeat_last_status"), "duplicate")
                 return {"ok": True, "status": "duplicate"}
             message = db.message_add(chat_id, "assistant", text, origin="heartbeat")
+            if heartbeat_quote:
+                found = db.message_find_by_words(chat_id, heartbeat_quote,
+                                                 before=int(db.message_get(message["id"])["rowid"]))
+                if found:
+                    db.message_quote_set(message["id"], found)
             _emit(chat_id, {
                 "type": "assistant",
                 "message": {
@@ -6287,6 +6339,19 @@ async def messages_version_restore(message_id: str, version_id: str):
     return result
 
 
+@app.get("/api/messages/{message_id}/context", dependencies=authed)
+async def message_context(message_id: str):
+    """点引用跳回原消息：那条离得太远、页面上没加载时，给它和前后几条。"""
+    message = db.message_get(message_id)
+    if not message:
+        raise HTTPException(404, "这条消息已经不在了")
+    rows = db.messages_around(message["chat_id"], int(message["rowid"]), int(message["rowid"]), MEMORY_SOURCE_PAD)
+    return {"ok": True, "messages": [{
+        "id": row["id"], "rowid": int(row["rowid"]), "role": row["role"], "content": row["content"],
+        "made": row["made"], "cited": row["id"] == message_id,
+    } for row in rows]}
+
+
 @app.put("/api/messages/{message_id}/reaction", dependencies=authed)
 async def message_reaction_put(message_id: str, payload: dict = Body(...)):
     """她给 Cloudy 的一条消息贴表情；空串是撤掉。她自己的消息上的表情是 Cloudy 贴的，她改不了。"""
@@ -6325,6 +6390,7 @@ async def messages_regenerate(message_id: str):
     db.message_delete_many([reply_id for reply_id in reply_ids if reply_id != anchor["id"]])
     db.message_update(anchor["id"], "")
     db.message_thinking_update(anchor["id"], "")
+    db.message_quote_set(anchor["id"], None)
     # 上一版贴在她那几条上的表情也收回，重说的那版自己决定贴不贴。
     for item in db.message_user_run(chat_id, before=int(anchor["rowid"])):
         if item.get("reaction"):
@@ -7224,9 +7290,14 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         抹的只是正文。思考面板留着——打回的理由就记在那儿，不然她只看到
         它忽然从头再说一遍，不知道发生了什么。
         """
-        nonlocal current_message_id, buf, split_pending
+        nonlocal current_message_id, buf, split_pending, quoted
         buf = []
         split_pending = ""
+        # 打回的那版引用过什么，也一起收回；重说的那版自己决定引不引。
+        marks.pending = ""
+        if quoted:
+            db.message_quote_set(msg_id, None)
+            quoted = False
         # 分条时前面那几条已经落库了，一起收回去，别留下半截旧版。
         for extra in reply_message_ids[1:]:
             db.message_delete(extra)
@@ -7234,6 +7305,30 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         current_message_id = msg_id
         db.message_update(msg_id, "")
         _emit(chat_id, {"type": "assistant_reset", "message_id": msg_id})
+
+    marks = reply_marks.MarkFilter()
+    reacted = False
+    quoted = False
+    # 记号里要引用的那条，只在这一轮回复之前的消息里找。
+    reply_rowid = int((db.message_get(msg_id) or {}).get("rowid") or 0) or None
+
+    def apply_marks():
+        """回复里的 [[react:…]] [[quote:…]]：边说边做掉。写错了、找不到就安静地丢掉。"""
+        nonlocal reacted, quoted
+        for kind, value in marks.take():
+            try:
+                if kind == "react":
+                    emoji, back = reply_marks.parse_react(value)
+                    react_tool(chat_id, {"emoji": emoji, "back": back})
+                    reacted = True
+                elif kind == "quote" and not quoted:
+                    found = db.message_find_by_words(chat_id, value, before=reply_rowid)
+                    if found:
+                        quote = db.message_quote_set(current_message_id, found)
+                        quoted = True
+                        _emit(chat_id, {"type": "quote", "message_id": current_message_id, "quote": quote})
+            except Exception:
+                continue
 
     def consume_stream_chunk(chunk: str, final: bool = False):
         nonlocal split_pending
@@ -7305,7 +7400,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 elif event["type"] == "text":
                     chunk = event["text"]
                     round_text.append(chunk)
-                    consume_stream_chunk(chunk)
+                    consume_stream_chunk(marks.feed(chunk))
+                    apply_marks()
                 elif event["type"] == "tool_calls":
                     calls.extend(event["calls"])
                 elif event["type"] == "reset":
@@ -7393,11 +7489,12 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
         else:
             raise RuntimeError("MCP 工具调用轮数超过上限")
-        consume_stream_chunk("", final=True)
+        consume_stream_chunk(marks.flush(), final=True)
+        apply_marks()
         full = "".join(buf).strip()
         if full:
             db.message_update(current_message_id, full)
-        elif len(reply_message_ids) == 1 and db.message_reacted_only(msg_id):
+        elif len(reply_message_ids) == 1 and (reacted or db.message_reacted_only(msg_id)):
             # 只贴了个表情、没说话：不留一个空气泡。
             db.message_delete(msg_id)
             _emit(chat_id, {"type": "assistant_removed", "message_id": msg_id})
@@ -7514,6 +7611,11 @@ async def send(request: Request):
             db.chat_reply_language_set(chat_id, payload["reply_language"])
 
     user_message = db.message_add(chat_id, "user", saved_text)
+    # 她引用的那条：只认这间聊天里的对话消息，存一份原话副本。
+    quote = None
+    quoted = db.message_get(str(payload.get("quote_message_id") or "")) if payload.get("quote_message_id") else None
+    if quoted and quoted["chat_id"] == chat_id and quoted["role"] in {"user", "assistant"}:
+        quote = db.message_quote_set(user_message["id"], quoted)
     # 她亲手挑的记忆卡：只认卡池里还在的，最多 12 张，按她挑的顺序。
     raw_picks = payload.get("memory_card_ids") or []
     picks = []
@@ -7543,6 +7645,7 @@ async def send(request: Request):
         "at": user_message["made"],
         "memory_picks": db.memory_picks_brief(chat_id, [db.message_get(user_message["id"])]).get(
             user_message["id"], []),
+        "quote": db.message_quote_view(db.message_get(user_message["id"])) if quote else None,
     })
 
     placeholder = db.message_add(chat_id, "assistant", "")

@@ -660,6 +660,9 @@ def init_db():
         # 她发这条时亲手挑的记忆卡（id 列表）：那一轮只给模型看这几张。
         if "memory_picks" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN memory_picks TEXT NOT NULL DEFAULT '[]'")
+        # 这条引用了哪一条：那条的 id、谁说的、什么时候，和原话副本（原消息以后改了删了也还在）。
+        if "quote_json" not in message_cols:
+            cx.execute("ALTER TABLE messages ADD COLUMN quote_json TEXT NOT NULL DEFAULT ''")
         usage_cols = {
             r["name"] for r in cx.execute("PRAGMA table_info(provider_usage_events)").fetchall()
         }
@@ -3901,6 +3904,7 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
             "voice": bool(r.get("voice")) if role == "assistant" else False,
             "reaction": r.get("reaction") or "",
             "memory_picks": picks_by_message.get(r["id"], []) if role == "user" else [],
+            "quote": message_quote_view(r),
             "usage": usage,
             "tools": tools_by_message.get(r["id"], []) if role == "assistant" else [],
             "images": images_by_message.get(r["id"], []),
@@ -4331,6 +4335,52 @@ def tool_call_finish(tool_call_id: str, result: str, is_error: bool) -> bool:
     with conn() as cx:
         cur = cx.execute("UPDATE tool_calls SET result=?, is_error=? WHERE id=?", (result, int(is_error), tool_call_id))
     return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------- 引用
+
+def message_quote(row: dict) -> dict | None:
+    try:
+        quote = json.loads(row.get("quote_json") or "null")
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return quote if isinstance(quote, dict) and quote.get("message_id") else None
+
+
+def message_quote_set(msg_id: str, quoted: dict | None) -> dict | None:
+    """把被引用的那条存成副本挂到这条上；quoted 是 None 就摘掉。"""
+    quote = None
+    if quoted:
+        quote = {"message_id": quoted["id"], "role": quoted["role"], "content": str(quoted.get("content") or ""),
+                 "made": int(quoted.get("made") or 0)}
+    with conn() as cx:
+        cx.execute("UPDATE messages SET quote_json=? WHERE id=?",
+                   (json.dumps(quote, ensure_ascii=False) if quote else "", msg_id))
+    return quote
+
+
+def message_quote_view(row: dict) -> dict | None:
+    """给界面的引用：副本加上被引用那条的第一张图（还在的话）。"""
+    quote = message_quote(row)
+    if not quote:
+        return None
+    images = message_attachments([quote["message_id"]]).get(quote["message_id"], [])
+    return {**quote, "image": images[0] if images else ""}
+
+
+def _squeeze(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "")).casefold()
+
+
+def message_find_by_words(chat_id: str, words: str, before: int | None = None, limit: int = 200) -> dict | None:
+    """Cloudy 写的 [[quote:那几个字]]：在他看得到的最近几百条里找含这几个字的那条，越近越先。"""
+    needle = _squeeze(words)
+    if len(needle) < 2:
+        return None
+    for row in reversed(message_list(chat_id, limit=limit, before=before)):
+        if row["role"] in {"user", "assistant"} and needle in _squeeze(row.get("content")):
+            return row
+    return None
 
 
 MEMORY_PICKS_MAX = 12
