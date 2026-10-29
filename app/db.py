@@ -2794,13 +2794,19 @@ def memory_card_get(chat_id: str, card_id: str) -> dict | None:
     return _memory_card_dict(row)
 
 
-def memory_card_draft_list(chat_id: str) -> list[dict]:
+def memory_card_draft_list(chat_id: str, with_lines: bool = False) -> list[dict]:
+    """with_lines：推荐的书签带上圈中的句子和前后几句，给界面画。"""
     with conn() as cx:
         rows = cx.execute(
             "SELECT * FROM memory_card_drafts WHERE chat_id=? ORDER BY made ASC, rowid ASC",
             (chat_id,),
         ).fetchall()
-    return [_memory_card_dict(row) for row in rows]
+    drafts = [_memory_card_dict(row) for row in rows]
+    if with_lines:
+        for draft in drafts:
+            if draft.get("action") == "bookmark":
+                draft["lines"] = bookmark_draft_lines(chat_id, draft["source_rowids"])
+    return drafts
 
 
 def memory_card_stage(chat_id: str, proposals: list[dict]) -> int:
@@ -3320,7 +3326,7 @@ def _bookmark_dict(row, assistant: str = "Cloudy") -> dict:
     }
 
 
-def bookmark_create(chat_id: str, message_ids: list[str], why: str = "") -> dict:
+def bookmark_create(chat_id: str, message_ids: list[str], why: str = "", label: str = "") -> dict:
     """把这间聊天里的几条消息圈成一个书签。消息按说的先后排，空的、不是对话的跳过。"""
     ids = list(dict.fromkeys(str(i) for i in message_ids if i))[:BOOKMARK_LINES_MAX]
     if not ids:
@@ -3337,8 +3343,10 @@ def bookmark_create(chat_id: str, message_ids: list[str], why: str = "") -> dict
     if not lines:
         raise ValueError("选的消息里没有能收的原话")
     now = int(time.time())
+    label = str(label or "").strip()[:BOOKMARK_LABEL_MAX]
     row = {"id": new_id(), "chat_id": chat_id, "lines_json": json.dumps(lines, ensure_ascii=False),
-           "label": "", "label_state": "pending", "why": str(why or "").strip()[:BOOKMARK_WHY_MAX],
+           "label": label, "label_state": "ready" if label else "pending",
+           "why": str(why or "").strip()[:BOOKMARK_WHY_MAX],
            "made": now, "updated": now}
     with conn() as cx:
         cx.execute(
@@ -3429,6 +3437,126 @@ def bookmark_delete(chat_id: str, bookmark_id: str) -> bool:
         cx.execute("DELETE FROM memory_card_uses WHERE card_id=?", (bookmark_id,))
     memory_pool_touch()
     return True
+
+
+# ---------------------------------------------------------------- 推荐的书签
+# 整理模型读原文，圈出值得记的几句，放进待确认（action='bookmark'）：content 是
+# 「这段在讲什么」，source_rowids 是圈中的那几条。她收下了才变成真的书签。
+
+BOOKMARK_DRAFT_PAD = 2
+_CHAT_LINE_SQL = ("SELECT rowid,id,role,content,made FROM messages WHERE chat_id=? "
+                  "AND role IN ('user','assistant') AND TRIM(content)<>'' ")
+
+
+def bookmark_draft_lines(chat_id: str, rowids: list[int], pad: int = BOOKMARK_DRAFT_PAD) -> list[dict]:
+    """圈中的那几句连同中间夹着的、前后各 pad 句，按说的先后排；picked 标出圈中的。"""
+    picked = sorted({int(r) for r in rowids or []})
+    if not picked:
+        return []
+    with conn() as cx:
+        before = cx.execute(_CHAT_LINE_SQL + "AND rowid<? ORDER BY rowid DESC LIMIT ?",
+                            (chat_id, picked[0], pad)).fetchall()
+        middle = cx.execute(_CHAT_LINE_SQL + "AND rowid BETWEEN ? AND ? ORDER BY rowid ASC",
+                            (chat_id, picked[0], picked[-1])).fetchall()
+        after = cx.execute(_CHAT_LINE_SQL + "AND rowid>? ORDER BY rowid ASC LIMIT ?",
+                           (chat_id, picked[-1], pad)).fetchall()
+    chosen = set(picked)
+    return [{"rowid": int(r["rowid"]), "message_id": r["id"], "role": r["role"],
+             "content": str(r["content"]), "made": int(r["made"] or 0), "picked": int(r["rowid"]) in chosen}
+            for r in [*reversed(before), *middle, *after]]
+
+
+def _chat_rowids(chat_id: str, rowids) -> list[int]:
+    """只留这间聊天里还在、能收进书签的那几条。"""
+    wanted = sorted({int(r) for r in rowids or [] if str(r).strip().lstrip("-").isdigit()})
+    if not wanted:
+        return []
+    with conn() as cx:
+        rows = cx.execute(
+            _CHAT_LINE_SQL + f"AND rowid IN ({','.join('?' for _ in wanted)})", [chat_id, *wanted]
+        ).fetchall()
+    return sorted(int(r["rowid"]) for r in rows)
+
+
+def bookmarked_rowids(chat_id: str) -> set[int]:
+    """已经收进书签、或者正推荐着的那些句子。"""
+    out: set[int] = set()
+    for item in bookmark_list(chat_id):
+        out.update(int(line["rowid"]) for line in item["lines"] if line.get("rowid"))
+    for draft in memory_card_draft_list(chat_id):
+        if draft.get("action") == "bookmark":
+            out.update(draft["source_rowids"])
+    return out
+
+
+def bookmark_stage(chat_id: str, segment_id: str | None, proposals: list[dict]) -> int:
+    """存推荐的书签。圈的句子大半已经收过或推荐过了，就不再推荐。"""
+    taken = bookmarked_rowids(chat_id)
+    now = int(time.time())
+    inserted = 0
+    with conn() as cx:
+        for proposal in proposals[:20]:
+            rowids = _chat_rowids(chat_id, proposal.get("rowids"))[:BOOKMARK_LINES_MAX]
+            label = str(proposal.get("label") or "").strip()[:BOOKMARK_LABEL_MAX]
+            if not rowids or not label:
+                continue
+            fresh = [r for r in rowids if r not in taken]
+            if len(fresh) * 2 < len(rowids):
+                continue
+            taken.update(rowids)
+            _insert_draft(cx, {
+                "id": new_id(), "chat_id": chat_id, "action": "bookmark", "target_card_id": None,
+                "content": label, "memory_type": "bookmark", "topics_json": "[]",
+                "importance": "normal", "retention": "long_term", "valid_until": None,
+                "surface_scope": "chat_only", "source_segment_id": segment_id,
+                "source_start_rowid": rowids[0], "source_end_rowid": rowids[-1],
+                "source_rowids_json": json.dumps(rowids), "made": now,
+            })
+            inserted += 1
+    return inserted
+
+
+def bookmark_draft_set(chat_id: str, draft_id: str, rowids=None, label: str | None = None) -> dict:
+    """调整一条推荐：改圈中的句子、改概括。不收下。"""
+    draft = next((d for d in memory_card_draft_list(chat_id)
+                  if d["id"] == draft_id and d.get("action") == "bookmark"), None)
+    if not draft:
+        raise LookupError("没有找到这条推荐的书签")
+    fields: dict = {}
+    if rowids is not None:
+        clean = _chat_rowids(chat_id, rowids)[:BOOKMARK_LINES_MAX]
+        if not clean:
+            raise ValueError("至少要圈一句")
+        fields.update(source_rowids_json=json.dumps(clean), source_start_rowid=clean[0],
+                      source_end_rowid=clean[-1])
+    if label is not None:
+        label = str(label).strip()[:BOOKMARK_LABEL_MAX]
+        if not label:
+            raise ValueError("概括不能为空")
+        fields["content"] = label
+    if fields:
+        with conn() as cx:
+            cx.execute(
+                f"UPDATE memory_card_drafts SET {', '.join(f'{key}=?' for key in fields)} WHERE id=? AND chat_id=?",
+                [*fields.values(), draft_id, chat_id],
+            )
+    return next(d for d in memory_card_draft_list(chat_id) if d["id"] == draft_id)
+
+
+def bookmark_draft_accept(chat_id: str, draft_id: str, rowids=None, label: str | None = None) -> dict:
+    """收下一条推荐：照圈中的句子建一个书签，推荐从待确认里拿掉。"""
+    draft = bookmark_draft_set(chat_id, draft_id, rowids, label)
+    clean = _chat_rowids(chat_id, draft["source_rowids"])
+    if not clean:
+        raise ValueError("圈中的句子都不在了")
+    with conn() as cx:
+        ids = [r["id"] for r in cx.execute(
+            f"SELECT id FROM messages WHERE chat_id=? AND rowid IN ({','.join('?' for _ in clean)})",
+            [chat_id, *clean]).fetchall()]
+    item = bookmark_create(chat_id, ids, label=draft["content"])
+    with conn() as cx:
+        cx.execute("DELETE FROM memory_card_drafts WHERE id=? AND chat_id=?", (draft_id, chat_id))
+    return item
 
 
 def memory_card_embeddings(chat_id: str) -> list[dict]:

@@ -146,6 +146,8 @@ struct MemoryCard: Identifiable, Equatable {
     }
 
     var isBookmark: Bool { kind == "bookmark" }
+    /// 整理模型推荐的书签（待确认里）：content 是「这段在讲什么」，lines 是圈中的句子和前后文。
+    var isBookmarkSuggestion: Bool { action == "bookmark" }
 
     var isHidden: Bool { status == "hidden" }
     var isMain: Bool { !thread.isEmpty && threadRole == "main" }
@@ -309,15 +311,20 @@ struct MemoryInjection {
 /// 书签里的一句原话：谁说的、什么时候、说了什么，还记着是哪条消息。
 struct BookmarkLine: Identifiable, Equatable {
     let messageID: String
+    let rowid: Int
     let role: String
     let content: String
     let made: Date
+    /// 推荐的书签：这一句圈中了没有（没圈中的是前后文）。
+    let picked: Bool
     var id: String { messageID }
 
     init(json: [String: Any]) {
         messageID = json["message_id"] as? String ?? UUID().uuidString
+        rowid = json["rowid"] as? Int ?? 0
         role = json["role"] as? String ?? "user"
         content = json["content"] as? String ?? ""
         made = Date(timeIntervalSince1970: TimeInterval(json["made"] as? Int ?? 0))
+        picked = json["picked"] as? Bool ?? true
     }
 }

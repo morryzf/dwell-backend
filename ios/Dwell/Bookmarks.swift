@@ -269,3 +269,150 @@ struct BookmarkComposeSheet: View {
         }
     }
 }
+
+/// 待确认里一条推荐的书签：整理模型圈中的几句原话，连同前后几句。
+/// 点任意一句把它圈进来或去掉（圈到边上，前后文会跟着往外多带两句）；概括可以改；收下或忽略。
+struct BookmarkSuggestionView: View {
+    let card: MemoryCard
+    let assistantName: String
+    let onLines: ([Int]) async -> Void
+    let onLabel: (String) async -> Bool
+    let onKeep: ([Int], String) -> Void
+    let onIgnore: () -> Void
+    @State private var picked: Set<Int>
+    @State private var editingLabel = false
+    @State private var label: String
+
+    init(card: MemoryCard, assistantName: String,
+         onLines: @escaping ([Int]) async -> Void,
+         onLabel: @escaping (String) async -> Bool,
+         onKeep: @escaping ([Int], String) -> Void,
+         onIgnore: @escaping () -> Void) {
+        self.card = card
+        self.assistantName = assistantName
+        self.onLines = onLines
+        self.onLabel = onLabel
+        self.onKeep = onKeep
+        self.onIgnore = onIgnore
+        _picked = State(initialValue: Set(card.sourceRowids))
+        _label = State(initialValue: card.content)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "bookmark")
+                Text("推荐书签")
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(Theme.accent)
+
+            if editingLabel {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("这段在讲什么", text: $label, axis: .vertical)
+                        .lineLimit(1...3)
+                        .font(.system(size: 14.5))
+                        .foregroundStyle(Theme.text)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(MemoryStyle.field))
+                    HStack(spacing: 8) {
+                        Button("保存") {
+                            Task { if await onLabel(label) { editingLabel = false } }
+                        }
+                        .buttonStyle(MemoryButtonStyle(kind: .primary))
+                        .disabled(label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("取消") {
+                            label = card.content
+                            editingLabel = false
+                        }
+                        .buttonStyle(MemoryButtonStyle(kind: .quiet))
+                    }
+                }
+            } else {
+                Button {
+                    editingLabel = true
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(card.content)
+                            .font(.system(size: 14.5, weight: .medium))
+                            .foregroundStyle(Theme.text)
+                            .multilineTextAlignment(.leading)
+                        Image(systemName: "pencil")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.dim)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("改这一句概括")
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(card.lines) { line in
+                    lineRow(line)
+                }
+            }
+
+            Text("点一句把它圈进来或去掉")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.dim)
+
+            HStack(spacing: 8) {
+                Button("收下") { onKeep(picked.sorted(), card.content) }
+                    .buttonStyle(MemoryButtonStyle(kind: .primary))
+                Button("忽略", action: onIgnore)
+                    .buttonStyle(MemoryButtonStyle(kind: .quiet))
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(MemoryStyle.card))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(MemoryStyle.border, lineWidth: 1))
+        // 后端换上了新的一条（前后文跟着圈的位置变了）：按它的为准。
+        .onChange(of: card.sourceRowids) { _, rowids in picked = Set(rowids) }
+        .onChange(of: card.content) { _, text in if !editingLabel { label = text } }
+    }
+
+    private func lineRow(_ line: BookmarkLine) -> some View {
+        let on = picked.contains(line.rowid)
+        return Button {
+            toggle(line)
+        } label: {
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15))
+                    .foregroundStyle(on ? Theme.accent : Theme.dim.opacity(0.6))
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(line.role == "user" ? "Morry" : assistantName) · \(line.made.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.dim)
+                    Text(line.content)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(on ? 8 : 2)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+            }
+            .opacity(on ? 1 : 0.5)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func toggle(_ line: BookmarkLine) {
+        var next = picked
+        if next.contains(line.rowid) {
+            // 最后一句不能去掉；不要这条就点忽略。
+            guard next.count > 1 else { return }
+            next.remove(line.rowid)
+        } else {
+            next.insert(line.rowid)
+        }
+        withAnimation(.easeOut(duration: 0.18)) { picked = next }
+        Task { await onLines(next.sorted()) }
+    }
+}

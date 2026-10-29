@@ -476,7 +476,7 @@ struct MemoryView: View {
         } label: {
             HStack(spacing: 8) {
                 if store.cardState.isBusy { ProgressView().tint(.white).controlSize(.small) }
-                Text(store.cardState.isBusy ? "正在整理…" : "生成未处理分段的记忆卡草稿")
+                Text(store.cardState.isBusy ? "正在整理…" : "整理还没处理过的聊天")
             }
             .frame(maxWidth: .infinity)
         }
@@ -497,12 +497,26 @@ struct MemoryView: View {
                     .buttonStyle(MemoryButtonStyle(kind: .dangerQuiet, large: true))
             }
         } else if !store.cardState.isBusy {
-            MemoryEmpty(title: "没有待确认的记忆", text: "每累计 50 条旧消息会自动生成一批；也可以点上面的按钮现在就整理。")
+            MemoryEmpty(title: "没有待确认的记忆", text: "每累计 50 条旧消息会自动挑一批推荐的书签；也可以点上面的按钮现在就整理。")
         }
 
         LazyVStack(spacing: 11) {
             ForEach(store.drafts) { draft in
-                if editingDraft?.id == draft.id, let editingDraft {
+                if draft.isBookmarkSuggestion {
+                    BookmarkSuggestionView(card: draft, assistantName: chat.assistant?.name ?? "Cloudy") { rowids in
+                        _ = await store.adjustSuggestion(draft, rowids: rowids)
+                    } onLabel: { label in
+                        await store.adjustSuggestion(draft, label: label)
+                    } onKeep: { rowids, label in
+                        leaving[draft.id] = .leading
+                        Task { _ = await store.acceptSuggestion(draft, rowids: rowids, label: label) }
+                    } onIgnore: {
+                        leaving[draft.id] = .trailing
+                        Task { await store.discard(draft) }
+                    }
+                    .transition(.asymmetric(insertion: .opacity,
+                                            removal: .move(edge: leaving[draft.id] ?? .trailing).combined(with: .opacity)))
+                } else if editingDraft?.id == draft.id, let editingDraft {
                     MemoryCardEditor(card: editingDraft, title: "先修改再采用", saveLabel: "采用", events: eventChoices) { edited in
                         if await store.accept(draft, edited: edited) { self.editingDraft = nil }
                     } onCancel: { self.editingDraft = nil }
