@@ -119,7 +119,7 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertNotIn("chat_memory_stage", automatic)
 
     def test_memory_card_button_describes_its_actual_job(self):
-        self.assertIn("生成未处理分段的记忆卡草稿", self.ui_source)
+        self.assertIn("整理还没处理过的聊天", self.ui_source)
         self.assertNotIn("整理新的分段", self.ui_source)
 
     def test_system_logs_do_not_read_request_content(self):

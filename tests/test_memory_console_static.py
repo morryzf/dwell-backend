@@ -71,8 +71,15 @@ class MemoryConsoleStaticTest(unittest.TestCase):
         )
 
     def test_manual_generation_only_checks_new_segments(self):
-        self.assertIn("生成未处理分段的记忆卡草稿", self.html)
+        self.assertIn("整理还没处理过的聊天", self.html)
+        self.assertNotIn("生成未处理分段的记忆卡草稿", self.html)
         self.assertIn("尚未处理的新分段", self.html)
+
+    def test_review_renders_recommended_bookmark_drafts(self):
+        self.assertIn("item.action==='bookmark'?memoryBookmarkDraftView(item)", self.html)
+        self.assertIn("推荐书签", self.html)
+        self.assertIn("点一句把它圈进来或去掉", self.html)
+        self.assertIn("收进书签了", self.html)
 
 
 if __name__ == "__main__":
