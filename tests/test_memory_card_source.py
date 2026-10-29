@@ -283,7 +283,8 @@ class MemoryThreadTest(unittest.TestCase):
     def test_drafting_keeps_the_thread_and_the_prompt_asks_for_it(self):
         sent = self._stage([{**self.CARD, "content": "在追音音这件事上，我让她别越界。", "thread": "追音音"}])
         self.assertIn("thread", sent["system"])
-        self.assertIn("主卡·追音音", sent["user"])
+        # 这段原文讲的是游泳和生日，跟音音无关：以前只靠「Morry：」这个说话人标签对上，现在不算了。
+        self.assertNotIn("主卡·追音音", sent["user"])
         self.assertIn("追音音（已有主卡）", sent["user"])
         draft = db.memory_card_draft_list(self.chat)[0]
         self.assertEqual(draft["thread"], "追音音")

@@ -5364,12 +5364,33 @@ def _recall_reasons(card: dict) -> list[str]:
 def _recall_card(card: dict, top: float, rank: int | None = None, reasons: list[str] | None = None) -> dict:
     """整张卡（演练页能直接拿去编辑、带进下一条），加上名次、相对强弱和理由。"""
     score = float(card.get("selection_score") or 0)
+    why = card.get("recall_why") or {}
     item = {k: v for k, v in card.items() if k not in {"embedding", "recall_why", "selection_score"}}
     return {
         **item,
         "rank": rank, "strength": round(score / top, 3) if top > 0 and score else 0,
         "reasons": _recall_reasons(card) if reasons is None else reasons,
+        # 两路各排第几：没进那一路的是 null。
+        "vector_rank": why.get("vector_rank"), "keyword_rank": why.get("keyword_rank"),
     }
+
+
+def _recall_focus(card_id: str, ranked: list[dict], pool: list[dict], top: float) -> dict | None:
+    """「这张为什么没进来」：她挑的那张卡在两路各排第几，差在哪里。"""
+    card = next((c for c in pool if c.get("id") == card_id), None)
+    if not card:
+        return {"id": card_id, "verdict": "missing", "note": "这张卡不在卡池里：归档了，或者是别的窗口的卡、互通没开。"}
+    if str(card.get("status") or "active") != "active":
+        return {**_recall_card(card, top), "verdict": "hidden", "note": "这张卡暂时隐藏了，召回时不会找它。"}
+    index = next((i for i, c in enumerate(ranked) if c.get("id") == card_id), None)
+    if index is None:
+        return {**_recall_card(card, top), "verdict": "unmatched",
+                "note": "两路都没对上：意思不够近，字面上也一个少见的词都没对上。也可能已经过期了。"}
+    found = ranked[index]
+    verdict = "picked" if index < RECALL_PICKED else "near" if index < RECALL_PICKED + RECALL_NEAR else "out"
+    notes = {"picked": "会带上。", "near": "差一点：在第 6 到第 10 名之间。",
+             "out": f"排第 {index + 1} 名，进不了前 {RECALL_PICKED}。"}
+    return {**_recall_card(found, top, index + 1), "verdict": verdict, "note": notes[verdict]}
 
 
 @app.post("/api/chats/{chat_id}/memory-recall/rehearse", dependencies=authed)
@@ -5412,7 +5433,9 @@ async def memory_recall_rehearse(chat_id: str, payload: dict = Body(default={}))
     top = float(ranked[0]["selection_score"]) if ranked else 0
     picked = ranked[:RECALL_PICKED]
     mains = _with_thread_mains(picked, pool)[len(picked):]
+    focus_id = str(payload.get("focus_card_id") or "")
     return {
+        "focus": _recall_focus(focus_id, ranked, pool, top) if focus_id else None,
         "ok": True, "text": text, "original": original, "query": query, "borrowed": borrowed,
         "vector": bool(embedding),
         "picked": [_recall_card(c, top, i) for i, c in enumerate(picked, 1)],
