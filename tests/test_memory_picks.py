@@ -128,3 +128,16 @@ class MemoryPickTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BookmarkPickTest(MemoryPickTest):
+    """手动挑的也可以是书签：那一轮递原话，消息下面那行写书签的概括。"""
+
+    def test_a_bookmark_can_ride_along(self):
+        said = db.message_add(self.chat, "user", "布丁今天早上六点把我叫醒了")
+        mark = db.bookmark_create(self.chat, [said["id"]])
+        db.bookmark_set_label(mark["id"], "布丁当闹钟")
+        user = self._send("你还记得吗", [mark["id"]])
+        self.assertIn("布丁今天早上六点把我叫醒了", self._cards_text())
+        mine = next(m for m in db.message_ui_list(self.chat)["msgs"] if m["id"] == user["id"])
+        self.assertEqual((mine["memory_picks"][0]["content"], mine["memory_picks"][0]["kind"]), ("布丁当闹钟", "bookmark"))

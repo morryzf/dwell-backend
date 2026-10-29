@@ -15,6 +15,10 @@ struct MemoryPickSheet: View {
 
     /// 胶囊上那几个字：有事件名就写事件，没有就取正文开头。
     static func shortLabel(_ card: MemoryCard) -> String {
+        if card.isBookmark {
+            let text = card.label.isEmpty ? (card.lines.first?.content ?? "") : card.label
+            return text.count > 12 ? String(text.prefix(12)) + "…" : text
+        }
         if !card.thread.isEmpty { return (card.isMain ? "主卡 · " : "") + card.thread }
         let text = card.content.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.count > 10 ? String(text.prefix(10)) + "…" : text
@@ -77,8 +81,6 @@ struct MemoryPickSheet: View {
         .task {
             // 只挑还在用的卡：归档的不列。
             memory.filter = "all"
-            // 随消息带的只认记忆卡，书签先不列。
-            memory.kind = "cards"
             await memory.loadCards(reset: true)
         }
         .onChange(of: memory.query) { _, _ in
@@ -146,12 +148,21 @@ struct MemoryPickSheet: View {
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(card.content)
+                    // 书签：上面概括，下面原话；卡片照旧是正文。
+                    Text(card.isBookmark ? BookmarkCardView.title(card) : card.content)
                         .font(.system(size: 14.5))
                         .foregroundStyle(Theme.text)
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
-                    if !card.thread.isEmpty {
+                    if card.isBookmark {
+                        Text(card.lines.map(\.content).joined(separator: " / "))
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Theme.dim)
+                            .lineLimit(2)
+                        Text("书签")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.accent)
+                    } else if !card.thread.isEmpty {
                         Text((card.isMain ? "主卡 · " : "副卡 · ") + card.thread)
                             .font(.system(size: 11.5))
                             .foregroundStyle(Theme.dim)
