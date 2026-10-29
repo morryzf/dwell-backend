@@ -288,11 +288,14 @@ struct CalendarPage: View {
     }
 
     private func load() async {
+        // 先摆上次存下的，服务器那份回来再换上。
+        let remembered = API.shared.remembered("api/cal")
+        if let remembered { apply(remembered) }
         do {
-            apply(try await API.shared.request("GET", "api/cal"))
+            apply(try await API.shared.request("GET", "api/cal", remember: true))
             error = ""
         } catch {
-            self.error = "日历没拿到，再开一次试试"
+            if remembered == nil { self.error = "日历没拿到，再开一次试试" }
         }
     }
 

@@ -125,6 +125,11 @@ struct ChatView: View {
         } message: {
             Text("删了就找不回来了。")
         }
+        .onChange(of: store.returnedDraft) { _, text in
+            guard let text else { return }
+            if draft.isEmpty { draft = text }
+            store.returnedDraft = nil
+        }
         .onChange(of: pickedItems) { _, items in
             Task { await takePicked(items) }
         }
@@ -352,6 +357,16 @@ struct ChatView: View {
     /// 网页的 composer：一张浮在方格纸上的圆角卡，上面是输入框，下面一排圆按钮和粉色发送键。
     private var inputBar: some View {
         VStack(spacing: 6) {
+            if store.offline && store.status.isEmpty {
+                Text("没连上服务器，现在看到的是上次的内容")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.chipText)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Theme.chip))
+                    .overlay(Capsule().stroke(Theme.chipBorder, lineWidth: 1))
+                    .transition(.opacity)
+            }
             if !store.status.isEmpty {
                 Text(store.status)
                     .font(.system(size: 13))

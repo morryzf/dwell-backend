@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// 跟 dwell 后端说话的那一层。登录用的是网页同一套：POST /api/login 拿签名 cookie，
@@ -39,10 +40,12 @@ final class API {
 
     // MARK: - 底层
 
+    /// remember：GET 回来的原样存一份在手机上，下次打开先拿它摆出来（见 ResponseCache）。
     func request(_ method: String, _ path: String,
                          query: [String: String] = [:],
                          body: [String: Any]? = nil,
-                         timeout: TimeInterval? = nil) async throws -> [String: Any] {
+                         timeout: TimeInterval? = nil,
+                         remember: Bool = false) async throws -> [String: Any] {
         guard let base = baseURL,
               var components = URLComponents(url: base.appendingPathComponent(path),
                                              resolvingAgainstBaseURL: false) else {
@@ -66,7 +69,13 @@ final class API {
             let detail = json["detail"] as? String
             throw APIError(status: status, message: detail ?? "服务器返回了 \(status)")
         }
+        if remember && method == "GET" { ResponseCache.save(data, path: path, query: query) }
         return json
+    }
+
+    /// 上次存下的那份；没存过是 nil。
+    func remembered(_ path: String, query: [String: String] = [:]) -> [String: Any]? {
+        ResponseCache.load(path: path, query: query)
     }
 
     // MARK: - 登录
@@ -77,20 +86,32 @@ final class API {
 
     func logout() async {
         _ = try? await request("POST", "api/logout")
+        ResponseCache.clear()
         if let base = baseURL, let cookies = HTTPCookieStorage.shared.cookies(for: base) {
             cookies.forEach(HTTPCookieStorage.shared.deleteCookie)
         }
     }
 
     func isAuthed() async -> Bool {
-        let json = try? await request("GET", "api/me")
-        return json?["authed"] as? Bool ?? false
+        await authState() ?? false
+    }
+
+    /// 登着没有：true / false；连不上服务器是 nil（这时候不该把人赶回登录页）。
+    func authState() async -> Bool? {
+        do {
+            let json = try await request("GET", "api/me")
+            return json["authed"] as? Bool ?? false
+        } catch let error as APIError {
+            return error.isUnauthorized ? false : nil
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - 助手和聊天
 
     func assistant() async throws -> AssistantInfo {
-        AssistantInfo(json: try await request("GET", "api/assistant"))
+        AssistantInfo(json: try await request("GET", "api/assistant", remember: true))
     }
 
     func switchAssistant(_ id: String) async throws -> AssistantInfo {
@@ -99,8 +120,16 @@ final class API {
 
     /// scope：live（Recents）/ box（收纳起来的）
     func chats(scope: String = "live") async throws -> [ChatSummary] {
-        let json = try await request("GET", "api/chats", query: ["scope": scope])
-        return (json["items"] as? [[String: Any]] ?? []).map(ChatSummary.init(json:))
+        let json = try await request("GET", "api/chats", query: ["scope": scope], remember: true)
+        return Self.chatList(json)
+    }
+
+    func rememberedChats(scope: String = "live") -> [ChatSummary]? {
+        remembered("api/chats", query: ["scope": scope]).map(Self.chatList)
+    }
+
+    private static func chatList(_ json: [String: Any]) -> [ChatSummary] {
+        (json["items"] as? [[String: Any]] ?? []).map(ChatSummary.init(json:))
     }
 
     func switchChat(_ id: String) async throws {
@@ -129,9 +158,17 @@ final class API {
     func messages(chatID: String, limit: Int = 200, before: Int? = nil) async throws -> (msgs: [Message], more: Bool) {
         var query = ["chat_id": chatID, "limit": String(limit)]
         if let before { query["before"] = String(before) }
-        let json = try await request("GET", "api/messages", query: query)
-        let msgs = (json["msgs"] as? [[String: Any]] ?? []).map(Message.init(json:))
-        return (msgs, json["more"] as? Bool ?? false)
+        // 只存每间聊天最近的那一页（连着里面的照片），往上翻的不存。
+        let json = try await request("GET", "api/messages", query: query, remember: before == nil)
+        return Self.messagePage(json)
+    }
+
+    func rememberedMessages(chatID: String, limit: Int = 200) -> (msgs: [Message], more: Bool)? {
+        remembered("api/messages", query: ["chat_id": chatID, "limit": String(limit)]).map(Self.messagePage)
+    }
+
+    private static func messagePage(_ json: [String: Any]) -> (msgs: [Message], more: Bool) {
+        ((json["msgs"] as? [[String: Any]] ?? []).map(Message.init(json:)), json["more"] as? Bool ?? false)
     }
 
     func send(text: String, chatID: String, images: [PendingImage] = [], files: [PendingFile] = [],
@@ -266,5 +303,42 @@ final class API {
             "time_zone": TimeZone.current.identifier,
             "offset_minutes": TimeZone.current.secondsFromGMT(for: now) / 60,
         ]
+    }
+}
+
+/// 存在手机上的那一份：GET 回来的原样 JSON，一个请求一个文件。打开页面先拿它摆出来，
+/// 再去服务器问新的，有新的就换上。放在 Caches 里，系统空间紧时可能清掉，清了也就是下次慢一点；
+/// 只在 app 自己的空间里，锁屏时系统加密；退出登录时全删。
+enum ResponseCache {
+    private static let folder: URL? = {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let url = caches.appendingPathComponent("dwell-responses", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }()
+
+    private static func file(path: String, query: [String: String]) -> URL? {
+        let key = path + "?" + query.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
+        let name = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        return folder?.appendingPathComponent(name + ".json")
+    }
+
+    static func save(_ data: Data, path: String, query: [String: String]) {
+        guard let url = file(path: path, query: query) else { return }
+        // 聊天那一页带着照片，可能有几 MB：放到后台写，不卡界面。
+        Task.detached(priority: .utility) {
+            try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
+    }
+
+    static func load(path: String, query: [String: String]) -> [String: Any]? {
+        guard let url = file(path: path, query: query), let data = try? Data(contentsOf: url) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    static func clear() {
+        guard let folder else { return }
+        try? FileManager.default.removeItem(at: folder)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
 }

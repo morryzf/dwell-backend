@@ -325,7 +325,9 @@ struct Sidebar: View {
     private func load() async {
         loading = true
         defer { loading = false }
-        chats = (try? await API.shared.chats(scope: scope)) ?? []
+        // 先摆上次存下的列表，服务器那份回来再换；没拿到就留着存下的。
+        if chats.isEmpty, let remembered = API.shared.rememberedChats(scope: scope) { chats = remembered }
+        if let fresh = try? await API.shared.chats(scope: scope) { chats = fresh }
     }
 
     private func open(_ chat: ChatSummary) async {

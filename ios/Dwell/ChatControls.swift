@@ -69,18 +69,34 @@ extension ChatStore {
     /// 换了聊天、回到前台时重读一遍输入框那一排的状态。
     func loadControls() async {
         guard !chatID.isEmpty else { return }
+        loadRememberedControls()
         let base = "api/chats/\(chatID)"
-        if let json = try? await API.shared.request("GET", "\(base)/voice-mode") {
+        if let json = try? await API.shared.request("GET", "\(base)/voice-mode", remember: true) {
             voiceMode = json["enabled"] as? Bool ?? false
         }
-        if let json = try? await API.shared.request("GET", "\(base)/reply-language") {
+        if let json = try? await API.shared.request("GET", "\(base)/reply-language", remember: true) {
             replyLanguage = json["language"] as? String ?? "auto"
         }
-        if let json = try? await API.shared.request("GET", "api/model") {
+        if let json = try? await API.shared.request("GET", "api/model", remember: true) {
             model = ChatModelState(json: json)
         }
         await refreshInstructionCount()
         await refreshTools()
+    }
+
+    /// 输入框那一排上次的样子（语音、语言、模型名），先摆出来，不用等服务器。
+    func loadRememberedControls() {
+        guard !chatID.isEmpty else { return }
+        let api = API.shared
+        if let json = api.remembered("api/chats/\(chatID)/voice-mode") {
+            voiceMode = json["enabled"] as? Bool ?? false
+        }
+        if let json = api.remembered("api/chats/\(chatID)/reply-language") {
+            replyLanguage = json["language"] as? String ?? "auto"
+        }
+        if let json = api.remembered("api/model") {
+            model = ChatModelState(json: json)
+        }
     }
 
     func refreshInstructionCount() async {

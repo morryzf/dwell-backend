@@ -77,34 +77,48 @@ final class MemoryStore: ObservableObject {
         loadingCards = true
         defer { loadingCards = false }
         let offset = reset ? 0 : cards.count
+        let params = [
+            "limit": String(Self.pageSize), "offset": String(offset),
+            "q": query.trimmingCharacters(in: .whitespaces), "filter": filter, "topic": topic,
+            "thread": thread,
+        ]
+        // 不搜不筛的第一页（连着待确认）存一份：一打开就有卡，服务器那份回来再换上。
+        let plain = offset == 0 && params["q"]!.isEmpty && filter == "all" && topic.isEmpty && thread.isEmpty
+        if plain, cards.isEmpty, let json = api.remembered("\(base)/memory-cards", query: params) {
+            applyPage(json, reset: true)
+        }
         do {
-            let json = try await api.request("GET", "\(base)/memory-cards", query: [
-                "limit": String(Self.pageSize), "offset": String(offset),
-                "q": query.trimmingCharacters(in: .whitespaces), "filter": filter, "topic": topic,
-                "thread": thread,
-            ])
-            threads = (json["threads"] as? [[String: Any]] ?? []).compactMap { item in
-                guard let name = item["thread"] as? String, !name.isEmpty else { return nil }
-                return (name, item["count"] as? Int ?? 0, item["has_main"] as? Bool ?? false)
-            }
-            let page = (json["items"] as? [[String: Any]] ?? []).map(MemoryCard.init(json:))
-            cards = reset ? page : cards + page
-            total = json["total"] as? Int ?? cards.count
-            let counts = json["counts"] as? [String: Any] ?? [:]
-            activeCount = counts["active"] as? Int ?? 0
-            archivedCount = counts["archived"] as? Int ?? 0
-            labels = MemoryLabels(json: json["taxonomy"] as? [String: Any])
-            drafts = (json["drafts"] as? [[String: Any]] ?? []).map(MemoryCard.init(json:))
-            let targets = (json["draft_targets"] as? [[String: Any]] ?? []).map(MemoryCard.init(json:))
-            draftTargets = Dictionary(targets.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-            cardState = MemoryCardState(json: json["state"] as? [String: Any])
-            injectionEnabled = json["injection_enabled"] as? Bool ?? false
-            sharedEnabled = json["shared_enabled"] as? Bool ?? false
-            lastInjection = MemoryInjection(json: json["last_injection"] as? [String: Any])
+            let json = try await api.request("GET", "\(base)/memory-cards", query: params, remember: plain)
+            applyPage(json, reset: reset)
             pollIfBusy()
         } catch {
-            say(error)
+            if error is URLError, !cards.isEmpty {
+                toast = "没连上服务器，现在看到的是上次的内容"
+            } else {
+                say(error)
+            }
         }
+    }
+
+    private func applyPage(_ json: [String: Any], reset: Bool) {
+        threads = (json["threads"] as? [[String: Any]] ?? []).compactMap { item in
+            guard let name = item["thread"] as? String, !name.isEmpty else { return nil }
+            return (name, item["count"] as? Int ?? 0, item["has_main"] as? Bool ?? false)
+        }
+        let page = (json["items"] as? [[String: Any]] ?? []).map(MemoryCard.init(json:))
+        cards = reset ? page : cards + page
+        total = json["total"] as? Int ?? cards.count
+        let counts = json["counts"] as? [String: Any] ?? [:]
+        activeCount = counts["active"] as? Int ?? 0
+        archivedCount = counts["archived"] as? Int ?? 0
+        labels = MemoryLabels(json: json["taxonomy"] as? [String: Any])
+        drafts = (json["drafts"] as? [[String: Any]] ?? []).map(MemoryCard.init(json:))
+        let targets = (json["draft_targets"] as? [[String: Any]] ?? []).map(MemoryCard.init(json:))
+        draftTargets = Dictionary(targets.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        cardState = MemoryCardState(json: json["state"] as? [String: Any])
+        injectionEnabled = json["injection_enabled"] as? Bool ?? false
+        sharedEnabled = json["shared_enabled"] as? Bool ?? false
+        lastInjection = MemoryInjection(json: json["last_injection"] as? [String: Any])
     }
 
     var hasMoreCards: Bool { cards.count < total }
