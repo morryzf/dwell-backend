@@ -737,6 +737,17 @@ def init_db():
                    FOREIGN KEY (card_id) REFERENCES memory_cards(id) ON DELETE CASCADE)"""
         )
         cx.execute("CREATE INDEX IF NOT EXISTS ix_memory_card_history_card ON memory_card_history(card_id, made DESC)")
+        # 书签：她在聊天里圈起来的几句原话。存一份副本（消息后来删了改了，原话还在），
+        # 也记着是哪几条消息，「看原文」时能跳回当时的上下文。
+        cx.execute(
+            """CREATE TABLE IF NOT EXISTS memory_bookmarks (
+                   id TEXT PRIMARY KEY, chat_id TEXT NOT NULL,
+                   lines_json TEXT NOT NULL DEFAULT '[]',
+                   label TEXT NOT NULL DEFAULT '', label_state TEXT NOT NULL DEFAULT 'pending',
+                   why TEXT NOT NULL DEFAULT '', embedding_json TEXT NOT NULL DEFAULT '',
+                   made INTEGER NOT NULL, updated INTEGER NOT NULL)"""
+        )
+        cx.execute("CREATE INDEX IF NOT EXISTS ix_memory_bookmarks_chat ON memory_bookmarks(chat_id, updated DESC)")
         # 已经产出过卡片或候选卡片的旧分段，不再重复调用模型。
         cx.execute(
             """INSERT OR IGNORE INTO memory_card_segment_runs
@@ -3237,6 +3248,167 @@ def memory_card_set_embedding(card_id: str, embedding: list[float]) -> None:
         cx.execute("UPDATE memory_cards SET embedding_json=? WHERE id=?", (raw, card_id))
 
 
+# ---------------------------------------------------------------- 书签
+
+BOOKMARK_LINES_MAX = 30
+BOOKMARK_WHY_MAX = 600
+BOOKMARK_LABEL_MAX = 80
+
+
+def _bookmark_lines(row) -> list[dict]:
+    try:
+        lines = json.loads(row["lines_json"] or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return [line for line in lines if isinstance(line, dict)]
+
+
+def bookmark_text(label: str, why: str, lines: list[dict], assistant: str = "Cloudy") -> str:
+    """书签拿去找、拿去递的那段文字：在讲什么、为什么记、原话（每句带日期和是谁说的）。"""
+    parts = []
+    if label:
+        parts.append(label)
+    if why:
+        parts.append("Morry 为什么记：" + why)
+    for line in lines:
+        who = "Morry" if line.get("role") == "user" else assistant
+        when = ""
+        if line.get("made"):
+            when = datetime.fromtimestamp(int(line["made"]), CN_TZ).strftime("%Y-%m-%d %H:%M") + " "
+        parts.append(f"{when}{who}：{line.get('content') or ''}")
+    return "\n".join(parts)
+
+
+def _bookmark_dict(row, assistant: str = "Cloudy") -> dict:
+    d = dict(row)
+    lines = _bookmark_lines(row)
+    d.pop("lines_json", None)
+    raw = d.pop("embedding_json", "") or ""
+    try:
+        embedding = json.loads(raw) if raw else None
+    except (TypeError, json.JSONDecodeError):
+        embedding = None
+    first = min((int(line.get("made") or 0) for line in lines if line.get("made")), default=0)
+    return {
+        **d, "kind": "bookmark", "lines": lines, "embedding": embedding,
+        # 召回、注入那一套按卡片的样子认：没有类别、事件，日期是第一句原话的日子。
+        "content": bookmark_text(d.get("label") or "", d.get("why") or "", lines, assistant),
+        "memory_type": "bookmark", "topics": [], "importance": "normal", "retention": "long_term",
+        "valid_until": None, "status": "active", "undated": 0, "thread": "", "thread_role": "",
+        "happened": first,
+    }
+
+
+def bookmark_create(chat_id: str, message_ids: list[str], why: str = "") -> dict:
+    """把这间聊天里的几条消息圈成一个书签。消息按说的先后排，空的、不是对话的跳过。"""
+    ids = list(dict.fromkeys(str(i) for i in message_ids if i))[:BOOKMARK_LINES_MAX]
+    if not ids:
+        raise ValueError("至少要选一句")
+    with conn() as cx:
+        rows = cx.execute(
+            f"SELECT rowid,id,role,content,made FROM messages WHERE chat_id=? AND id IN ({','.join('?' for _ in ids)}) "
+            "ORDER BY rowid ASC",
+            [chat_id, *ids],
+        ).fetchall()
+    lines = [{"message_id": r["id"], "rowid": int(r["rowid"]), "role": r["role"],
+              "content": str(r["content"]), "made": int(r["made"] or 0)}
+             for r in rows if r["role"] in {"user", "assistant"} and str(r["content"] or "").strip()]
+    if not lines:
+        raise ValueError("选的消息里没有能收的原话")
+    now = int(time.time())
+    row = {"id": new_id(), "chat_id": chat_id, "lines_json": json.dumps(lines, ensure_ascii=False),
+           "label": "", "label_state": "pending", "why": str(why or "").strip()[:BOOKMARK_WHY_MAX],
+           "made": now, "updated": now}
+    with conn() as cx:
+        cx.execute(
+            """INSERT INTO memory_bookmarks (id,chat_id,lines_json,label,label_state,why,made,updated)
+               VALUES (:id,:chat_id,:lines_json,:label,:label_state,:why,:made,:updated)""",
+            row,
+        )
+    memory_pool_touch()
+    return bookmark_get(chat_id, row["id"])
+
+
+def bookmark_get(chat_id: str, bookmark_id: str) -> dict | None:
+    ids = _memory_card_pool(chat_id)
+    with conn() as cx:
+        row = cx.execute(
+            f"SELECT * FROM memory_bookmarks WHERE id=? AND chat_id IN ({','.join('?' for _ in ids)})",
+            [bookmark_id, *ids],
+        ).fetchone()
+    return _bookmark_dict(row, assistant_name(chat_assistant(chat_id))) if row else None
+
+
+def bookmark_list(chat_id: str, query: str = "") -> list[dict]:
+    """卡池里的书签，最近动过的在前；query 在概括、为什么记、原话里找。"""
+    ids = _memory_card_pool(chat_id)
+    with conn() as cx:
+        rows = cx.execute(
+            f"SELECT * FROM memory_bookmarks WHERE chat_id IN ({','.join('?' for _ in ids)}) "
+            "ORDER BY updated DESC, rowid DESC",
+            ids,
+        ).fetchall()
+    name = assistant_name(chat_assistant(chat_id))
+    items = [_bookmark_dict(row, name) for row in rows]
+    needle = str(query or "").strip().casefold()
+    if needle:
+        items = [item for item in items if needle in item["content"].casefold()]
+    return items
+
+
+def bookmark_update(chat_id: str, bookmark_id: str, label: str | None = None, why: str | None = None,
+                    remove_message_id: str = "") -> dict:
+    """改概括（改了就算她写的，模型不再覆盖）、改为什么记、去掉其中一句。"""
+    item = bookmark_get(chat_id, bookmark_id)
+    if not item:
+        raise LookupError("没有找到这个书签")
+    lines = item["lines"]
+    if remove_message_id:
+        lines = [line for line in lines if line.get("message_id") != remove_message_id]
+        if not lines:
+            raise ValueError("最后一句不能去掉；不要这个书签就删掉它")
+    fields = {"lines_json": json.dumps(lines, ensure_ascii=False), "updated": int(time.time()),
+              "embedding_json": ""}
+    if label is not None:
+        fields["label"] = str(label).strip()[:BOOKMARK_LABEL_MAX]
+        fields["label_state"] = "manual"
+    if why is not None:
+        fields["why"] = str(why).strip()[:BOOKMARK_WHY_MAX]
+    with conn() as cx:
+        cx.execute(
+            f"UPDATE memory_bookmarks SET {', '.join(f'{key}=?' for key in fields)} WHERE id=?",
+            [*fields.values(), bookmark_id],
+        )
+    memory_pool_touch()
+    return bookmark_get(chat_id, bookmark_id)
+
+
+def bookmark_set_label(bookmark_id: str, label: str, state: str = "ready") -> None:
+    """模型写好的概括。她自己改过的（manual）不覆盖。"""
+    with conn() as cx:
+        cx.execute(
+            "UPDATE memory_bookmarks SET label=?, label_state=?, embedding_json='' "
+            "WHERE id=? AND label_state<>'manual'",
+            (str(label or "").strip()[:BOOKMARK_LABEL_MAX], state, bookmark_id),
+        )
+    memory_pool_touch()
+
+
+def bookmark_set_embedding(bookmark_id: str, embedding: list[float]) -> None:
+    with conn() as cx:
+        cx.execute("UPDATE memory_bookmarks SET embedding_json=? WHERE id=?",
+                   (json.dumps(embedding, separators=(",", ":")), bookmark_id))
+
+
+def bookmark_delete(chat_id: str, bookmark_id: str) -> bool:
+    if not bookmark_get(chat_id, bookmark_id):
+        return False
+    with conn() as cx:
+        cx.execute("DELETE FROM memory_bookmarks WHERE id=?", (bookmark_id,))
+    memory_pool_touch()
+    return True
+
+
 def memory_card_embeddings(chat_id: str) -> list[dict]:
     """给检索和注入用的卡片。
 
@@ -3273,6 +3445,8 @@ def memory_card_embeddings(chat_id: str) -> list[dict]:
         d["happened"] = 0 if d.get("undated") else int(d.pop("source_made", None) or d.get("made") or 0)
         d.pop("source_made", None)
         result.append(d)
+    # 书签和卡片放在一起找：召回、演练、整理时看的「相关卡」都认得它。
+    result.extend(bookmark_list(chat_id))
     return result
 
 
