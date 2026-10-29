@@ -111,6 +111,13 @@ COMMON_CJK_GRAMS = {
 }
 
 
+# 三个字的常用词切开以后，那几个两字块（「为什」「么样」）也一样没意义，一起去掉。
+COMMON_CJK_GRAMS |= {
+    word[index:index + 2] for word in tuple(COMMON_CJK_GRAMS) if len(word) >= 3
+    for index in range(len(word) - 1)
+}
+
+
 def _normalized(text: object) -> str:
     return re.sub(r"\s+", "", str(text or "").casefold())
 

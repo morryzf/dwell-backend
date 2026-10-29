@@ -328,6 +328,15 @@ final class MemoryStore: ObservableObject {
 
     // MARK: - 原文
 
+    /// 对着原文改待确认的正文：只改字，不采用，回头还能决定要不要。
+    func saveDraftContent(_ draft: MemoryCard, _ content: String) async -> Bool {
+        do {
+            _ = try await api.request("PUT", "\(base)/memory-card-drafts/\(draft.id)", body: ["content": content])
+            await loadCards(reset: true)
+            return true
+        } catch { say(error); return false }
+    }
+
     func source(of card: MemoryCard, isDraft: Bool, full: Bool) async -> (messages: [MemorySourceMessage], canExpand: Bool) {
         do {
             let json = try await api.request("GET", "api/chats/\(isDraft ? chatID : card.chatID)/memory-source", query: [

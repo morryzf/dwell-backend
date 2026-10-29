@@ -95,3 +95,11 @@ class EverydayWordsTest(unittest.TestCase):
         for card in ranked:
             self.assertNotIn("nsfw", card["recall_why"]["topics"])
             self.assertNotIn("health_safety", card["recall_why"]["topics"])
+
+
+class CommonWordPiecesTest(unittest.TestCase):
+    def test_pieces_of_common_words_do_not_count(self):
+        from app.memory_retrieval import _terms
+        terms = _terms("知道为什么吗，怎么样")
+        for piece in ("为什", "什么", "么样", "怎么"):
+            self.assertNotIn(piece, terms)
