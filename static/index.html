@@ -1218,6 +1218,26 @@ html[data-theme="dark"] .composer {
   #messageSelectCount { flex: 1; text-align: center; font-size: 14px; color: var(--text); }
   .selectbar-btn { padding: 8px 11px; border-radius: 10px; background: var(--panel); color: var(--text); font-size: 13px; }
   .selectbar-btn.danger { color: var(--red); }
+  .selectbar-btn:disabled { opacity: .45; }
+  /* 收进记忆的小面板：借「看原文」那层的壳，从底下浮上来 */
+  #bookmarkSheet { position: fixed; inset: 0; z-index: 120; display: none; align-items: flex-end; justify-content: center; --mc-ease-out: cubic-bezier(.23,1,.32,1); }
+  #bookmarkSheet.on { display: flex; }
+  @media (min-width: 700px) { #bookmarkSheet.on { align-items: center; } }
+  #bookmarkSheet.on .ms-shade { animation: bmFade 200ms ease-out both; }
+  #bookmarkSheet.on .bm-panel { animation: bmUp 240ms var(--mc-ease-out) both; }
+  @keyframes bmFade { from { opacity: 0; } }
+  @keyframes bmUp { from { opacity: 0; transform: translateY(16px); } }
+  .bm-panel { margin: 0; }
+  .bm-pick-list { display: grid; gap: 6px; max-height: 34vh; overflow: auto; overscroll-behavior: contain;
+    padding: 2px 0 2px 11px; border-left: 2px solid color-mix(in srgb, var(--accent-soft) 60%, var(--line)); }
+  .bm-pick { display: flex; gap: 8px; min-width: 0; font-size: 13px; line-height: 1.5; }
+  .bm-pick-who { flex: none; color: var(--dim); font-size: 12px; line-height: 19.5px; }
+  .bm-pick-text { min-width: 0; color: var(--text); word-break: break-word; }
+  #bookmarkWhy { font-size: 16px; min-height: 64px; box-sizing: border-box; }
+  #bookmarkSheet .ap-msg { margin-top: 0; }
+  #bookmarkSheet .mc-actions { margin-top: 0; }
+  #bookmarkSheet .mc-btn:active { transform: scale(.97); }
+  @media (prefers-reduced-motion: reduce) { #bookmarkSheet.on .ms-shade, #bookmarkSheet.on .bm-panel { animation: none; } #bookmarkSheet .mc-btn { transition-duration: 0.01ms; } }
   .selecting-messages footer { opacity: .42; pointer-events: none; }
   .selecting-messages .row[data-message-id] { cursor: pointer; box-sizing: border-box; padding-left: 40px; }
   .selecting-messages .row.me[data-message-id] { padding-left: 0; padding-right: 40px; }
@@ -3736,6 +3756,47 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .mc-tag.mc-tag-main { background: color-mix(in srgb, var(--accent) 24%, var(--card)); color: var(--text); font-weight: 650; }
   /* 补全建议里新加的那一段 */
   .mc-added { padding: 0 2px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+  /* 书签：她从聊天里圈的几句原话。和卡片同一个底，左边一道引文线、头上一个「书签」，看得出是原话不是整理过的 */
+  .mc-bm .mc-card-head { flex-wrap: nowrap; align-items: center; }
+  .mc-bm-label { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 650; line-height: 1.5; word-break: break-word; }
+  .mc-bm-label.dim { color: var(--dim); font-weight: 400; }
+  .mc-bm-badge { background: color-mix(in srgb, var(--accent) 14%, var(--card)); }
+  .mc-bm-more { flex: none; width: 32px; height: 26px; margin: -4px -6px -4px -2px; border-radius: 9px; color: var(--dim); font-size: 17px; line-height: 1; letter-spacing: 1px;
+    transition: transform 120ms var(--mc-ease-out), background-color 160ms var(--mc-ease-out); }
+  .mc-bm-more:active { transform: scale(.94); background: color-mix(in srgb, var(--dim) 12%, transparent); }
+  .mc-bm-more[aria-expanded="true"] { color: var(--text); background: var(--card); }
+  .mc-bm-lines { display: grid; gap: 8px; margin-top: 10px; padding-left: 11px; border-left: 2px solid color-mix(in srgb, var(--accent-soft) 60%, var(--line)); }
+  .mc-bm-line { position: relative; min-width: 0; }
+  .mc-bm-line.cont { margin-top: -4px; }
+  .mc-bm-who { color: var(--dim); font-size: 11.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .mc-bm-text { font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+  .mc-bm-line.open .mc-bm-text { display: block; -webkit-line-clamp: unset; overflow: visible; }
+  .mc-bm-expand { padding: 0; margin-top: 2px; color: color-mix(in srgb, var(--accent) 78%, var(--text)); font-size: 12px; font-weight: 650; }
+  .mc-bm-expand[hidden] { display: none; }
+  .mc-bm-why { margin-top: 10px; color: var(--dim); font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+  .mc-bm-actions { animation: mcTlIn 200ms var(--mc-ease-out) both; }
+  .mc-bm-actions[hidden] { display: none; }
+  /* 编辑：概括、为什么记各一个框；每句右上角一个 ×，点了直接去掉那一句 */
+  .mc-bm.editing .mc-bm-line { padding-right: 34px; }
+  .mc-bm-del { position: absolute; top: -4px; right: -4px; width: 30px; height: 30px; border-radius: 9px; color: var(--dim); font-size: 18px; line-height: 1;
+    transition: transform 120ms var(--mc-ease-out), background-color 160ms var(--mc-ease-out); }
+  .mc-bm-del:active { transform: scale(.94); background: color-mix(in srgb, var(--dim) 12%, transparent); }
+  .mc-bm-del:disabled { opacity: .4; }
+  .mc-bm-edit { display: grid; gap: 8px; margin-top: 10px; }
+  .mc-bm-edit label { display: grid; gap: 5px; color: var(--dim); font-size: 12px; }
+  .mc-bm-edit .ap-in { font-size: 16px; box-sizing: border-box; }
+  .mc-bm-edit textarea.ap-in { min-height: 64px; line-height: 1.5; }
+  .mc-bm-edit .ap-msg { margin-top: 0; }
+  .mc-bm-edit .mc-bm-lines { margin: 2px 0; }
+  .mc-bm-edit .mc-actions { margin-top: 2px; }
+  /* 全部 / 卡片 / 书签：一小条分段，挨着列表上面 */
+  .mc-kind-filter { display: inline-flex; gap: 2px; margin: 2px 0 13px; padding: 2px; border-radius: 999px;
+    background: color-mix(in srgb, var(--card) 70%, transparent); box-shadow: inset 0 0 0 .5px var(--line); }
+  .mc-kind-filter .mc-chip { min-height: 26px; padding: 0 11px; background: transparent; box-shadow: none; transition: color 160ms var(--mc-ease-out), background-color 160ms var(--mc-ease-out); }
+  .mc-kind-filter .mc-chip.on { color: #fff; background: var(--accent); }
+  .mc-kind-n { margin-left: 3px; opacity: .72; font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .mc-bm-actions { animation: none; } .mc-bm-more, .mc-bm-del, .mc-kind-filter .mc-chip { transition-duration: 0.01ms; } }
   /* 主卡的旧版本，点「历史」摊在卡片下面 */
   .mc-history { display: grid; gap: 9px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   /* 主卡在列表里只露最新一步；点「时间线 · N 步」在卡片里摊开整条，摊开时最新一步不再重复 */
@@ -4661,7 +4722,21 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
 <div id="messageSelectBar" aria-live="polite">
   <button class="selectbar-btn" id="messageSelectCancel">取消</button>
   <span id="messageSelectCount">选择消息</span>
+  <button class="selectbar-btn" id="messageSelectKeep" disabled>收进记忆</button>
   <button class="selectbar-btn danger" id="messageSelectDelete" disabled>删除</button>
+</div>
+
+<!-- 收进记忆：勾的几句原话照抄成一个书签，概括在后台写 -->
+<div id="bookmarkSheet" role="dialog" aria-modal="true" aria-labelledby="bookmarkSheetTitle">
+  <div class="ms-shade" data-bm-close></div>
+  <form class="ms-panel bm-panel" id="bookmarkForm">
+    <div class="ms-head"><button type="button" data-bm-close aria-label="关闭">×</button><strong id="bookmarkSheetTitle">收进记忆</strong><span></span></div>
+    <div class="ms-hint">原话照抄下来，过一会儿会自己概括这段在讲什么。</div>
+    <div class="bm-pick-list" id="bookmarkPickList"></div>
+    <textarea class="ap-in" id="bookmarkWhy" rows="2" maxlength="600" placeholder="为什么记（可以不写）" aria-label="为什么记（可以不写）"></textarea>
+    <div class="ap-msg" id="bookmarkMsg"></div>
+    <div class="mc-actions"><button class="mc-btn primary" type="submit" id="bookmarkSave">收进记忆</button><button class="mc-btn quiet" type="button" data-bm-close>取消</button></div>
+  </form>
 </div>
 
 <footer>
@@ -5960,6 +6035,7 @@ const selectedMessageIds = new Set();
 const messageSelectBar = document.getElementById('messageSelectBar');
 const messageSelectCount = document.getElementById('messageSelectCount');
 const messageSelectDelete = document.getElementById('messageSelectDelete');
+const messageSelectKeep = document.getElementById('messageSelectKeep');
 function refreshMessageSelection() {
   document.querySelectorAll('.row[data-message-id]').forEach(rowEl => {
     rowEl.classList.toggle('selected', selectedMessageIds.has(rowEl.dataset.messageId));
@@ -5967,6 +6043,7 @@ function refreshMessageSelection() {
   const n = selectedMessageIds.size;
   messageSelectCount.textContent = n ? '已选择 ' + n + ' 条' : '点消息来选择';
   messageSelectDelete.disabled = !n;
+  messageSelectKeep.disabled = !n;
 }
 /* 进出选择模式会给每行让出勾选框的位置，气泡重新折行、行也变高。
    不扶一把的话滚动条还停在原来的数字上，眼睛就被推到前面的消息去了。 */
@@ -6013,6 +6090,55 @@ messageSelectDelete.onclick = async () => {
   } catch (e) {
     note('（没删掉：' + e.message + '）', 'err');
     refreshMessageSelection();
+  }
+};
+/* 收进记忆：勾的几句先在小面板里过一眼（谁说的 + 开头几十个字），可以写一句为什么记。
+   原话由服务器照抄、按时间排；概括在后台写，写好之前记忆面板里显示「正在概括…」。 */
+const bookmarkSheet = document.getElementById('bookmarkSheet');
+const bookmarkForm = document.getElementById('bookmarkForm');
+const bookmarkWhy = document.getElementById('bookmarkWhy');
+const bookmarkMsg = document.getElementById('bookmarkMsg');
+const bookmarkSave = document.getElementById('bookmarkSave');
+let bookmarkPickIds = [];
+function closeBookmarkSheet() { bookmarkSheet.classList.remove('on'); }
+bookmarkSheet.querySelectorAll('[data-bm-close]').forEach(el => el.onclick = closeBookmarkSheet);
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && bookmarkSheet.classList.contains('on')) closeBookmarkSheet(); });
+function openBookmarkSheet() {
+  // 按聊天里的先后排；选了但已经不在页面上的（刚被删、还没重画）就不列，服务器那边也会跳过。
+  const rows = [...log.querySelectorAll('.row[data-message-id]')].filter(r => selectedMessageIds.has(r.dataset.messageId));
+  const lines = rows.map(r => r._message).filter(m => m && String(m.text || '').trim());
+  if (!lines.length) { note('（选中的消息里没有文字，收不进记忆）', 'err'); return; }
+  bookmarkPickIds = lines.map(m => m.id);
+  const list = document.getElementById('bookmarkPickList');
+  list.textContent = '';
+  for (const m of lines) {
+    const text = String(m.text || '').replace(/\s+/g, ' ').trim();
+    const cut = Array.from(text);
+    const line = document.createElement('div'); line.className = 'bm-pick';
+    const who = document.createElement('span'); who.className = 'bm-pick-who'; who.textContent = m.role === 'user' ? '我' : assistantName;
+    const said = document.createElement('span'); said.className = 'bm-pick-text'; said.textContent = cut.length > 40 ? cut.slice(0, 40).join('') + '…' : text;
+    line.append(who, said); list.appendChild(line);
+  }
+  bookmarkWhy.value = '';
+  bookmarkMsg.className = 'ap-msg'; bookmarkMsg.textContent = '';
+  bookmarkSave.disabled = false;
+  bookmarkSheet.classList.add('on');
+}
+messageSelectKeep.onclick = openBookmarkSheet;
+bookmarkForm.onsubmit = async event => {
+  event.preventDefault();
+  if (!bookmarkPickIds.length) return;
+  bookmarkSave.disabled = true;
+  try {
+    const chat = await currentChatForMemory();
+    if (!chat) throw new Error('还没有打开聊天');
+    await memoryJson('api/chats/' + encodeURIComponent(chat.id) + '/bookmarks', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message_ids: bookmarkPickIds, why: bookmarkWhy.value.trim()})});
+    closeBookmarkSheet();
+    setMessageSelectionMode(false);
+    note('（收进记忆了，正在概括这段在讲什么）');
+  } catch (e) {
+    bookmarkSave.disabled = false;
+    note('（没收进去：' + e.message + '）', 'err');
   }
 };
 function attachMessageActions(el, message) {
@@ -13232,7 +13358,7 @@ async function currentChatForMemory() {
   const data = await (await fetch('api/chats?scope=live', {cache:'no-store'})).json();
   return (data.items || []).find(item => item.current) || null;
 }
-function stopLongContextPoll() { if (longContextPoll) { clearTimeout(longContextPoll); longContextPoll = null; } }
+function stopLongContextPoll() { if (longContextPoll) { clearTimeout(longContextPoll); longContextPoll = null; } stopBookmarkPoll(); }
 let memoryConsoleTab = 'cards';
 let memoryConsoleQuery = '';
 let memoryConsoleFilter = 'all';
@@ -13240,6 +13366,8 @@ let memoryConsoleFilter = 'all';
 let memoryConsoleTopic = '', memorySearchDraft = '';
 // 事件（追音音、搬家……）：点卡上的「主卡 · xx」「副卡 · xx」只看这件事的卡；空＝不按事件筛。
 let memoryConsoleThread = '';
+// 全部 / 卡片 / 书签：只记在这一次打开的页面里，刷新就回到全部。
+let memoryConsoleKind = 'all';
 // 已有的事件名（[{thread, count, has_main}]），每次拿记忆卡时更新；编辑框里的事件下拉从这里列。
 let memoryThreads = [];
 // 右上角两个按钮：🔍 展开搜索和筛选，＋ 摊开一张空卡。都会切到「记忆卡」页。
@@ -13283,7 +13411,9 @@ async function openMemorySource(chatId, kind, id, content, full) {
     const d = await memoryJson(url, {cache: 'no-store'});
     const msgs = d.messages || [];
     let hint = '';
-    if (!d.precise) hint = '这张卡是旧的整理方式生成的，只记得大概在这一段，没法标出具体哪几句。';
+    const bookmark = kind === 'bookmark';
+    if (bookmark) hint = full ? '整段原文，高亮的是收进书签的那几句。' : '高亮的是收进书签的那几句，前后各带几条上下文。';
+    else if (!d.precise) hint = '这张卡是旧的整理方式生成的，只记得大概在这一段，没法标出具体哪几句。';
     else if (full) hint = '整段原文，高亮的是这张卡依据的那几条。';
     else hint = '高亮的是这张卡依据的原话，前后各带几条上下文。';
     if ((d.missing || []).length) hint += ` 有 ${d.missing.length} 条依据的原文已经删除。`;
@@ -13298,11 +13428,16 @@ async function openMemorySource(chatId, kind, id, content, full) {
       }
     });
     const list = groups.length ? groups.map(g => `<div class="ms-msg${d.precise ? (g.cited ? ' cited' : '') : ' plain'}"><div class="ms-who"><span>${g.role === 'user' ? '我' : (g.role === 'assistant' ? assistantName : '系统')}</span><span>${instructionEsc(memorySourceTime(g.made))}</span></div><div class="ms-text">${instructionEsc(g.texts.join('\n\n'))}</div></div>`).join('') : '<div class="ms-hint">原文已经找不到了。</div>';
-    memorySourceBody.innerHTML = `<div class="ms-card" data-ms-card><span data-ms-content>${instructionEsc(content || '')}</span><button class="ms-edit" type="button" data-ms-edit aria-label="编辑这条记忆"><span class="ic" data-i="pen"></span></button></div><div class="ms-hint">${instructionEsc(hint)}</div><div class="ms-list">${list}</div>${d.can_expand ? '<button class="mc-btn" type="button" data-ms-expand>展开整段</button>' : ''}`;
+    // 书签的概括在书签卡上改（这里的编辑框是改卡片正文的）；顶上只把概括亮一下，没有就不放。
+    const head = bookmark
+      ? (content ? `<div class="ms-card" style="padding-right:12px">${instructionEsc(content)}</div>` : '')
+      : `<div class="ms-card" data-ms-card><span data-ms-content>${instructionEsc(content || '')}</span><button class="ms-edit" type="button" data-ms-edit aria-label="编辑这条记忆"><span class="ic" data-i="pen"></span></button></div>`;
+    memorySourceBody.innerHTML = `${head}<div class="ms-hint">${instructionEsc(hint)}</div><div class="ms-list">${list}</div>${d.can_expand ? '<button class="mc-btn" type="button" data-ms-expand>展开整段</button>' : ''}`;
     fillIcons(memorySourceBody);
     const expand = memorySourceBody.querySelector('[data-ms-expand]');
     if (expand) expand.onclick = () => openMemorySource(chatId, kind, id, content, true);
-    memorySourceBody.querySelector('[data-ms-edit]').onclick = () => editMemorySourceCard(chatId, kind, id, content, full);
+    const edit = memorySourceBody.querySelector('[data-ms-edit]');
+    if (edit) edit.onclick = () => editMemorySourceCard(chatId, kind, id, content, full);
     const first = memorySourceBody.querySelector('.ms-msg.cited');
     if (first) first.scrollIntoView({block: 'center'});
   } catch (e) {
@@ -13545,6 +13680,164 @@ function memoryTimelineEdit(box, item, chat, cardState, allItems) {
     } catch (e) { save.disabled = false; msg.textContent = '没有保存：' + e.message; msg.className = 'ap-msg on bad'; }
   };
 }
+/* ---------- 书签：她从聊天里圈下来的几句原话 ---------- */
+// 概括是模型在后台写的：没写好、没写出来、她自己清空了，各说各的。
+function memoryBookmarkLabel(item, animate) {
+  const enter = animate ? ' mc-tl-enter' : '';
+  if (item.label_state === 'pending') return '<div class="mc-bm-label dim">正在概括…</div>';
+  if (item.label) return `<div class="mc-bm-label${enter}">${instructionEsc(item.label)}</div>`;
+  return `<div class="mc-bm-label dim${enter}">${item.label_state === 'error' ? '没概括出来，点编辑自己写一句' : '还没有概括'}</div>`;
+}
+// 原话排成一小段对话：谁 · 几时，下面是那句。同一个人十分钟内接着说的，不再重复写抬头。
+function memoryBookmarkLines(item, editing) {
+  const lines = item.lines || [];
+  let prev = null;
+  return lines.map(line => {
+    const cont = prev && prev.role === line.role && Math.abs(Number(line.made || 0) - Number(prev.made || 0)) < 600;
+    prev = line;
+    const who = line.role === 'user' ? '我' : assistantName;
+    const when = memorySourceTime(line.made);
+    return `<div class="mc-bm-line${cont ? ' cont' : ''}" data-bm-line="${instructionEsc(line.message_id)}">`
+      + (cont ? '' : `<div class="mc-bm-who">${instructionEsc(who)}${when ? ' · ' + instructionEsc(when) : ''}</div>`)
+      + `<div class="mc-bm-text">${instructionEsc(line.content || '')}</div><button type="button" class="mc-bm-expand" hidden>展开</button>`
+      // 只剩一句就不给 ×：不要这个书签就整个删掉
+      + (editing && lines.length > 1 ? `<button type="button" class="mc-bm-del" data-bm-del="${instructionEsc(line.message_id)}" aria-label="去掉这一句">×</button>` : '')
+      + '</div>';
+  }).join('');
+}
+function memoryBookmarkView(item, editing) {
+  const foreign = item.chat_id && memoryCurrentChatId && item.chat_id !== memoryCurrentChatId;
+  const meta = foreign ? `<div class="mc-meta"><span class="mc-tag">来自 ${instructionEsc(item.chat_name || '别的窗口')}</span></div>` : '';
+  if (editing) {
+    return `<article class="mc-card mc-bm editing" data-bm-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head"><div class="mc-bm-label dim">编辑书签</div><span class="mc-badge mc-bm-badge">书签</span></div>`
+      + `<form class="mc-bm-edit" data-bm-form><label>这段在讲什么<input class="ap-in" name="label" maxlength="80" value="${instructionEsc(item.label || '')}" placeholder="${item.label_state === 'pending' ? '正在概括…也可以自己写' : '一句话说说这段在讲什么'}"></label>`
+      + `<div class="mc-bm-lines">${memoryBookmarkLines(item, true)}</div>`
+      + `<label>为什么记<textarea class="ap-in" name="why" maxlength="600" rows="2" placeholder="可以不写">${instructionEsc(item.why || '')}</textarea></label>`
+      + `<div class="ap-msg" data-bm-msg></div><div class="mc-actions"><button class="mc-btn primary" type="submit">保存</button><button class="mc-btn quiet" type="button" data-bm-cancel>取消</button></div></form>`
+      + `${meta}</div></article>`;
+  }
+  return `<article class="mc-card mc-bm" data-bm-item="${instructionEsc(item.id)}"><div class="mc-card-view"><div class="mc-card-head">${memoryBookmarkLabel(item)}<span class="mc-badge mc-bm-badge">书签</span><button type="button" class="mc-bm-more" data-bm-more aria-expanded="false" aria-label="更多操作">⋯</button></div>`
+    + `<div class="mc-bm-lines">${memoryBookmarkLines(item, false)}</div>`
+    + (item.why ? `<div class="mc-bm-why">为什么记：${instructionEsc(item.why)}</div>` : '')
+    + meta
+    + `<div class="mc-actions mc-bm-actions" hidden><button class="mc-btn" type="button" data-bm-edit>编辑</button><button class="mc-btn quiet" type="button" data-bm-source>看原文</button><button class="mc-btn quiet danger" type="button" data-bm-delete>删除</button></div>`
+    + '</div></article>';
+}
+function memoryBookmarkReplace(card, item, chat, editing) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = memoryBookmarkView(item, editing);
+  card.className = tmp.firstElementChild.className;
+  card.innerHTML = tmp.firstElementChild.innerHTML;
+  wireMemoryBookmark(card, item, chat);
+}
+// 长的原话先收到四行：真被截了才露「展开」。
+function wireMemoryBookmarkLines(card, item, chat) {
+  card.querySelectorAll('.mc-bm-line').forEach(line => {
+    const text = line.querySelector('.mc-bm-text'), more = line.querySelector('.mc-bm-expand');
+    more.hidden = !line.classList.contains('open') && text.scrollHeight <= text.clientHeight + 1;
+    more.onclick = () => { const open = line.classList.toggle('open'); more.textContent = open ? '收起' : '展开'; };
+  });
+  card.querySelectorAll('[data-bm-del]').forEach(button => button.onclick = async () => {
+    const msg = card.querySelector('[data-bm-msg]');
+    card.querySelectorAll('[data-bm-del]').forEach(b => b.disabled = true);
+    try {
+      const d = await memoryJson(memoryBookmarkUrl(item, chat), {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({remove_message_id: button.dataset.bmDel})});
+      item.lines = d.item.lines; item.updated = d.item.updated; item.content = d.item.content;
+      // 只换原话那一块，上面下面框里没存的字不动
+      card.querySelector('.mc-bm-lines').innerHTML = memoryBookmarkLines(item, true);
+      if (msg) { msg.textContent = ''; msg.className = 'ap-msg'; }
+      wireMemoryBookmarkLines(card, item, chat);
+    } catch (e) {
+      card.querySelectorAll('[data-bm-del]').forEach(b => b.disabled = false);
+      if (msg) { msg.textContent = '没去掉：' + e.message; msg.className = 'ap-msg on bad'; }
+    }
+  });
+}
+function memoryBookmarkUrl(item, chat) {
+  return 'api/chats/' + encodeURIComponent(memoryCardChatId(item, chat)) + '/bookmarks/' + encodeURIComponent(item.id);
+}
+function wireMemoryBookmark(card, item, chat) {
+  wireMemoryBookmarkLines(card, item, chat);
+  const more = card.querySelector('[data-bm-more]'), actions = card.querySelector('.mc-bm-actions');
+  if (more) more.onclick = () => { const open = actions.hidden; actions.hidden = !open; more.setAttribute('aria-expanded', String(open)); };
+  const edit = card.querySelector('[data-bm-edit]');
+  if (edit) edit.onclick = () => {
+    memoryBookmarkReplace(card, item, chat, true);
+    // 记下打开编辑时的样子：只发她动过的那一项。概括没动就别发，不然一保存就算她自己写的，模型写好的也会被空的盖掉。
+    card._bmLabel = item.label || ''; card._bmWhy = item.why || '';
+    const input = card.querySelector('input[name="label"]');
+    if (input) input.focus();
+  };
+  const source = card.querySelector('[data-bm-source]');
+  if (source) source.onclick = () => openMemorySource(memoryCardChatId(item, chat), 'bookmark', item.id, item.label || '');
+  const del = card.querySelector('[data-bm-delete]');
+  if (del) del.onclick = async () => {
+    if (!confirm('删掉这个书签？聊天里的原话不受影响。')) return;
+    del.disabled = true;
+    try {
+      await memoryJson(memoryBookmarkUrl(item, chat), {method: 'DELETE'});
+      removeMemoryCard(card, null);
+      const n = document.querySelector('[data-mc-kind="bookmarks"] .mc-kind-n');
+      if (n) n.textContent = Math.max(0, (parseInt(n.textContent, 10) || 0) - 1);
+    } catch (e) { del.disabled = false; alert('没有删除：' + e.message); }
+  };
+  const form = card.querySelector('[data-bm-form]');
+  if (!form) return;
+  form.querySelector('[data-bm-cancel]').onclick = () => memoryBookmarkReplace(card, item, chat, false);
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const msg = form.querySelector('[data-bm-msg]');
+    const label = form.elements.label.value.trim(), why = form.elements.why.value.trim();
+    const payload = {};
+    if (label !== (card._bmLabel || '')) payload.label = label;
+    if (why !== (card._bmWhy || '')) payload.why = why;
+    if (!Object.keys(payload).length) { memoryBookmarkReplace(card, item, chat, false); return; }
+    const save = form.querySelector('[type="submit"]');
+    save.disabled = true; msg.textContent = '正在保存…'; msg.className = 'ap-msg on';
+    try {
+      const d = await memoryJson(memoryBookmarkUrl(item, chat), {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+      Object.assign(item, d.item);
+      memoryBookmarkReplace(card, item, chat, false);
+    } catch (e) { save.disabled = false; msg.textContent = '没有保存：' + e.message; msg.className = 'ap-msg on bad'; }
+  };
+}
+function wireMemoryBookmarks(chat, allItems) {
+  document.querySelectorAll('[data-bm-item]').forEach(card => {
+    const item = allItems.find(value => value.kind === 'bookmark' && value.id === card.dataset.bmItem);
+    if (item) wireMemoryBookmark(card, item, chat);
+  });
+}
+// 刚收进来的书签，概括要过几秒才写好。列表里还有「正在概括…」就每 3 秒悄悄问一次，
+// 只把那一行字换掉（不重画整页，正在编辑的、翻到一半的都不动）；最多问 30 秒。
+let bookmarkPoll = 0, bookmarkPollUntil = 0, bookmarkPollGen = 0;
+function stopBookmarkPoll() { if (bookmarkPoll) { clearTimeout(bookmarkPoll); bookmarkPoll = 0; } bookmarkPollGen++; }
+function watchBookmarkLabels(chat, allItems) {
+  stopBookmarkPoll();
+  const gen = bookmarkPollGen;
+  const pendingCards = () => [...document.querySelectorAll('[data-bm-item]')]
+    .map(card => [card, allItems.find(value => value.kind === 'bookmark' && value.id === card.dataset.bmItem)])
+    .filter(([, item]) => item && item.label_state === 'pending');
+  if (!pendingCards().length) { bookmarkPollUntil = 0; return; }
+  if (!bookmarkPollUntil) bookmarkPollUntil = Date.now() + 30000;
+  if (Date.now() >= bookmarkPollUntil) return;
+  bookmarkPoll = setTimeout(async () => {
+    bookmarkPoll = 0;
+    try {
+      const d = await memoryJson('api/chats/' + encodeURIComponent(chat.id) + '/bookmarks', {cache: 'no-store'});
+      if (gen !== bookmarkPollGen) return;
+      const fresh = Object.fromEntries((d.items || []).map(value => [value.id, value]));
+      for (const [card, item] of pendingCards()) {
+        const next = fresh[item.id];
+        if (!next || next.label_state === 'pending') continue;
+        item.label = next.label; item.label_state = next.label_state;
+        // 正在编辑的那张只更新数据；收起编辑时自然显示出来
+        const label = !card.classList.contains('editing') && card.querySelector('.mc-bm-label');
+        if (label) label.outerHTML = memoryBookmarkLabel(item, true);
+      }
+    } catch (e) {}
+    if (gen === bookmarkPollGen) watchBookmarkLabels(chat, allItems);
+  }, 3000);
+}
 function memoryEmpty(title, text, button) {
   return `<div class="mc-empty"><strong>${instructionEsc(title)}</strong>${instructionEsc(text)}${button || ''}</div>`;
 }
@@ -13775,6 +14068,7 @@ function wireMemoryCards(chat, cardState, allItems) {
 }
 async function loadLongContext(quiet) {
   const body=document.getElementById('longContextBody'); stopLongContextPoll();
+  if(!quiet)bookmarkPollUntil=0;   // 重新打开算新的一轮：「正在概括…」再等 30 秒
   /* quiet：开关这种原地改动不清空面板。清空再重建就是「点一下慢半拍」的来源。 */
   const keepScroll = quiet ? body.scrollTop : 0;
   if(!quiet) body.innerHTML='<div class="gnote">正在打开记忆控制台…</div>';
@@ -13782,7 +14076,7 @@ async function loadLongContext(quiet) {
     const chat=await currentChatForMemory(); if(!chat){body.innerHTML=memoryEmpty('还没有打开聊天','先打开一间聊天，再回来管理它的记忆。');return;}
     memoryCurrentChatId=chat.id;   // 卡片可能来自别的窗口，靠它认出哪些是外来的
     markMemorySeen(chat.id);       // 打开过就算看过，采没采用都一样
-    const [summaryResponse,modelResponse,cardsResponse,embeddingResponse,sigilloResponse,shopResponse]=await Promise.all([fetch('api/chats/'+encodeURIComponent(chat.id)+'/long-context',{cache:'no-store'}),fetch('api/long-context-model',{cache:'no-store'}),fetch('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards?limit='+memoryCardLimit+'&q='+encodeURIComponent(memoryConsoleQuery||'')+'&filter='+encodeURIComponent(memoryConsoleFilter||'all')+'&topic='+encodeURIComponent(memoryConsoleTopic||'')+'&thread='+encodeURIComponent(memoryConsoleThread||''),{cache:'no-store'}),fetch('api/embedding-model',{cache:'no-store'}),fetch('api/chats/'+encodeURIComponent(chat.id)+'/sigillo',{cache:'no-store'}),fetch('api/chats/'+encodeURIComponent(chat.id)+'/shop',{cache:'no-store'})]);
+    const [summaryResponse,modelResponse,cardsResponse,embeddingResponse,sigilloResponse,shopResponse]=await Promise.all([fetch('api/chats/'+encodeURIComponent(chat.id)+'/long-context',{cache:'no-store'}),fetch('api/long-context-model',{cache:'no-store'}),fetch('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards?limit='+memoryCardLimit+'&q='+encodeURIComponent(memoryConsoleQuery||'')+'&filter='+encodeURIComponent(memoryConsoleFilter||'all')+'&topic='+encodeURIComponent(memoryConsoleTopic||'')+'&thread='+encodeURIComponent(memoryConsoleThread||'')+'&kind='+encodeURIComponent(memoryConsoleKind),{cache:'no-store'}),fetch('api/embedding-model',{cache:'no-store'}),fetch('api/chats/'+encodeURIComponent(chat.id)+'/sigillo',{cache:'no-store'}),fetch('api/chats/'+encodeURIComponent(chat.id)+'/shop',{cache:'no-store'})]);
     const summary=await summaryResponse.json(), model=await modelResponse.json(), cards=await cardsResponse.json(), embeddingModel=await embeddingResponse.json();
     // 回执单是附加功能，读不到就当没开，不该拖垮整个控制台。
     const sigilloState=sigilloResponse.ok?await sigilloResponse.json().catch(()=>({ok:false})):{ok:false};
@@ -13799,7 +14093,9 @@ async function loadLongContext(quiet) {
     if(memoryConsoleTab==='summary') panel=memorySummaryHtml(summary);
     if(memoryConsoleTab==='settings') panel=memorySettingsHtml(model,cards,embeddingModel,sigilloState,shopState);
     if(memoryConsoleTab==='review') panel=`<div class="mc-toolbar mc-review-actions"><button class="mc-btn primary" id="memoryGenerate" ${cardWorking?'disabled':''}>${cardWorking?'正在整理…':'生成未处理分段的记忆卡草稿'}</button>${drafts.length?`<div class="mc-pair"><button class="mc-btn" id="memoryAcceptAll" ${cardWorking?'disabled':''}>采用全部（${drafts.length}）</button><button class="mc-btn quiet danger" id="memoryDiscardAll" ${cardWorking?'disabled':''}>全部忽略（${drafts.length}）</button></div>`:''}</div>${cards.state&&cards.state.error?`<div class="ap-msg on bad">${instructionEsc(cards.state.error)}</div>`:''}${(cards.state&&cards.state.note&&!cards.state.error)?`<div class="ap-msg on">${instructionEsc(cards.state.note)}</div>`:''}${drafts.length?`<div class="mc-stack">${drafts.map(item=>memoryCardView(item,cards.taxonomy,'draft',null,cardById)).join('')}</div>`:memoryEmpty(cardWorking?'正在整理候选':'没有待确认内容',cardWorking?'完成后会自动出现在这里。':'可以让模型检查尚未处理的新分段；任何候选都要由你逐条采用。')}`;
-    if(memoryConsoleTab==='cards') panel=`${(()=>{ const lastUse=cards.last_injection; if(!lastUse||!(lastUse.items||[]).length) return ''; /* 最近一次带入是「结果」不是设置：放记忆卡顶上，折叠着不挡翻卡 */ return `<details class="mc-used-fold"><summary>最近一次带入 · ${instructionEsc(memoryDate(lastUse.used_at))} · ${lastUse.items.length} 条</summary><div class="mc-stack mc-used-scroll" style="margin-top:10px">${lastUse.items.map(item=>memoryCardView(item,cards.taxonomy,'used')).join('')}</div></details>`; })()}${memorySearchOpen?`<div class="mc-search-panel"><form class="mc-search-box" id="memorySearchForm" role="search"><select id="memoryStatus" aria-label="按状态筛选">${[['all','全部'],['active','可被挑选'],['hidden','已隐藏'],['high','固定保留'],['archived','已归档'+(counts.archived?' '+counts.archived:'')]].map(([key,label])=>`<option value="${key}"${memoryConsoleFilter===key?' selected':''}>${label}</option>`).join('')}</select><input id="memorySearch" type="search" enterkeyhint="search" placeholder="搜索记忆内容" value="${instructionEsc(memorySearchDraft)}"><button type="submit" class="mc-search-go" aria-label="搜索"><span class="ic" data-i="search"></span></button></form><div class="mc-filter-chips" role="group" aria-label="按类别筛选">${[['','全部类别'],...Object.entries(cards.taxonomy.topics||{})].map(([key,label])=>`<button type="button" class="mc-chip${memoryConsoleTopic===key?' on':''}" data-mc-topic="${key}">${instructionEsc(label)}</button>`).join('')}</div></div>`:''}${memoryConsoleThread?`<div class="mc-filter-chips mc-thread-filter" role="group" aria-label="按事件筛选"><button type="button" class="mc-chip on" id="memoryThreadClear" aria-label="不再只看这件事">事件：${instructionEsc(memoryConsoleThread)} ×</button></div>`:''}<div id="memoryNewSlot"></div>${pageItems.length?`<div class="mc-stack">${pageItems.map(item=>memoryCardView(item,cards.taxonomy,'card',recentIds)).join('')}</div>${totalShown>pageItems.length?`<button type="button" class="mc-btn mc-more" id="memoryMore">再显示 ${Math.min(MEMORY_PAGE,totalShown-pageItems.length)} 条 · 还有 ${totalShown-pageItems.length} 条</button>`:''}`:(searching?`<div class="mc-empty"><strong>没有符合条件的记忆</strong>换个关键词或筛选条件看看。</div>`:memoryEmpty('还没有正式记忆卡','先到“待确认”生成候选，并逐条采用。'))}`;
+    // 全部 / 卡片 / 书签：还没有书签时不摆出来，免得多一排用不上的东西
+    const kindFilter=(Number(counts.bookmarks||0)||memoryConsoleKind!=='all')?`<div class="mc-kind-filter" role="group" aria-label="按种类筛选">${[['all','全部'],['cards','卡片'],['bookmarks','书签']].map(([key,label])=>`<button type="button" class="mc-chip${memoryConsoleKind===key?' on':''}" data-mc-kind="${key}" aria-pressed="${memoryConsoleKind===key}">${label}${key==='bookmarks'&&counts.bookmarks?`<span class="mc-kind-n">${Number(counts.bookmarks)}</span>`:''}</button>`).join('')}</div>`:'';
+    if(memoryConsoleTab==='cards') panel=`${(()=>{ const lastUse=cards.last_injection; if(!lastUse||!(lastUse.items||[]).length) return ''; /* 最近一次带入是「结果」不是设置：放记忆卡顶上，折叠着不挡翻卡 */ return `<details class="mc-used-fold"><summary>最近一次带入 · ${instructionEsc(memoryDate(lastUse.used_at))} · ${lastUse.items.length} 条</summary><div class="mc-stack mc-used-scroll" style="margin-top:10px">${lastUse.items.map(item=>memoryCardView(item,cards.taxonomy,'used')).join('')}</div></details>`; })()}${memorySearchOpen?`<div class="mc-search-panel"><form class="mc-search-box" id="memorySearchForm" role="search"><select id="memoryStatus" aria-label="按状态筛选">${[['all','全部'],['active','可被挑选'],['hidden','已隐藏'],['high','固定保留'],['archived','已归档'+(counts.archived?' '+counts.archived:'')]].map(([key,label])=>`<option value="${key}"${memoryConsoleFilter===key?' selected':''}>${label}</option>`).join('')}</select><input id="memorySearch" type="search" enterkeyhint="search" placeholder="搜索记忆内容" value="${instructionEsc(memorySearchDraft)}"><button type="submit" class="mc-search-go" aria-label="搜索"><span class="ic" data-i="search"></span></button></form><div class="mc-filter-chips" role="group" aria-label="按类别筛选">${[['','全部类别'],...Object.entries(cards.taxonomy.topics||{})].map(([key,label])=>`<button type="button" class="mc-chip${memoryConsoleTopic===key?' on':''}" data-mc-topic="${key}">${instructionEsc(label)}</button>`).join('')}</div></div>`:''}${kindFilter}${memoryConsoleThread?`<div class="mc-filter-chips mc-thread-filter" role="group" aria-label="按事件筛选"><button type="button" class="mc-chip on" id="memoryThreadClear" aria-label="不再只看这件事">事件：${instructionEsc(memoryConsoleThread)} ×</button></div>`:''}<div id="memoryNewSlot"></div>${pageItems.length?`<div class="mc-stack">${pageItems.map(item=>item.kind==='bookmark'?memoryBookmarkView(item):memoryCardView(item,cards.taxonomy,'card',recentIds)).join('')}</div>${totalShown>pageItems.length?`<button type="button" class="mc-btn mc-more" id="memoryMore">再显示 ${Math.min(MEMORY_PAGE,totalShown-pageItems.length)} 条 · 还有 ${totalShown-pageItems.length} 条</button>`:''}`:(searching?`<div class="mc-empty"><strong>没有符合条件的记忆</strong>换个关键词或筛选条件看看。</div>`:memoryConsoleKind==='bookmarks'?memoryEmpty('还没有书签','在聊天里点一条消息，⋯ 里点「选择消息」，勾上几句再点「收进记忆」。'):memoryEmpty('还没有正式记忆卡','先到“待确认”生成候选，并逐条采用。'))}`;
     
     body.innerHTML=`<div class="mc-intro"><h1>${instructionEsc(chat.name||'新对话')}</h1><p>记忆卡把重要细节拆成可以管理的小条目；摘要维持这段关系的连续性。</p><div class="mc-safety${cards.injection_enabled?'':' off'}"><span class="ic" data-i="${cards.injection_enabled?'check':'x'}"></span><span>${cards.injection_enabled?'按需记忆已开启：每轮最多带入 5 条相关卡片；隐藏、归档和过期内容会自动排除。':'按需记忆已暂停：AI 仍会看到长期摘要和最近原文，但不会看到记忆卡。'}</span></div></div><div class="mc-tabs" role="tablist" aria-label="记忆管理">${tabHtml}</div><section class="mc-panel${(memoryConsoleTab==='summary'||memoryConsoleTab==='settings')?' mc-flat':''}" role="tabpanel">${panel}</section>`;
     if(quiet) body.scrollTop=keepScroll;
@@ -13808,6 +14104,9 @@ async function loadLongContext(quiet) {
     if(memoryConsoleTab==='summary')wireMemorySummary(chat,summary);
     if(memoryConsoleTab==='settings')wireMemorySettings(chat,cards,sigilloState,shopState);
     if(memoryConsoleTab==='cards'||memoryConsoleTab==='review')wireMemoryCards(chat,cards,cards.items||[]);
+    if(memoryConsoleTab==='cards'){ wireMemoryBookmarks(chat,cards.items||[]); watchBookmarkLabels(chat,cards.items||[]); }
+    // 只看书签时，类别、事件这些筛不到书签，一并放下
+    body.querySelectorAll('[data-mc-kind]').forEach(chip=>chip.onclick=()=>{ const kind=chip.dataset.mcKind; if(kind===memoryConsoleKind)return; memoryConsoleKind=kind; if(kind==='bookmarks'){ memoryConsoleTopic=''; memoryConsoleThread=''; if(!['all','active'].includes(memoryConsoleFilter))memoryConsoleFilter='all'; } memoryCardLimit=MEMORY_PAGE; loadLongContext(true); });
     const generate=document.getElementById('memoryGenerate'); if(generate&&!cardWorking)generate.onclick=async()=>{generate.disabled=true;generate.textContent='正在开始…';try{await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-cards/generate',{method:'POST'});loadLongContext();}catch(e){generate.disabled=false;generate.textContent='生成未处理分段的记忆卡草稿';alert('没有开始：'+e.message);}};
     const discardAll=document.getElementById('memoryDiscardAll'); if(discardAll&&!cardWorking)discardAll.onclick=async()=>{if(!confirm('忽略全部 '+drafts.length+' 条待确认记忆？它们不会变成记忆卡，这些分段也不会再重新出卡。'))return;discardAll.disabled=true;discardAll.textContent='正在忽略…';try{const result=await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/discard-all',{method:'POST'});note('（已忽略 '+result.discarded+' 条候选）');loadLongContext();}catch(e){discardAll.disabled=false;discardAll.textContent='全部忽略（'+drafts.length+'）';alert('没有全部忽略：'+e.message);}};
     const acceptAll=document.getElementById('memoryAcceptAll'); if(acceptAll&&!cardWorking)acceptAll.onclick=async()=>{if(!confirm('采用全部 '+drafts.length+' 条待确认记忆？它们会直接按当前内容成为正式记忆卡。'))return;acceptAll.disabled=true;acceptAll.textContent='正在采用…';try{const result=await memoryJson('api/chats/'+encodeURIComponent(chat.id)+'/memory-card-drafts/accept-all',{method:'POST'});note('（已采用 '+result.accepted+' 条记忆）');document.querySelectorAll('.mc-card').forEach(c=>removeMemoryCard(c,'review'));updateMemoryTabCount('cards',result.accepted);acceptAll.remove();}catch(e){acceptAll.disabled=false;acceptAll.textContent='采用全部（'+drafts.length+'）';alert('没有全部采用：'+e.message);}};
@@ -15463,7 +15762,7 @@ async function memPickLoad(more) {
     }
     const url = 'api/chats/' + encodeURIComponent(st.chatId) + '/memory-cards?limit=' + MEM_PICK_PAGE
       + '&offset=' + (more ? st.items.length : 0) + '&q=' + encodeURIComponent(st.q)
-      + '&filter=active&thread=' + encodeURIComponent(st.thread);
+      + '&filter=active&kind=cards&thread=' + encodeURIComponent(st.thread);  // 书签还不能随消息带，只列卡片
     const d = await memoryJson(url, { cache: 'no-store' });
     if (seq !== st.seq) return;
     const have = new Set(st.items.map(v => v.id));

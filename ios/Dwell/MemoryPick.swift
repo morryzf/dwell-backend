@@ -77,6 +77,8 @@ struct MemoryPickSheet: View {
         .task {
             // 只挑还在用的卡：归档的不列。
             memory.filter = "all"
+            // 随消息带的只认记忆卡，书签先不列。
+            memory.kind = "cards"
             await memory.loadCards(reset: true)
         }
         .onChange(of: memory.query) { _, _ in
