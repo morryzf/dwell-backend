@@ -13,6 +13,10 @@ struct RecallCard: Identifiable, Equatable {
     /// 「这张为什么没进来」才有：会带上 / 差一点 / 排得太后 / 两路都没对上……以及一句说明。
     let verdict: String
     let note: String
+    /// 意思那一路的相似度原数（0–1），之后定「绝对门槛」时对照用。
+    let similarity: Double
+    /// 两路都在第 10 名以后：真聊天时被门槛挡下，不带。
+    let gated: Bool
     var id: String { card.id }
 
     init(json: [String: Any]) {
@@ -24,13 +28,16 @@ struct RecallCard: Identifiable, Equatable {
         keywordRank = json["keyword_rank"] as? Int
         verdict = json["verdict"] as? String ?? ""
         note = json["note"] as? String ?? ""
+        similarity = (json["similarity"] as? NSNumber)?.doubleValue ?? 0
+        gated = json["gated"] as? Bool ?? false
     }
 
-    /// 「意思排第 2 · 关键词排第 14」。没拿到向量时只说关键词。
+    /// 「意思排第 2（0.48）· 关键词排第 14」。没拿到向量时只说关键词。
     func ranksLine(vector: Bool) -> String {
         let keyword = keywordRank.map { "关键词排第 \($0)" } ?? "关键词没对上"
         guard vector else { return keyword }
-        return (vectorRank.map { "意思排第 \($0)" } ?? "意思没排上") + " · " + keyword
+        let meaning = vectorRank.map { "意思排第 \($0)（\(String(format: "%.2f", similarity))）" } ?? "意思没排上"
+        return meaning + " · " + keyword
     }
 }
 
@@ -288,6 +295,11 @@ struct RecallRehearsalView: View {
                     Text(item.reasons.joined(separator: " · "))
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.dim)
+                }
+                if item.gated {
+                    Text("两路都在第 10 名以后，真聊天时不带")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(MemoryStyle.danger)
                 }
                 Text(item.ranksLine(vector: vector))
                     .font(.system(size: 11.5).monospacedDigit())
