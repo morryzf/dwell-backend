@@ -109,17 +109,16 @@ class ReactionTest(unittest.TestCase):
 
         self.assertEqual(db.message_get(self.words["id"])["reaction"], "😂")
 
-    def test_every_chat_has_the_tool_but_heartbeat_does_not(self):
+    def test_reacting_is_a_mark_in_the_reply_not_a_tool(self):
         tools, tool_map = asyncio.run(main._chat_tools(self.chat))
-        react = next(t for t in tools if t["function"]["name"] == "React")
-
-        self.assertEqual(tool_map["React"], "builtin:react")
-        self.assertFalse(main._heartbeat_tool_allowed(react, "builtin:react"))
+        self.assertNotIn("React", tool_map)
+        _, _, format_preference, _ = main._chat_stable_message_parts(self.chat)
+        self.assertTrue(any("[[react:" in m["content"] for m in format_preference))
 
     # ------------------------------------------------------------ 一轮回复
 
     def test_a_reaction_alone_leaves_no_empty_bubble(self):
-        self.rounds = [self._react_call("🥺"), []]
+        self.rounds = [[{"type": "text", "text": "[[react:🥺]]"}]]
 
         reply = self._reply()
 
@@ -128,7 +127,9 @@ class ReactionTest(unittest.TestCase):
         self.assertEqual(self._events("assistant_removed")[-1]["message_id"], reply)
 
     def test_a_reaction_with_words_keeps_the_reply(self):
-        self.rounds = [self._react_call("🥺"), [{"type": "text", "text": "好看"}]]
+        # 记号被拆在几段里流过来，也认得出、不露出来。
+        self.rounds = [[{"type": "text", "text": "[[rea"}, {"type": "text", "text": "ct:🥺]]好"},
+                        {"type": "text", "text": "看"}]]
 
         reply = self._reply()
 
@@ -179,6 +180,11 @@ class ReactionTest(unittest.TestCase):
     def test_she_cannot_send_words(self):
         r = self.client.put(f"/api/messages/{self.earlier['id']}/reaction", json={"emoji": "爱你"})
         self.assertEqual(r.status_code, 400)
+
+    def test_a_mark_can_point_at_an_earlier_message(self):
+        self.rounds = [[{"type": "text", "text": "[[react:😍|1]]真好看"}]]
+        self._reply()
+        self.assertEqual(db.message_get(self.photo["id"])["reaction"], "😍")
 
 
 if __name__ == "__main__":

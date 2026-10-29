@@ -333,7 +333,8 @@ const CODE_OR_LINK_G = /```[\s\S]*?```|`[^`]*`|https?:\/\/\S+/g;
 
 function replyLanguageOk(text, language) {
   if (language !== "en" && language !== "zh") return true;
-  const body = String(text || "").replace(CODE_OR_LINK_G, " ");
+  // 回复里的 [[react:…]] [[quote:…]] 记号会被摘掉，引用里的中文不算这轮说的话。
+  const body = String(text || "").replace(/\[\[(?:react|quote):[\s\S]*?\]\]/g, " ").replace(CODE_OR_LINK_G, " ");
   const han = (body.match(HAN_G) || []).length;
   const latin = (body.match(LATIN_G) || []).length;
   if (!han && !latin) return true;
