@@ -319,8 +319,7 @@ final class ChatStore: ObservableObject {
 
     /// 下一条要引用的那条消息（输入框上方那条小引用）。只管一条。
     @Published var quoting: Message?
-    /// 点了引用块：页面上有那条就滚过去、闪一下。
-    @Published var jumpTarget: String?
+    /// 跳过去的那条闪一下（点引用块、搜索里点开都用 jumpTarget 跳）。
     @Published var flashID: String?
     /// 点了引用块、那条离得太远没加载：弹出它和前后几条。
     @Published var quoteContext: MessageQuote?

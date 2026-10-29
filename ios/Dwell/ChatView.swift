@@ -203,17 +203,6 @@ struct ChatView: View {
     private var chatScroll: some View {
         ScrollViewReader { proxy in
             scrollBody(proxy)
-                .onChange(of: store.jumpTarget) { _, target in
-                    guard let target else { return }
-                    store.jumpTarget = nil
-                    withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(target, anchor: .center) }
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(250))
-                        withAnimation(.easeOut(duration: 0.2)) { store.flashID = target }
-                        try? await Task.sleep(for: .milliseconds(900))
-                        withAnimation(.easeOut(duration: 0.6)) { store.flashID = nil }
-                    }
-                }
         }
     }
 
@@ -334,11 +323,17 @@ struct ChatView: View {
                     scrollToBottom(proxy, animated: false)
                 }
             }
-            // 搜索里点开的那句：滚到正中，闪一下就好。
+            // 搜索里点开的那句、点引用跳回去的那句：滚到正中，闪一下就好。
             .onChange(of: store.jumpTarget) { _, target in
                 guard let target else { return }
                 withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(target, anchor: .center) }
                 store.jumpTarget = nil
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(250))
+                    withAnimation(.easeOut(duration: 0.2)) { store.flashID = target }
+                    try? await Task.sleep(for: .milliseconds(900))
+                    withAnimation(.easeOut(duration: 0.6)) { store.flashID = nil }
+                }
             }
             // 往上翻了：输入框上面一颗小箭头，点一下回到最新。
             .overlay(alignment: .bottom) {
