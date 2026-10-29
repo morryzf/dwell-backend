@@ -127,6 +127,10 @@ struct ChatView: View {
         } message: {
             Text("删了就找不回来了。")
         }
+        // 点了「引用」：顺手把键盘叫出来，接着就能写。
+        .onChange(of: store.quoting?.id) { _, id in
+            if id != nil { inputFocused = true }
+        }
         .onChange(of: store.returnedDraft) { _, text in
             guard let text else { return }
             if draft.isEmpty { draft = text }
@@ -149,6 +153,14 @@ struct ChatView: View {
                             })
                 .environmentObject(store)
                 .presentationDetents([.height(450)])
+        }
+        .sheet(isPresented: Binding(get: { store.quoteContext != nil },
+                                    set: { if !$0 { store.quoteContext = nil } })) {
+            if let quote = store.quoteContext {
+                QuoteContextSheet(quote: quote)
+                    .environmentObject(store)
+                    .presentationDetents([.medium, .large])
+            }
         }
         .sheet(isPresented: $showMemoryPick) {
             MemoryPickSheet(chatID: store.chatID)
@@ -190,6 +202,23 @@ struct ChatView: View {
 
     private var chatScroll: some View {
         ScrollViewReader { proxy in
+            scrollBody(proxy)
+                .onChange(of: store.jumpTarget) { _, target in
+                    guard let target else { return }
+                    store.jumpTarget = nil
+                    withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(target, anchor: .center) }
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(250))
+                        withAnimation(.easeOut(duration: 0.2)) { store.flashID = target }
+                        try? await Task.sleep(for: .milliseconds(900))
+                        withAnimation(.easeOut(duration: 0.6)) { store.flashID = nil }
+                    }
+                }
+        }
+    }
+
+    private func scrollBody(_ proxy: ScrollViewProxy) -> some View {
+        Group {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if store.hasMore {
@@ -235,6 +264,14 @@ struct ChatView: View {
                                            })
                             }
                             .padding(.top, newDay || index == 0 ? 0 : (sameSpeaker ? 6 : 22))
+                            // 从引用跳过来的那条：底下淡淡亮一下再退掉。
+                            .background {
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(Theme.accent.opacity(store.flashID == message.id ? 0.16 : 0))
+                                    .padding(.horizontal, -8)
+                                    .padding(.top, newDay || index == 0 ? -4 : (sameSpeaker ? 2 : 18))
+                                    .padding(.bottom, -4)
+                            }
                             .transition(BubbleEntrance.insertion(isMe: message.kind == .me))
                         }
                     }
@@ -379,6 +416,12 @@ struct ChatView: View {
                     .overlay(Capsule().stroke(Theme.chipBorder, lineWidth: 1))
             }
             VStack(alignment: .leading, spacing: 4) {
+                if let quoting = store.quoting {
+                    QuotingChip(message: quoting) {
+                        withAnimation(.easeOut(duration: 0.18)) { store.quoting = nil }
+                    }
+                    .transition(.opacity)
+                }
                 if !store.pickedCards.isEmpty {
                     pickedStrip
                 }
@@ -923,6 +966,10 @@ struct MessageRow: View {
                         }
                     }
                 }
+                if let quote = message.quote {
+                    QuoteBlock(quote: quote) { store.openQuote(quote) }
+                        .frame(maxWidth: 280, alignment: isMe ? .trailing : .leading)
+                }
                 let voiceBar = message.voice && !isMe && !message.text.isEmpty
                 // 表情挂在最后一个看得见的东西上：一般是最后一个气泡；只发了图就挂在最后一张图上。
                 let badgeOnImage = message.bubbles.isEmpty && !voiceBar
@@ -1022,6 +1069,7 @@ struct MessageRow: View {
                 .disabled(store.isReplying)
                 iconButton("face.smiling", "贴个表情") { reacting = true }
             }
+            iconButton("arrowshape.turn.up.left", "引用这条") { startQuote() }
             iconButton("trash", "删除消息") { onDelete(message) }
             Menu {
                 Button { onSelect() } label: { Label("选择消息", systemImage: "checkmark.circle") }
@@ -1059,6 +1107,12 @@ struct MessageRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+    }
+
+    /// 引用这条：输入框上方出现一条小引用，下一条发出去时带上。
+    private func startQuote() {
+        withAnimation(.easeOut(duration: 0.18)) { store.quoting = message }
+        if actionsOpen { onToggleActions() }
     }
 
     /// 摘进最喜欢的话：点的是哪个气泡都一样，摘的是这一轮完整的回复（自己的话就是这一条）。
@@ -1116,6 +1170,9 @@ struct MessageRow: View {
                 } label: {
                     Label("贴个表情", systemImage: "face.smiling")
                 }
+            }
+            Button { startQuote() } label: {
+                Label("引用", systemImage: "arrowshape.turn.up.left")
             }
             Button {
                 onEdit(message)

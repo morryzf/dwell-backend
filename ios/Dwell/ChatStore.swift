@@ -291,8 +291,11 @@ final class ChatStore: ObservableObject {
         // 挑好的记忆卡只管这一条：发出去就清空，没发成再放回去。
         let picks = pickedCards
         pickedCards = []
+        let quoting = self.quoting
+        self.quoting = nil
         var local = Message(id: localID, kind: .me, text: shown, images: images.map(\.previewDataURL))
         local.memoryPicks = picks.map(MemoryPick.init(card:))
+        local.quote = quoting.map(MessageQuote.init(message:))
         messages.append(local)
         markEntering(localID)
         isReplying = true
@@ -300,15 +303,40 @@ final class ChatStore: ObservableObject {
         do {
             try await api.send(text: text, chatID: chatID, images: images, files: files,
                                voice: voiceMode, replyLanguage: replyLanguage,
-                               memoryCardIDs: picks.map(\.id))
+                               memoryCardIDs: picks.map(\.id), quoteMessageID: quoting?.id)
         } catch {
             isReplying = false
             messages.removeAll { $0.isLocal }
             pickedCards = picks
+            self.quoting = quoting
             // 没发出去的字放回输入框，不让它丢了。
             returnedDraft = raw
             handle(error)
         }
+    }
+
+    // MARK: 引用
+
+    /// 下一条要引用的那条消息（输入框上方那条小引用）。只管一条。
+    @Published var quoting: Message?
+    /// 点了引用块：页面上有那条就滚过去、闪一下。
+    @Published var jumpTarget: String?
+    @Published var flashID: String?
+    /// 点了引用块、那条离得太远没加载：弹出它和前后几条。
+    @Published var quoteContext: MessageQuote?
+
+    func openQuote(_ quote: MessageQuote) {
+        if messages.contains(where: { $0.id == quote.messageID }) {
+            jumpTarget = quote.messageID
+        } else {
+            quoteContext = quote
+        }
+    }
+
+    /// 被引用那条和前后几条（原话可能已经改过、删了，删了就是空的）。
+    func context(of messageID: String) async -> [MemorySourceMessage] {
+        guard let json = try? await api.request("GET", "api/messages/\(messageID)/context") else { return [] }
+        return (json["messages"] as? [[String: Any]] ?? []).map(MemorySourceMessage.init(json:))
     }
 
     // MARK: 亲手挑的记忆卡
@@ -580,6 +608,7 @@ final class ChatStore: ObservableObject {
                 var mine = Message(id: id, kind: .me, text: event["text"] as? String ?? "",
                                    images: event["images"] as? [String] ?? [], at: at)
                 mine.memoryPicks = (event["memory_picks"] as? [[String: Any]] ?? []).map(MemoryPick.init(json:))
+                mine.quote = (event["quote"] as? [String: Any]).flatMap(MessageQuote.init(json:))
                 messages.append(mine)
             }
             isReplying = true
@@ -632,6 +661,13 @@ final class ChatStore: ObservableObject {
             let name = tool?["name"] as? String ?? ""
             // 贴表情一下就好，表情自己会冒出来，不用报「在用」。
             if name != "React" { status = name.isEmpty ? "在用工具…" : "在用 \(name)…" }
+
+        case "quote":
+            // 他这条引用了哪句：那条已经落成一条消息就挂上，还在打的等收尾重读时一起出来。
+            if let id = event["message_id"] as? String,
+               let index = messages.firstIndex(where: { $0.id == id }) {
+                messages[index].quote = (event["quote"] as? [String: Any]).flatMap(MessageQuote.init(json:))
+            }
 
         case "reaction":
             if let id = event["message_id"] as? String {
