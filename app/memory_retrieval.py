@@ -10,6 +10,18 @@ from __future__ import annotations
 import math
 import re
 from datetime import date, datetime
+from functools import lru_cache
+
+try:
+    # 中文按词切：「坏小子」「闹腾」「起床」各是一个词，不再两三个字硬切出「丁这」「为什」。
+    # 装不上（老部署还没跑 pip）就退回硬切，召回照样能用，只是粗一点。
+    import jieba
+    jieba.setLogLevel(60)
+    # 词典第一次用时要读半秒：服务一起来就在后台读好，别让第一条回复等它。
+    import threading
+    threading.Thread(target=jieba.initialize, daemon=True).start()
+except ImportError:  # pragma: no cover - 部署时 requirements 会装上
+    jieba = None
 
 
 def _valid_on(card: dict, today: date) -> bool:
@@ -122,15 +134,56 @@ def _normalized(text: object) -> str:
     return re.sub(r"\s+", "", str(text or "").casefold())
 
 
-def _terms(text: object) -> set[str]:
-    raw = str(text or "").casefold()
-    terms = {word for word in re.findall(r"[a-z0-9_]{2,}", raw)}
+_CJK_WORD = re.compile(r"[㐀-鿿]{2,}")
+_known_words: set[str] = set()
+
+
+def learn_words(names) -> None:
+    """把专有名词教给分词：事件名「布丁（Pudding）」里的「布丁」，「追音音」……
+    不教的话，生僻的名字会被切碎，对不上。教过的记着，不重复教。"""
+    if jieba is None:
+        return
+    fresh = set()
+    for name in names:
+        for part in re.split(r"[（）()、/,，·\s]+", str(name or "")):
+            if _CJK_WORD.fullmatch(part) and part not in _known_words:
+                fresh.add(part)
+    if not fresh:
+        return
+    for word in fresh:
+        jieba.add_word(word, freq=20000)
+    _known_words.update(fresh)
+    # 词典变了，之前切好的要作废。
+    _terms.cache_clear()
+
+
+@lru_cache(maxsize=8192)
+def _split(raw: str) -> frozenset[str]:
+    terms = set(re.findall(r"[a-z0-9_]{2,}", raw))
     # 「6点」「10月」「3次」：数字连着后面那个字算一块，不然数字会把它切没了。
     terms.update(re.findall(r"[0-9]+[㐀-鿿]", raw))
-    for chunk in re.findall(r"[㐀-鿿]{2,}", raw):
-        for size in (2, 3):
-            terms.update(chunk[index:index + size] for index in range(len(chunk) - size + 1))
-    return {term for term in terms if term not in COMMON_CJK_GRAMS}
+    if jieba is not None:
+        # 搜索模式：长词也给出里面的短词（「坏小子」也给「小子」），找和被找用同一种切法。
+        for word in jieba.lcut_for_search(raw):
+            if not _CJK_WORD.fullmatch(word):
+                continue
+            terms.add(word)
+            # 三个字以上的词再拆出两字块：「追音音」里的「音音」，她单说「音音」也要对得上。
+            # 只在一个词里面拆，不像以前整句硬切，切不出「丁这」这种跨词的碎块。
+            if len(word) >= 3:
+                terms.update(word[index:index + 2] for index in range(len(word) - 1))
+    else:
+        for chunk in _CJK_WORD.findall(raw):
+            for size in (2, 3):
+                terms.update(chunk[index:index + size] for index in range(len(chunk) - size + 1))
+    return frozenset(term for term in terms if term not in COMMON_CJK_GRAMS)
+
+
+def _terms(text: object) -> set[str]:
+    return set(_split(str(text or "").casefold()))
+
+
+_terms.cache_clear = _split.cache_clear
 
 
 def _hint_hit(hints, normalized_query: str, query_terms: set[str]) -> bool:
@@ -276,11 +329,6 @@ def rank_memory_cards(
     query = str(context or "").strip()
     if not query:
         return []
-    query_terms = _terms(query)
-    # 每行开头的「Morry：」「Cloudy：」是说话人的标签，不是说了什么，不拿来比对。
-    for speaker in re.findall(r"(?m)^([^：:\n]{1,20})[：:]", query):
-        query_terms -= _terms(speaker)
-
     valid_cards: dict[str, dict] = {}
     why: dict[str, dict] = {}
     vec_scores: list[tuple[str, float]] = []
@@ -290,6 +338,12 @@ def rank_memory_cards(
         cid = str(card.get("id") or "")
         if cid and _valid_on(card, now.date()):
             valid_cards[cid] = card
+    # 事件名是她起的名字，先教给分词，再切查询和卡片。
+    learn_words(card.get("thread") for card in valid_cards.values())
+    query_terms = _terms(query)
+    # 每行开头的「Morry：」「Cloudy：」是说话人的标签，不是说了什么，不拿来比对。
+    for speaker in re.findall(r"(?m)^([^：:\n]{1,20})[：:]", query):
+        query_terms -= _terms(speaker)
     weights = _term_weights(query_terms, [_terms(_card_text(card)) for card in valid_cards.values()])
 
     for cid, card in valid_cards.items():
