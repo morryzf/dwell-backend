@@ -16,6 +16,10 @@ final class ChatStore: ObservableObject {
     @Published var assistant: AssistantInfo?
     /// 当前这间聊天的名字，顶栏标题用；没起名时显示助手的名字（跟网页一样）。
     @Published var chatName = ""
+    /// 连不上服务器，屏幕上是上次存下的内容。
+    @Published var offline = false
+    /// 没发出去的那条字，聊天页拿回输入框里。
+    @Published var returnedDraft: String?
     /// 记忆面板里有几条新的待确认（三个点上那颗粉点）。
     @Published var memoryUnseen = 0
     /// 按需记忆开没开（菜单里那个开关）。
@@ -72,6 +76,8 @@ final class ChatStore: ObservableObject {
     private var polledChatID = ""
     /// messages 现在装的是哪间聊天的。
     private var loadedChatID = ""
+    /// 刚摆出来的是存着的那一页：等服务器那页回来时整页换上，不当成「新到的」一条条冒。
+    private var rememberedChatID = ""
 
     var chatID: String { assistant?.chatID ?? "" }
 
@@ -79,12 +85,35 @@ final class ChatStore: ObservableObject {
 
     func start() async {
         guard api.baseURL != nil else { phase = .needsLogin; return }
-        if await api.isAuthed() {
+        // 先把上次存下的摆出来：一打开就有内容，再去服务器问新的。
+        if loadedChatID.isEmpty, let json = api.remembered("api/assistant") {
+            assistant = AssistantInfo(json: json)
+            showRemembered()
+            loadRememberedControls()
+            phase = .ready
+        }
+        switch await api.authState() {
+        case true?:
             phase = .ready
             await refresh()
-        } else {
+        case false?:
             phase = .needsLogin
+        case nil:
+            // 连不上：有存着的就接着看存着的，没有才回登录页。
+            if assistant != nil { offline = true } else { phase = .needsLogin }
         }
+    }
+
+    /// 这间聊天上次存下的那一页，还没摆过就摆出来。
+    private func showRemembered() {
+        let chat = chatID
+        guard !chat.isEmpty, loadedChatID != chat, let page = api.rememberedMessages(chatID: chat) else { return }
+        shown = [:]
+        messages = page.msgs.filter { !$0.isEmpty }
+        hasMore = page.more
+        loadedChatID = chat
+        rememberedChatID = chat
+        chatName = api.rememberedChats()?.first { $0.id == chat }?.name ?? chatName
     }
 
     func login(server: String, user: String, password: String) async throws {
@@ -113,12 +142,17 @@ final class ChatStore: ObservableObject {
     func refresh() async {
         do {
             assistant = try await api.assistant()
+            showRemembered()
             try await reloadMessages()
+            offline = false
             startPolling()
             await syncReplying()
             chatName = (try? await api.chats())?.first { $0.id == chatID }?.name ?? ""
             await refreshMemoryBadge()
             await loadControls()
+        } catch is URLError {
+            // 自己去拿的没拿到：不用弹提示，顶上那行小字就够了。
+            offline = true
         } catch {
             handle(error)
         }
@@ -137,8 +171,11 @@ final class ChatStore: ObservableObject {
             older = messages.filter { $0.seq > 0 && $0.seq < firstSeq }
         }
         if older.isEmpty { hasMore = page.more }
-        // 同一间聊天里多出来的（比如他主动发的），算刚到的；换聊天、第一次打开就不演了。
-        if loadedChatID == chat {
+        // 同一间聊天里多出来的（比如他主动发的），算刚到的；换聊天、第一次打开、
+        // 刚才摆的是存着的那页，就不演了，整页换上。
+        let fromRemembered = rememberedChatID == chat
+        rememberedChatID = ""
+        if loadedChatID == chat && !fromRemembered {
             let known = Set(messages.map(\.id))
             hold(fresh.filter { !known.contains($0.id) && $0.kind == .gu }, carried: streamShown)
         } else {
@@ -268,6 +305,8 @@ final class ChatStore: ObservableObject {
             isReplying = false
             messages.removeAll { $0.isLocal }
             pickedCards = picks
+            // 没发出去的字放回输入框，不让它丢了。
+            returnedDraft = raw
             handle(error)
         }
     }
@@ -603,6 +642,12 @@ final class ChatStore: ObservableObject {
         if let apiError = error as? APIError, apiError.isUnauthorized {
             stopPolling()
             phase = .needsLogin
+            return
+        }
+        // 没网：顶上那行小字一直挂着；这一下是她点的，再说一句没做成。
+        if error is URLError {
+            offline = true
+            flash("没连上服务器，这次没做成")
             return
         }
         flash(error.localizedDescription)

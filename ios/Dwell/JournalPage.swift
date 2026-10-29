@@ -168,12 +168,18 @@ struct JournalPage: View {
     }
 
     private func load() async {
+        // 先摆上次存下的，服务器那份回来再换上。
+        if !loaded, let json = API.shared.remembered("api/quotes") {
+            quotes = (json["items"] as? [[String: Any]] ?? []).map(Quote.init(json:))
+            loaded = true
+        }
         do {
-            let json = try await API.shared.request("GET", "api/quotes")
+            let json = try await API.shared.request("GET", "api/quotes", remember: true)
             quotes = (json["items"] as? [[String: Any]] ?? []).map(Quote.init(json:))
             failed = false
         } catch {
-            failed = true
+            // 手里有存着的就接着看，不说拿不到。
+            failed = quotes.isEmpty
         }
         loaded = true
     }

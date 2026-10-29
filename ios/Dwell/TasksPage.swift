@@ -208,11 +208,13 @@ struct TasksPage: View {
     }
 
     private func load() async {
+        // 先摆上次存下的，服务器那份回来再换上。
+        if !loaded, let json = API.shared.remembered("api/todos") { apply(json) }
         do {
-            apply(try await API.shared.request("GET", "api/todos"))
+            apply(try await API.shared.request("GET", "api/todos", remember: true))
             error = ""
         } catch {
-            self.error = "清单拿不到，网抖了一下，再开一次试试"
+            if !loaded { self.error = "清单拿不到，网抖了一下，再开一次试试" }
         }
     }
 
