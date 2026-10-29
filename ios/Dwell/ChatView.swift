@@ -33,6 +33,8 @@ struct ChatView: View {
     @State private var showSearch = false
     /// 多选删除：nil 是没在选；一个集合就是正在选、已经勾了哪些。
     @State private var selection: Set<String>?
+    /// 勾好几句后点了「收进记忆」：按说的先后排好的那几条。
+    @State private var bookmarking: [Message]?
     @State private var confirmBulkDelete = false
     /// 最底下那条看得见吗。看不见（往上翻了）就在输入框上面放一颗回到底部的箭头。
     @State private var atBottom = true
@@ -811,6 +813,14 @@ struct ChatView: View {
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.dim)
             Spacer()
+            Button("收进记忆") {
+                let ids = selection ?? []
+                bookmarking = store.messages.filter { ids.contains($0.id) && !$0.isLocal && $0.kind != .system }
+            }
+            .fontWeight(.semibold)
+            .foregroundStyle(count == 0 ? Theme.dim : Theme.text)
+            .disabled(count == 0)
+            .padding(.trailing, 14)
             Button("删除") { confirmBulkDelete = true }
                 .fontWeight(.semibold)
                 .foregroundStyle(count == 0 ? Theme.dim : MemoryStyle.danger)
@@ -822,6 +832,13 @@ struct ChatView: View {
         .background(GlassBackground(surface: .composer, shape: RoundedRectangle(cornerRadius: 22, style: .continuous)))
         .padding(.horizontal, 12)
         .padding(.bottom, 6)
+        .sheet(isPresented: Binding(get: { bookmarking != nil }, set: { if !$0 { bookmarking = nil } })) {
+            BookmarkComposeSheet(messages: bookmarking ?? []) {
+                withAnimation(.easeOut(duration: 0.2)) { selection = nil }
+            }
+            .environmentObject(store)
+            .presentationDetents([.medium, .large])
+        }
         .confirmationDialog("删除这 \(count) 条消息？", isPresented: $confirmBulkDelete, titleVisibility: .visible) {
             Button("删除", role: .destructive) {
                 let ids = Array(selection ?? [])

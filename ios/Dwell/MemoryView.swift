@@ -19,6 +19,8 @@ struct MemoryView: View {
     @State private var editingDraft: MemoryCard?
     @State private var sourceOf: (card: MemoryCard, isDraft: Bool)?
     @State private var confirmDelete: MemoryCard?
+    @State private var editingBookmark: MemoryCard?
+    @State private var deletingBookmark: MemoryCard?
     @State private var confirmDiscardAll = false
 
     init(chatID: String, chatTitle: String) {
@@ -100,6 +102,16 @@ struct MemoryView: View {
                 if let sourceOf {
                     MemorySourceSheet(store: store, card: sourceOf.card, isDraft: sourceOf.isDraft)
                 }
+            }
+            .confirmationDialog("删掉这个书签？", isPresented: Binding(
+                get: { deletingBookmark != nil }, set: { if !$0 { deletingBookmark = nil } }
+            ), titleVisibility: .visible) {
+                Button("删除", role: .destructive) {
+                    if let card = deletingBookmark { Task { await store.deleteBookmark(card) } }
+                    deletingBookmark = nil
+                }
+            } message: {
+                Text("聊天里的原话不受影响，只是不再当作记忆。")
             }
             .confirmationDialog("永久删除这张记忆卡？", isPresented: Binding(
                 get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }
@@ -214,6 +226,7 @@ struct MemoryView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        kindFilter
         if searchOpen { searchPanel }
         if let draft = adding {
             MemoryCardEditor(card: draft, title: "添加记忆卡", saveLabel: "添加", events: eventChoices) { card in
@@ -228,7 +241,9 @@ struct MemoryView: View {
         }
         LazyVStack(spacing: 11) {
             ForEach(store.cards) { card in
-                if editing?.id == card.id, let editing {
+                if card.isBookmark {
+                    bookmarkRow(card)
+                } else if editing?.id == card.id, let editing {
                     MemoryCardEditor(card: editing, title: "编辑", saveLabel: "保存", events: eventChoices) { edited in
                         if await store.save(edited) { self.editing = nil }
                     } onCancel: { self.editing = nil }
@@ -335,6 +350,56 @@ struct MemoryView: View {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// 全部 / 卡片 / 书签：一排小字，不占地方。
+    private var kindFilter: some View {
+        HStack(spacing: 4) {
+            ForEach([("all", "全部"), ("cards", "卡片"), ("bookmarks", "书签")], id: \.0) { key, title in
+                let on = store.kind == key
+                Button {
+                    guard !on else { return }
+                    store.kind = key
+                    Task { await store.loadCards(reset: true) }
+                } label: {
+                    Text(key == "bookmarks" && store.bookmarkCount > 0 ? "\(title) \(store.bookmarkCount)" : title)
+                        .font(.system(size: 12.5, weight: on ? .semibold : .regular))
+                        .foregroundStyle(on ? Theme.text : Theme.dim)
+                        .padding(.horizontal, 11)
+                        .frame(height: 28)
+                        .background(Capsule().fill(on ? MemoryStyle.tabSelected : .clear))
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private func bookmarkRow(_ card: MemoryCard) -> some View {
+        let name = chat.assistant?.name ?? "Cloudy"
+        if editingBookmark?.id == card.id {
+            BookmarkEditor(card: card, assistantName: name) { label, why in
+                if await store.updateBookmark(card, label: label == card.label ? nil : label,
+                                              why: why == card.why ? nil : why) {
+                    editingBookmark = nil
+                }
+            } onRemoveLine: { line in
+                if await store.updateBookmark(card, removing: line.id) {
+                    editingBookmark = store.cards.first { $0.id == card.id }
+                }
+            } onCancel: {
+                editingBookmark = nil
+            }
+        } else {
+            BookmarkCardView(card: card, assistantName: name) {
+                editingBookmark = card
+            } onSource: {
+                sourceOf = (card, false)
+            } onDelete: {
+                deletingBookmark = card
             }
         }
     }
@@ -1094,7 +1159,7 @@ struct MemorySourceSheet: View {
                     .font(.system(size: 14))
                     .foregroundStyle(Theme.dim)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if !card.isMain {
+                if !card.isMain && !card.isBookmark {
                     Button { draftText = content } label: {
                         Image(systemName: "pencil")
                             .font(.system(size: 14))
