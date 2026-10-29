@@ -311,6 +311,32 @@ final class MemoryStore: ObservableObject {
         } catch { say(error); return false }
     }
 
+    /// 推荐的书签：改圈中的句子或概括，不收下。后端把前后文跟着圈的位置重新带好，换上新的那条。
+    func adjustSuggestion(_ draft: MemoryCard, rowids: [Int]? = nil, label: String? = nil) async -> Bool {
+        var body: [String: Any] = [:]
+        if let rowids { body["rowids"] = rowids }
+        if let label { body["label"] = label }
+        do {
+            let json = try await api.request("PUT", "\(base)/memory-card-drafts/\(draft.id)", body: body)
+            if let item = json["item"] as? [String: Any], let index = drafts.firstIndex(where: { $0.id == draft.id }) {
+                drafts[index] = MemoryCard(json: item)
+            }
+            return true
+        } catch { say(error); return false }
+    }
+
+    /// 收下推荐的书签：照她最后圈定的句子和概括。
+    func acceptSuggestion(_ draft: MemoryCard, rowids: [Int], label: String) async -> Bool {
+        do {
+            _ = try await api.request("POST", "\(base)/memory-card-drafts/\(draft.id)/accept",
+                                      body: ["rowids": rowids, "label": label])
+            _ = withAnimation(.easeIn(duration: 0.26)) { drafts.removeAll { $0.id == draft.id } }
+            toast = "收进书签了"
+            await loadCards(reset: true)
+            return true
+        } catch { say(error); return false }
+    }
+
     /// 点了就先让卡片往右滑走（不等服务器），下面的卡顺势补上来，眼睛不会丢了位置；
     /// 万一没删成，再把它放回原处。
     func discard(_ draft: MemoryCard) async {
