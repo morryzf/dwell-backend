@@ -503,6 +503,27 @@ html[data-theme="dark"] .composer {
   #memPickStrip .mp-chip .x:active { background: color-mix(in srgb, var(--text) 8%, transparent); }
   @keyframes mpIn { from { opacity: 0; transform: scale(.94); } }
   @media (prefers-reduced-motion: reduce) { #memPickStrip .mp-chip.fresh { animation: none; } }
+  /* 引用：贴着输入框上沿一小块，左边一道细线，引的那句只露一行。一次只引一条 */
+  #quoteStrip { display: none; padding-bottom: 8px; }
+  #quoteStrip.on { display: flex; }
+  #quoteStrip .qd-chip {
+    position: relative; display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%;
+    min-height: 30px; padding: 3px 2px 3px 13px; border-radius: 10px;
+    background: var(--panel); color: var(--dim); font-size: 12.5px; line-height: 1.4;
+  }
+  #quoteStrip .qd-chip::before {
+    content: ''; position: absolute; left: 6px; top: 7px; bottom: 7px; width: 2px; border-radius: 1px;
+    background: color-mix(in srgb, var(--accent) 75%, transparent);
+  }
+  #quoteStrip .qd-chip.fresh { animation: mpIn 180ms cubic-bezier(.23,1,.32,1) both; }
+  #quoteStrip .qd-chip img { flex: none; width: 22px; height: 22px; border-radius: 5px; object-fit: cover; }
+  #quoteStrip .qd-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #quoteStrip .x {
+    flex: none; width: 24px; height: 24px; border-radius: 50%; color: var(--dim);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #quoteStrip .x:active { background: color-mix(in srgb, var(--text) 8%, transparent); }
+  @media (prefers-reduced-motion: reduce) { #quoteStrip .qd-chip.fresh { animation: none; } }
   #box {
     width: 100%; border: 0; outline: 0; resize: none; background: transparent;
     color: var(--text); font: inherit; line-height: 1.6;
@@ -1115,6 +1136,51 @@ html[data-theme="dark"] .composer {
     .mem-picks-list { animation: none; }
     .mem-picks-note .chev { transition: none; }
   }
+  /* ---------- 引用 ----------
+     引的那句挂在这条消息第一个泡的上面，跟气泡同一边，不写是谁说的。
+     底色是气泡那层玻璃往字色里压一点，字淡一截，最多两行。点一下去看原句。 */
+  .row.me.has-quote { flex-wrap: wrap; }
+  .msg-quote-wrap { display: flex; margin-bottom: 4px; }
+  .row.me > .msg-quote-wrap { flex: 0 0 100%; justify-content: flex-end; }
+  .msg-quote {
+    --mq-bg: var(--msg-cloudy-bg, rgba(248,242,245,.46)); --mq-ink: var(--msg-cloudy-text, #514a4f);
+    position: relative; display: flex; align-items: center; gap: 8px;
+    min-width: 0; max-width: 85%; padding: 5px 11px 5px 14px; border-radius: 12px;
+    background: color-mix(in srgb, var(--mq-ink) 7%, var(--mq-bg));
+    color: color-mix(in srgb, var(--mq-ink) 64%, transparent);
+    font-size: 12.5px; line-height: 1.45; text-align: left;
+    -webkit-backdrop-filter: blur(10px) saturate(1.3); backdrop-filter: blur(10px) saturate(1.3);
+    transition: transform 150ms cubic-bezier(.23,1,.32,1), opacity 150ms ease;
+  }
+  .row.me .msg-quote { --mq-bg: var(--msg-me-bg, rgba(248,242,245,.46)); --mq-ink: var(--msg-me-text, #514a4f); }
+  html[data-theme="dark"] .msg-quote { --mq-bg: var(--msg-cloudy-bg, rgba(79,65,72,.62)); --mq-ink: var(--msg-cloudy-text, #f7edf2); }
+  html[data-theme="dark"] .row.me .msg-quote { --mq-bg: var(--msg-me-bg, rgba(79,65,72,.62)); --mq-ink: var(--msg-me-text, #f7edf2); }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) .msg-quote { --mq-bg: var(--msg-cloudy-bg, rgba(79,65,72,.62)); --mq-ink: var(--msg-cloudy-text, #f7edf2); }
+    html:not([data-theme="light"]) .row.me .msg-quote { --mq-bg: var(--msg-me-bg, rgba(79,65,72,.62)); --mq-ink: var(--msg-me-text, #f7edf2); }
+  }
+  .msg-quote::before {
+    content: ''; position: absolute; left: 6px; top: 7px; bottom: 7px; width: 2px; border-radius: 1px;
+    background: color-mix(in srgb, var(--mq-ink) 30%, transparent);
+  }
+  .msg-quote:active { transform: scale(.98); opacity: .7; }
+  .msg-quote img { flex: none; width: 32px; height: 32px; border-radius: 7px; object-fit: cover; }
+  .msg-quote .mq-text {
+    min-width: 0; overflow: hidden; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  .msg-quote-wrap.fresh .msg-quote { animation: mpIn 180ms cubic-bezier(.23,1,.32,1) both; }
+  /* 跳到原句：那几个泡亮一下再退掉 */
+  .q-flash {
+    position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none;
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    animation: qFlash 800ms cubic-bezier(.23,1,.32,1) forwards;
+  }
+  @keyframes qFlash { 0%, 30% { opacity: 1; } to { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .msg-quote { transition: none; }
+    .msg-quote-wrap.fresh .msg-quote, .q-flash { animation: none; }
+  }
   /* ---------- 带记忆：挑卡的弹层 ---------- */
   #memPickSheet .sheet { height: min(86vh, 720px); }
   #memPickSheet .mp-tools { flex: none; display: flex; gap: 8px; padding: 0 20px 10px; }
@@ -1238,6 +1304,13 @@ html[data-theme="dark"] .composer {
   #bookmarkSheet .mc-actions { margin-top: 0; }
   #bookmarkSheet .mc-btn:active { transform: scale(.97); }
   @media (prefers-reduced-motion: reduce) { #bookmarkSheet.on .ms-shade, #bookmarkSheet.on .bm-panel { animation: none; } #bookmarkSheet .mc-btn { transition-duration: 0.01ms; } }
+  /* 引用的原句页面上还没翻到：也借「看原文」那层的壳，原句带前后几条 */
+  #quoteSheet { position: fixed; inset: 0; z-index: 120; display: none; align-items: flex-end; justify-content: center; }
+  #quoteSheet.on { display: flex; }
+  @media (min-width: 700px) { #quoteSheet.on { align-items: center; } }
+  #quoteSheet.on .ms-shade { animation: bmFade 200ms ease-out both; }
+  #quoteSheet.on .ms-panel { animation: bmUp 240ms cubic-bezier(.23,1,.32,1) both; }
+  @media (prefers-reduced-motion: reduce) { #quoteSheet.on .ms-shade, #quoteSheet.on .ms-panel { animation: none; } }
   .selecting-messages footer { opacity: .42; pointer-events: none; }
   .selecting-messages .row[data-message-id] { cursor: pointer; box-sizing: border-box; padding-left: 40px; }
   .selecting-messages .row.me[data-message-id] { padding-left: 0; padding-right: 40px; }
@@ -4739,6 +4812,16 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   </form>
 </div>
 
+<!-- 引用的原句：页面上还没翻到时，在这里看它和前后几条 -->
+<div id="quoteSheet" role="dialog" aria-modal="true" aria-labelledby="quoteSheetTitle">
+  <div class="ms-shade" data-qs-close></div>
+  <div class="ms-panel">
+    <div class="ms-head"><button type="button" data-qs-close aria-label="关闭">×</button><strong id="quoteSheetTitle">引用的原文</strong><span></span></div>
+    <div class="ms-hint" id="quoteSheetHint"></div>
+    <div class="ms-list" id="quoteSheetList"></div>
+  </div>
+</div>
+
 <footer>
   <button id="scrollBottom" aria-label="回到最新"><span class="ic" data-i="arrowDown"></span></button>
   <div id="doingLine"><span class="pill"><span class="w"></span><span class="en"></span><span class="t"></span></span></div>
@@ -4752,6 +4835,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
     <span class="cache-glow-hint" id="cacheGlowHint" role="status" aria-live="polite"></span>
     <div id="memPickStrip" aria-label="下一条要带的记忆"></div>
     <div id="attachStrip"></div>
+    <div id="quoteStrip" aria-label="引用的消息"></div>
     <textarea id="box" rows="1" placeholder="说点什么…" autocomplete="off"></textarea>
     <div class="ctlrow">
 <button id="plusBtn" title="添加照片和文件"><span class="ic" data-i="plus"></span></button>
@@ -5404,6 +5488,7 @@ const ICONS = {
   sliders: S('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
   chat: S('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'),
   pen: S('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>'),
+  reply: S('<polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>'),
   wave: S('<path d="M4 10v4"/><path d="M8 7v10"/><path d="M12 4v16"/><path d="M16 8v8"/><path d="M20 11v2"/>'),
   volume: S('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/>'),
   mediaPrevious: S('<line x1="6" y1="5" x2="6" y2="19"/><path d="M18 6.5 9 12l9 5.5z" fill="currentColor" stroke="none"/>'),
@@ -5743,12 +5828,13 @@ document.addEventListener('keydown', event => {
 function addMe(text, message) {
   var segments = String(text).split(/\n{2,}/);
   if (segments.length <= 1) segments = [text];
-  var lastBubble;
+  var lastBubble, firstRow;
   segments.forEach(function(seg, i) {
     seg = seg.trim();
     var hasTail = ((message && message.images || []).length || (message && message.files || []).length);
     if (!seg && !(hasTail && i === segments.length - 1)) return;
     var r = row('me');
+    if (!firstRow) firstRow = r;
     var b = document.createElement('div');
     b.className = 'bubble';
     var copy = document.createElement('div');
@@ -5771,8 +5857,9 @@ function addMe(text, message) {
     b.textContent = text;
     r.appendChild(b);
     if (message) attachMessageActions(b, message);
-    lastBubble = b;
+    lastBubble = b; firstRow = r;
   }
+  if (message && message.quote) attachQuote(firstRow, message.quote);   // 引用挂在第一个泡上面
   if (message && message.reaction) setReactionBadge(lastBubble.parentElement, message.reaction, false);
   if (message && message.memory_picks) attachMemoryPicks(lastBubble.parentElement, message.memory_picks);
   scroll(true);
@@ -6030,6 +6117,132 @@ document.addEventListener('keydown', event => {
   open.classList.remove('on');
   closeMessageActions();
 });
+
+/* ---------- 引用 ----------
+   一条消息可以引前面的一句（她的、Cloudy 的都行）。message.quote =
+   {message_id, role, content, made, image}，content 是引的时候抄下的一份。
+   引用块挂在这条消息第一个泡的上面；点一下，原句在页面上就滚过去亮一下，不在就开个小面板看。 */
+const QUOTE_IMAGE_ONLY = '（发来了一张图片）';
+function quoteLine(q) {
+  const text = String((q && q.content) || '').replace(/\s+/g, ' ').trim();
+  if (text && text !== QUOTE_IMAGE_ONLY) return text;
+  return (q && q.image) || text === QUOTE_IMAGE_ONLY ? '[图片]' : '（没有文字）';
+}
+/* 只管一行：quote 为空就摘掉。fresh=实时来的才淡入一下 */
+function attachQuote(rowEl, quote, fresh) {
+  if (!rowEl) return;
+  rowEl.querySelector(':scope > .msg-quote-wrap')?.remove();
+  const on = !!(quote && quote.message_id);
+  rowEl.classList.toggle('has-quote', on);
+  if (!on) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-quote-wrap' + (fresh ? ' fresh' : '');
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'msg-quote';
+  const line = quoteLine(quote);
+  btn.setAttribute('aria-label', '引用：' + line);
+  if (String(quote.image || '').startsWith('data:image/')) {
+    const img = new Image();
+    img.src = quote.image; img.alt = ''; img.decoding = 'async';
+    btn.appendChild(img);
+  }
+  const text = document.createElement('span');
+  text.className = 'mq-text'; text.textContent = line;
+  btn.appendChild(text);
+  btn.onclick = event => {
+    // 选消息的时候，点它和点气泡一样是勾这一条
+    if (messageSelectionMode) {
+      event.stopPropagation();
+      if (rowEl.dataset.messageId) toggleMessageSelection(rowEl.dataset.messageId);
+      return;
+    }
+    openQuoted(quote.message_id);
+  };
+  wrap.appendChild(btn);
+  rowEl.prepend(wrap);
+}
+/* 整条消息：记账 + 画到第一个泡上。屏幕上没这条（正在说的那个泡还没对上号）就等说完重读历史 */
+function applyQuote(messageId, quote, fresh) {
+  const rows = reactionRows(messageId);
+  if (!rows.length) return false;
+  rows.forEach(r => { if (r._message) r._message.quote = quote || null; });
+  rows.slice(1).forEach(r => attachQuote(r, null));
+  attachQuote(rows[0], quote, fresh && !reactCalm.matches);
+  return true;
+}
+/* 原句那几个泡亮一下。减弱动态时不渐隐，亮一会儿直接收掉 */
+function flashMessage(rows) {
+  rows.forEach(r => {
+    if (!r.isConnected) return;
+    r.querySelectorAll(':scope > .gu, :scope > .bubble, :scope > .vb').forEach(el => {
+      if (!el.getClientRects().length) return;      // 语音条底下收着的文字不亮
+      el.querySelector(':scope > .q-flash')?.remove();
+      const glow = document.createElement('span');
+      glow.className = 'q-flash'; glow.setAttribute('aria-hidden', 'true');
+      el.appendChild(glow);
+      setTimeout(() => glow.remove(), 820);
+    });
+  });
+}
+function openQuoted(messageId) {
+  const rows = reactionRows(messageId);
+  if (!rows.length) { openQuoteContext(messageId); return; }
+  closeMessageActions();
+  releaseBottomLock();                 // 这一趟是去找那句话的，别再扶着底
+  // 等滚停了再亮：滚动事件停了 120ms 就算到了；本来就在眼前、一下没滚，也是 120ms 后亮
+  let timer = 0;
+  const arrive = () => { log.removeEventListener('scroll', wait); flashMessage(rows); };
+  const wait = () => { clearTimeout(timer); timer = setTimeout(arrive, 120); };
+  log.addEventListener('scroll', wait, { passive: true });
+  wait();
+  rows[0].scrollIntoView({ behavior: reactCalm.matches ? 'auto' : 'smooth', block: 'center' });
+}
+const quoteSheet = document.getElementById('quoteSheet');
+const quoteSheetHint = document.getElementById('quoteSheetHint');
+const quoteSheetList = document.getElementById('quoteSheetList');
+let quoteSheetFor = '';
+function closeQuoteSheet() { quoteSheet.classList.remove('on'); quoteSheetFor = ''; }
+quoteSheet.querySelectorAll('[data-qs-close]').forEach(el => el.onclick = closeQuoteSheet);
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && quoteSheet.classList.contains('on')) closeQuoteSheet(); });
+async function openQuoteContext(messageId) {
+  if (!messageId) return;
+  quoteSheetFor = messageId;
+  quoteSheetHint.textContent = '正在找原句…';
+  quoteSheetList.textContent = '';
+  quoteSheet.classList.add('on');
+  try {
+    const r = await fetch('api/messages/' + encodeURIComponent(messageId) + '/context', { cache: 'no-store' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(r.status === 404 ? '原句已经删掉了' : (d.detail || '请再试一次'));
+    if (quoteSheetFor !== messageId) return;       // 等的时候关了，或者又点了另一条
+    // 同一条消息拆成几行存的（分条回复），这里并回一个泡
+    const groups = [];
+    (d.messages || []).forEach(m => {
+      const last = groups[groups.length - 1];
+      const text = m.content === QUOTE_IMAGE_ONLY ? '[图片]' : (m.content || '');
+      if (last && last.id === m.id) { last.texts.push(text); last.cited = last.cited || !!m.cited; }
+      else groups.push({ id: m.id, role: m.role, made: m.made, texts: [text], cited: !!m.cited });
+    });
+    if (!groups.length) { quoteSheetHint.textContent = '原句已经找不到了。'; return; }
+    quoteSheetHint.textContent = '这句在更早的聊天里。高亮的是被引用的那条，前后带几条上下文。';
+    for (const g of groups) {
+      const item = document.createElement('div');
+      item.className = 'ms-msg' + (g.cited ? ' cited' : '');
+      const who = document.createElement('div'); who.className = 'ms-who';
+      const name = document.createElement('span');
+      name.textContent = g.role === 'user' ? '我' : (g.role === 'assistant' ? assistantName : '系统');
+      const at = document.createElement('span'); at.textContent = memorySourceTime(g.made);
+      who.append(name, at);
+      const said = document.createElement('div'); said.className = 'ms-text';
+      said.textContent = g.texts.join('\n\n');
+      item.append(who, said);
+      quoteSheetList.appendChild(item);
+    }
+    quoteSheetList.querySelector('.ms-msg.cited')?.scrollIntoView({ block: 'center' });
+  } catch (e) {
+    if (quoteSheetFor === messageId) quoteSheetHint.textContent = '没找到原句：' + e.message;
+  }
+}
 let messageSelectionMode = false;
 const selectedMessageIds = new Set();
 const messageSelectBar = document.getElementById('messageSelectBar');
@@ -6213,6 +6426,7 @@ function attachMessageActions(el, message) {
       else openPicker();
     });
   }
+  addAction('reply', '引用', () => { close(); quoteMessage(message); });
   addAction('pen', '编辑消息', () => { close(); openMessageEditor(message); });
   if (message.role === 'assistant') {
     addAction('volume', '播放整轮回复', async () => { close(); await playTts(message.id, true); });
@@ -7507,6 +7721,7 @@ function renderSaid(msgs) {
         }
         attachMessageActions(el, m);
         if (m.voice) voiceDecorate(el, m.id, 'ready');
+        if (index === 0 && m.quote) attachQuote(el.parentElement, m.quote);   // 引用挂在第一个泡上面
         if (index === segments.length - 1) attachMessageUsage(el, m);
         lastSeg = el;
         guEl = null;                   // 每段各归各位，编辑时仍指向同一条原消息
@@ -7713,13 +7928,13 @@ function handle(d) {
   lastEventAt = Date.now();
   if (d.type === 'echo') {
     if (armedFresh) setArmed(false);
-    addMe(d.text, { id: d.message_id, role: 'user', text: d.text, at: d.at, images: d.images || [], files: d.files || [], memory_picks: d.memory_picks || [] });
+    addMe(d.text, { id: d.message_id, role: 'user', text: d.text, at: d.at, images: d.images || [], files: d.files || [], memory_picks: d.memory_picks || [], quote: d.quote || null });
     turnBubbles = [];
     petSet('thinking');
     return;
   }
   // 换了窗口：挑的卡是上一间的，不带过去
-  if (d.type === 'system' && (d.subtype === 'newchat' || d.subtype === 'switched')) { memPicks = []; renderMemPickStrip(); }
+  if (d.type === 'system' && (d.subtype === 'newchat' || d.subtype === 'switched')) { memPicks = []; renderMemPickStrip(); quoteDraft = null; renderQuoteStrip(); }
   if (d.type === 'system' && d.subtype === 'newchat') { loadChatModel(); setArmed(false); log.innerHTML = ''; guEl = null; turnBubbles = []; earliestSeq = null; olderBtn = null; note(d.text); return; }
   if (d.type === 'system' && d.subtype === 'switched') { loadChatModel(); setArmed(false); log.innerHTML = ''; guEl = null; turnBubbles = []; earliestSeq = null; olderBtn = null; note(d.text); return; }
   if (d.type === 'system' && d.subtype === 'regenerating') {
@@ -7740,6 +7955,11 @@ function handle(d) {
   if (d.type === 'reaction') {
     // 贴上 / 换掉 / 撤掉。实时来的鼓一下；屏幕上没这条（还没翻到）就等重读历史
     applyReaction(d.message_id || '', d.emoji || '', true);
+    return;
+  }
+  if (d.type === 'quote') {
+    // 他这条引了前面一句。正在说的泡还没对上消息号的话，等说完重读历史时自然带上
+    applyQuote(d.message_id || '', d.quote || null, true);
     return;
   }
   if (d.type === 'assistant_removed') {
@@ -8214,6 +8434,45 @@ function memPickAdd(item) {
   return true;
 }
 
+/* ---------- 引用：她挑一条消息引着说 ----------
+   一次只引一条，再挑一条就换掉。只跟下一条消息走：发出去就清，没发出去还回来。 */
+let quoteDraft = null;          // {id, line, image}
+const quoteStrip = document.getElementById('quoteStrip');
+function renderQuoteStrip(fresh) {
+  quoteStrip.textContent = '';
+  quoteStrip.classList.toggle('on', !!quoteDraft);
+  if (!quoteDraft) return;
+  const chip = document.createElement('div');
+  chip.className = 'qd-chip' + (fresh ? ' fresh' : '');
+  chip.title = quoteDraft.line;
+  if (quoteDraft.image) {
+    const img = new Image();
+    img.src = quoteDraft.image; img.alt = '';
+    chip.appendChild(img);
+  }
+  const text = document.createElement('span');
+  text.className = 'qd-text'; text.textContent = quoteDraft.line;
+  const x = document.createElement('button');
+  x.type = 'button'; x.className = 'x';
+  x.setAttribute('aria-label', '不引用了');
+  x.appendChild(icEl('x', 11));
+  x.onclick = () => { quoteDraft = null; renderQuoteStrip(); };
+  chip.append(text, x);
+  quoteStrip.appendChild(chip);
+}
+function quoteMessage(message) {
+  if (!message || !message.id) return;
+  const image = (message.images || []).find(src => String(src).startsWith('data:image/')) || '';
+  const files = (message.files || []).filter(Boolean);
+  // 只发了文件、一个字没写的，签上写文件名
+  const line = !String(message.text || '').trim() && !image && files.length
+    ? '📎 ' + files[0] : quoteLine({ content: message.text, image });
+  quoteDraft = { id: message.id, line, image };
+  renderQuoteStrip(true);
+  rememberLogPosition();
+  box.focus({ preventScroll: true });
+}
+
 /* 她消息底下那行「带了 N 张记忆」，点开看是哪几张。消息拆成几个泡时挂在最后一个泡那行。 */
 function attachMemoryPicks(rowEl, picks) {
   if (!rowEl || !Array.isArray(picks) || !picks.length) return;
@@ -8457,6 +8716,11 @@ async function send() {
   if (outgoingPicks.length) payload.memory_card_ids = outgoingPicks.map(v => v.id);
   memPicks = [];
   renderMemPickStrip();
+  // 引的那条也只管这一条
+  const outgoingQuote = quoteDraft;
+  if (outgoingQuote) payload.quote_message_id = outgoingQuote.id;
+  quoteDraft = null;
+  renderQuoteStrip();
   try {
     const response = await fetch('api/send', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -8468,6 +8732,8 @@ async function send() {
     // 没送出去：挑的卡还回来（这期间又加的排在后面，去重，不超过上限）
     memPicks = outgoingPicks.concat(memPicks.filter(v => !outgoingPicks.some(o => o.id === v.id))).slice(0, MEM_PICK_MAX);
     renderMemPickStrip();
+    // 引用也还回来；这期间又挑了别的就以新挑的为准
+    if (outgoingQuote && !quoteDraft) { quoteDraft = outgoingQuote; renderQuoteStrip(); }
     box.value = text; box.dispatchEvent(new Event('input'));
     renderStrip(); setBusy(false);
     if (previousCacheEnd > Date.now()) {
@@ -8798,7 +9064,7 @@ function drawerRelease(shown) {
   }
 }
 /* 上面盖着别的层时，边缘手势不该穿过去摸到抽屉 */
-const DRAWER_BLOCKERS = '.sheetWrap.open, .image-viewer.open, .menuCard.open, #ttsChoicePicker.on, #memorySourcePicker.on, .cbk-full, #lockWrap:not(.gone)';
+const DRAWER_BLOCKERS = '.sheetWrap.open, .image-viewer.open, .menuCard.open, #ttsChoicePicker.on, #memorySourcePicker.on, #quoteSheet.on, .cbk-full, #lockWrap:not(.gone)';
 function drawerCovered() { return !!document.querySelector(DRAWER_BLOCKERS); }
 document.addEventListener('touchstart', (e) => {
   if (drawerCovered()) { dg = null; return; }
