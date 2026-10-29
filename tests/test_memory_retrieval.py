@@ -103,3 +103,25 @@ class CommonWordPiecesTest(unittest.TestCase):
         terms = _terms("知道为什么吗，怎么样")
         for piece in ("为什", "什么", "么样", "怎么"):
             self.assertNotIn(piece, terms)
+
+
+@unittest.skipIf(__import__("app.memory_retrieval", fromlist=["jieba"]).jieba is None, "jieba 没装")
+class WordSplitTest(unittest.TestCase):
+    """按词切：整词对得上，跨词的碎块不再出现；名字藏在事件名里也找得到。"""
+
+    def test_words_not_fragments(self):
+        from app.memory_retrieval import _terms
+        terms = _terms("因为布丁这个坏小子在6点闹腾，我一直睡不好")
+        for word in ("布丁", "坏小子", "闹腾", "6点"):
+            self.assertIn(word, terms)
+        for fragment in ("丁这", "子在", "直睡"):
+            self.assertNotIn(fragment, terms)
+
+    def test_a_name_inside_an_event_name(self):
+        from app.memory_retrieval import learn_words, rank_memory_cards
+        learn_words(["追音音"])
+        cards = [{"id": "yin", "content": "Morry 在追音音，还没放手。", "thread": "追音音", "status": "active"},
+                 {"id": "swim", "content": "她在学游泳，周末上课。", "status": "active"},
+                 {"id": "cat", "content": "布丁是她的猫。", "status": "active"}]
+        ranked = rank_memory_cards(cards, "音音今天回我了")
+        self.assertEqual(ranked[0]["id"], "yin")
