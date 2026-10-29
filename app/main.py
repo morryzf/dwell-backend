@@ -7520,6 +7520,8 @@ async def send(request: Request):
     if isinstance(raw_picks, list) and raw_picks:
         wanted = list(dict.fromkeys(str(i) for i in raw_picks if i))[:db.MEMORY_PICKS_MAX]
         alive = {c["id"] for c in db.memory_cards_by_id(chat_id, wanted) if c.get("status") != "archived"}
+        # 书签也能带。
+        alive |= {i for i in wanted if i not in alive and db.bookmark_get(chat_id, i)}
         picks = [i for i in wanted if i in alive]
         if picks:
             db.message_memory_picks_set(user_message["id"], picks)

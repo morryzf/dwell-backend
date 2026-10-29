@@ -8171,6 +8171,8 @@ function memPickOf(item) {
 /* 签上写什么：有事件写事件名，没有就取内容前十个字（按字取，不切坏 emoji） */
 function memPickLabel(item) {
   if (item.thread) return item.thread;
+  // 书签：有概括就写概括，没有就取第一句原话
+  if (item.kind === 'bookmark') item = {content: item.label || ((item.lines || [])[0] || {}).content || ''};
   const chars = Array.from(String(item.content || '').replace(/\s+/g, ' ').trim());
   return chars.length > 10 ? chars.slice(0, 10).join('') + '…' : chars.join('');
 }
@@ -15681,9 +15683,12 @@ function memPickCard(item) {
   b.type = 'button'; b.className = 'mp-card';
   b.setAttribute('aria-pressed', String(memPickState.draft.some(v => v.id === item.id)));
   const text = document.createElement('div');
-  text.className = 'mp-text'; text.textContent = item.content || '';
+  text.className = 'mp-text';
+  text.textContent = item.kind === 'bookmark'
+    ? (item.label || '') + ((item.lines || []).length ? '\n' + item.lines.map(l => l.content).join(' / ') : '')
+    : (item.content || '');
   b.appendChild(text);
-  const tag = memPickTag(item);
+  const tag = item.kind === 'bookmark' ? '书签' : memPickTag(item);
   if (tag) { const t = document.createElement('span'); t.className = 'mp-tag'; t.textContent = tag; b.appendChild(t); }
   const check = document.createElement('span');
   check.className = 'mp-check'; check.setAttribute('aria-hidden', 'true');
@@ -15762,7 +15767,7 @@ async function memPickLoad(more) {
     }
     const url = 'api/chats/' + encodeURIComponent(st.chatId) + '/memory-cards?limit=' + MEM_PICK_PAGE
       + '&offset=' + (more ? st.items.length : 0) + '&q=' + encodeURIComponent(st.q)
-      + '&filter=active&kind=cards&thread=' + encodeURIComponent(st.thread);  // 书签还不能随消息带，只列卡片
+      + '&filter=active&thread=' + encodeURIComponent(st.thread);
     const d = await memoryJson(url, { cache: 'no-store' });
     if (seq !== st.seq) return;
     const have = new Set(st.items.map(v => v.id));

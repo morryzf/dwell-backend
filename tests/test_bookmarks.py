@@ -123,3 +123,44 @@ class BookmarkTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UsesTableMigrationTest(unittest.TestCase):
+    """老库的带入记录表挂着指向 memory_cards 的外键，书签写不进去；启动时重建一张不挂的，记录照搬。"""
+
+    def test_old_table_is_rebuilt_and_keeps_its_rows(self):
+        import sqlite3
+        path = os.path.abspath(f"uses-migrate-{uuid.uuid4().hex}.sqlite3")
+        previous = db.DB_PATH
+        db.DB_PATH = path
+        try:
+            db.init_db()
+            chat = db.chat_add("m")["id"]
+            reply = db.message_add(chat, "assistant", "嗯")
+            with sqlite3.connect(path) as cx:
+                cx.execute("DROP TABLE memory_card_uses")
+                cx.execute("""CREATE TABLE memory_card_uses (
+                    id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, card_id TEXT NOT NULL,
+                    response_message_id TEXT NOT NULL, content_snapshot TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}', query_excerpt TEXT NOT NULL DEFAULT '',
+                    score REAL NOT NULL DEFAULT 0, used_at INTEGER NOT NULL,
+                    UNIQUE(response_message_id, card_id),
+                    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+                    FOREIGN KEY (card_id) REFERENCES memory_cards(id) ON DELETE CASCADE,
+                    FOREIGN KEY (response_message_id) REFERENCES messages(id) ON DELETE CASCADE)""")
+                cx.execute("INSERT INTO memory_card_uses VALUES ('u1',?,'gone',?,'旧记录','{}','',0.1,1)",
+                           (chat, reply["id"]))
+            db.init_db()
+            with sqlite3.connect(path) as cx:
+                fks = cx.execute("PRAGMA foreign_key_list(memory_card_uses)").fetchall()
+                self.assertFalse(any(fk[2] == "memory_cards" for fk in fks))
+                self.assertEqual(cx.execute("SELECT content_snapshot FROM memory_card_uses").fetchone()[0], "旧记录")
+            said = db.message_add(chat, "user", "布丁")
+            mark = db.bookmark_create(chat, [said["id"]])
+            db.memory_card_usage_record(chat, reply["id"], "q", [{**mark, "selection_score": 0.2}])
+            self.assertEqual(db.memory_card_last_injection(chat)["items"][0]["id"], mark["id"])
+        finally:
+            db.DB_PATH = previous
+            for suffix in ("", "-wal", "-shm"):
+                if os.path.exists(path + suffix):
+                    os.remove(path + suffix)

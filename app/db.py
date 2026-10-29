@@ -338,7 +338,6 @@ CREATE TABLE IF NOT EXISTS memory_card_uses (
     used_at             INTEGER NOT NULL,
     UNIQUE(response_message_id, card_id),
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
-    FOREIGN KEY (card_id) REFERENCES memory_cards(id) ON DELETE CASCADE,
     FOREIGN KEY (response_message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS ix_memory_card_uses_chat
@@ -737,6 +736,25 @@ def init_db():
                    FOREIGN KEY (card_id) REFERENCES memory_cards(id) ON DELETE CASCADE)"""
         )
         cx.execute("CREATE INDEX IF NOT EXISTS ix_memory_card_history_card ON memory_card_history(card_id, made DESC)")
+        # 带入记录里的 card_id 也可能是书签，不再要求它在 memory_cards 里：
+        # 老库这张表还挂着那条外键，重建一张不挂的，记录原样搬过去。
+        if any(fk["table"] == "memory_cards"
+               for fk in cx.execute("PRAGMA foreign_key_list(memory_card_uses)").fetchall()):
+            cx.execute(
+                """CREATE TABLE memory_card_uses_v2 (
+                       id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, card_id TEXT NOT NULL,
+                       response_message_id TEXT NOT NULL, content_snapshot TEXT NOT NULL,
+                       metadata_json TEXT NOT NULL DEFAULT '{}', query_excerpt TEXT NOT NULL DEFAULT '',
+                       score REAL NOT NULL DEFAULT 0, used_at INTEGER NOT NULL,
+                       UNIQUE(response_message_id, card_id),
+                       FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+                       FOREIGN KEY (response_message_id) REFERENCES messages(id) ON DELETE CASCADE)"""
+            )
+            cx.execute("INSERT INTO memory_card_uses_v2 SELECT id,chat_id,card_id,response_message_id,"
+                       "content_snapshot,metadata_json,query_excerpt,score,used_at FROM memory_card_uses")
+            cx.execute("DROP TABLE memory_card_uses")
+            cx.execute("ALTER TABLE memory_card_uses_v2 RENAME TO memory_card_uses")
+            cx.execute("CREATE INDEX IF NOT EXISTS ix_memory_card_uses_chat ON memory_card_uses(chat_id, used_at DESC)")
         # 书签：她在聊天里圈起来的几句原话。存一份副本（消息后来删了改了，原话还在），
         # 也记着是哪几条消息，「看原文」时能跳回当时的上下文。
         cx.execute(
@@ -3405,6 +3423,7 @@ def bookmark_delete(chat_id: str, bookmark_id: str) -> bool:
         return False
     with conn() as cx:
         cx.execute("DELETE FROM memory_bookmarks WHERE id=?", (bookmark_id,))
+        cx.execute("DELETE FROM memory_card_uses WHERE card_id=?", (bookmark_id,))
     memory_pool_touch()
     return True
 
@@ -3528,6 +3547,8 @@ def memory_card_delete_permanently(chat_id: str, card_id: str) -> bool:
             "DELETE FROM memory_cards WHERE id=? AND chat_id=? AND status='archived'",
             (card_id, chat_id),
         )
+        if cur.rowcount:
+            cx.execute("DELETE FROM memory_card_uses WHERE card_id=?", (card_id,))
     if cur.rowcount:
         memory_pool_touch()
     return cur.rowcount > 0
@@ -4336,6 +4357,13 @@ def memory_picks_brief(chat_id: str, rows: list[dict]) -> dict[str, list[dict]]:
     if not all_ids:
         return {}
     found = {card["id"]: card for card in memory_cards_by_id(chat_id, list(dict.fromkeys(all_ids)))}
+    for i in dict.fromkeys(all_ids):
+        if i not in found:
+            bookmark = bookmark_get(chat_id, i)
+            if bookmark:
+                # 书签在这一行里给概括，没概括就给第一句原话。
+                first = bookmark["lines"][0]["content"] if bookmark["lines"] else ""
+                found[i] = {**bookmark, "content": bookmark.get("label") or first}
     brief = {}
     for msg_id, ids in wanted.items():
         if not ids:
@@ -4343,8 +4371,9 @@ def memory_picks_brief(chat_id: str, rows: list[dict]) -> dict[str, list[dict]]:
         brief[msg_id] = [
             {"id": i, "content": found[i]["content"], "thread": found[i].get("thread") or "",
              "thread_role": found[i].get("thread_role") or "", "memory_type": found[i].get("memory_type") or "",
-             "missing": False} if i in found else
-            {"id": i, "content": "", "thread": "", "thread_role": "", "memory_type": "", "missing": True}
+             "kind": found[i].get("kind") or "card", "missing": False} if i in found else
+            {"id": i, "content": "", "thread": "", "thread_role": "", "memory_type": "", "kind": "card",
+             "missing": True}
             for i in ids
         ]
     return brief
