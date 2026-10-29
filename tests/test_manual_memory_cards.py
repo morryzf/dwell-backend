@@ -134,7 +134,7 @@ class MemoryCardPagingTest(unittest.TestCase):
         data = self._get()
         self.assertEqual(len(data["items"]), 30)
         self.assertEqual(data["items"][0]["content"], "第74张卡")
-        self.assertEqual((data["total"], data["counts"]), (74, {"active": 74, "archived": 1}))
+        self.assertEqual((data["total"], data["counts"]), (74, {"active": 74, "archived": 1, "bookmarks": 0}))
         self.assertNotIn("embedding_json", data["items"][0])
         self.assertNotIn("embedding_json", json.dumps(data))
 

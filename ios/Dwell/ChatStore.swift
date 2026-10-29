@@ -445,6 +445,21 @@ final class ChatStore: ObservableObject {
     }
 
     /// 多选删除：跟网页一样一次发过去。
+    /// 把勾的几句收成一个书签；概括在后台写。
+    func bookmark(_ ids: [String], why: String) async -> Bool {
+        guard !ids.isEmpty, !chatID.isEmpty else { return false }
+        do {
+            _ = try await api.request("POST", "api/chats/\(chatID)/bookmarks", body: [
+                "message_ids": ids, "why": why.trimmingCharacters(in: .whitespacesAndNewlines),
+            ])
+            flash("收进记忆了，正在概括这段在讲什么")
+            return true
+        } catch {
+            handle(error)
+            return false
+        }
+    }
+
     func bulkDelete(_ ids: [String]) async {
         guard !ids.isEmpty else { return }
         do {

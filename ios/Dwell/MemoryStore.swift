@@ -25,6 +25,11 @@ final class MemoryStore: ObservableObject {
     @Published var topic = ""
     /// 只看某一件事的卡；空＝不按事件筛。
     @Published var thread = ""
+    /// 全部 / 卡片 / 书签：all / cards / bookmarks。
+    @Published var kind = "all"
+    @Published var bookmarkCount = 0
+    private var labelWatch: Task<Void, Never>?
+    private var labelChecks = 0
     /// 卡池里有哪些事件、各几张。
     @Published var threads: [(name: String, count: Int, hasMain: Bool)] = []
     /// 存的时候发现这件事已经有主卡：问她要不要把原来那张改成副卡。
@@ -80,7 +85,7 @@ final class MemoryStore: ObservableObject {
         let params = [
             "limit": String(Self.pageSize), "offset": String(offset),
             "q": query.trimmingCharacters(in: .whitespaces), "filter": filter, "topic": topic,
-            "thread": thread,
+            "thread": thread, "kind": kind,
         ]
         // 不搜不筛的第一页（连着待确认）存一份：一打开就有卡，服务器那份回来再换上。
         let plain = offset == 0 && params["q"]!.isEmpty && filter == "all" && topic.isEmpty && thread.isEmpty
@@ -91,6 +96,7 @@ final class MemoryStore: ObservableObject {
             let json = try await api.request("GET", "\(base)/memory-cards", query: params, remember: plain)
             applyPage(json, reset: reset)
             pollIfBusy()
+            watchLabels()
         } catch {
             if error is URLError, !cards.isEmpty {
                 toast = "没连上服务器，现在看到的是上次的内容"
@@ -111,6 +117,7 @@ final class MemoryStore: ObservableObject {
         let counts = json["counts"] as? [String: Any] ?? [:]
         activeCount = counts["active"] as? Int ?? 0
         archivedCount = counts["archived"] as? Int ?? 0
+        bookmarkCount = counts["bookmarks"] as? Int ?? 0
         labels = MemoryLabels(json: json["taxonomy"] as? [String: Any])
         drafts = (json["drafts"] as? [[String: Any]] ?? []).map(MemoryCard.init(json:))
         let targets = (json["draft_targets"] as? [[String: Any]] ?? []).map(MemoryCard.init(json:))
@@ -342,6 +349,45 @@ final class MemoryStore: ObservableObject {
 
     // MARK: - 原文
 
+    // MARK: - 书签
+
+    /// 刚收的书签，概括还在后台写：隔几秒悄悄重拉一次，写好就换上，最多等半分钟。
+    private func watchLabels() {
+        guard cards.contains(where: { $0.isBookmark && $0.labelState == "pending" }) else {
+            labelChecks = 0
+            return
+        }
+        guard labelWatch == nil, labelChecks < 10 else { return }
+        labelChecks += 1
+        labelWatch = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard let self, !Task.isCancelled else { return }
+            self.labelWatch = nil
+            await self.loadCards(reset: true)
+        }
+    }
+
+    /// 改书签：概括、为什么记，或者去掉其中一句。
+    func updateBookmark(_ bookmark: MemoryCard, label: String? = nil, why: String? = nil,
+                        removing lineID: String? = nil) async -> Bool {
+        var body: [String: Any] = [:]
+        if let label { body["label"] = label }
+        if let why { body["why"] = why }
+        if let lineID { body["remove_message_id"] = lineID }
+        do {
+            _ = try await api.request("PATCH", "api/chats/\(bookmark.chatID)/bookmarks/\(bookmark.id)", body: body)
+            await loadCards(reset: true)
+            return true
+        } catch { say(error); return false }
+    }
+
+    func deleteBookmark(_ bookmark: MemoryCard) async {
+        do {
+            _ = try await api.request("DELETE", "api/chats/\(bookmark.chatID)/bookmarks/\(bookmark.id)")
+            await loadCards(reset: true)
+        } catch { say(error) }
+    }
+
     /// 对着原文改待确认的正文：只改字，不采用，回头还能决定要不要。
     func saveDraftContent(_ draft: MemoryCard, _ content: String) async -> Bool {
         do {
@@ -354,7 +400,8 @@ final class MemoryStore: ObservableObject {
     func source(of card: MemoryCard, isDraft: Bool, full: Bool) async -> (messages: [MemorySourceMessage], canExpand: Bool) {
         do {
             let json = try await api.request("GET", "api/chats/\(isDraft ? chatID : card.chatID)/memory-source", query: [
-                "kind": isDraft ? "draft" : "card", "id": card.id, "full": full ? "true" : "false",
+                "kind": isDraft ? "draft" : (card.isBookmark ? "bookmark" : "card"), "id": card.id,
+                "full": full ? "true" : "false",
             ])
             let messages = (json["messages"] as? [[String: Any]] ?? []).map(MemorySourceMessage.init(json:))
             return (messages, json["can_expand"] as? Bool ?? false)

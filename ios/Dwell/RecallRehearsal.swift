@@ -314,7 +314,7 @@ struct RecallRehearsalView: View {
                         }
                 }
             }
-            Menu {
+            if !item.card.isBookmark { Menu {
                 Button {
                     let was = chat.isPicked(item.card)
                     if chat.togglePick(item.card) {
@@ -332,7 +332,7 @@ struct RecallRehearsalView: View {
                     .foregroundStyle(Theme.dim)
                     .frame(width: 26, height: 26)
                     .contentShape(Rectangle())
-            }
+            } }
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MemoryStyle.card))

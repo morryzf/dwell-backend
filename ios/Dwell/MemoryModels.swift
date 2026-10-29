@@ -102,6 +102,15 @@ struct MemoryCard: Identifiable, Equatable {
     let action: String
     let targetCardID: String?
     let updated: Date
+    /// card（记忆卡）或 bookmark（她在聊天里圈的几句原话）。
+    let kind: String
+    /// 书签：模型写的「这段在讲什么」，她可以改；还在写的时候 labelState 是 pending。
+    let label: String
+    let labelState: String
+    /// 书签：她写的「为什么记」。
+    let why: String
+    /// 书签：圈起来的原话（副本）。
+    let lines: [BookmarkLine]
 
     init(json: [String: Any]) {
         id = json["id"] as? String ?? UUID().uuidString
@@ -129,7 +138,14 @@ struct MemoryCard: Identifiable, Equatable {
         action = json["action"] as? String ?? "create"
         targetCardID = json["target_card_id"] as? String
         updated = Date(timeIntervalSince1970: TimeInterval(json["updated"] as? Int ?? json["made"] as? Int ?? 0))
+        kind = json["kind"] as? String ?? "card"
+        label = json["label"] as? String ?? ""
+        labelState = json["label_state"] as? String ?? ""
+        why = json["why"] as? String ?? ""
+        lines = (json["lines"] as? [[String: Any]] ?? []).map(BookmarkLine.init(json:))
     }
+
+    var isBookmark: Bool { kind == "bookmark" }
 
     var isHidden: Bool { status == "hidden" }
     var isMain: Bool { !thread.isEmpty && threadRole == "main" }
@@ -287,5 +303,21 @@ struct MemoryInjection {
         items = (json["items"] as? [[String: Any]] ?? []).map(MemoryCard.init(json:))
         if items.isEmpty { return nil }
         usedAt = Date(timeIntervalSince1970: TimeInterval(json["used_at"] as? Int ?? 0))
+    }
+}
+
+/// 书签里的一句原话：谁说的、什么时候、说了什么，还记着是哪条消息。
+struct BookmarkLine: Identifiable, Equatable {
+    let messageID: String
+    let role: String
+    let content: String
+    let made: Date
+    var id: String { messageID }
+
+    init(json: [String: Any]) {
+        messageID = json["message_id"] as? String ?? UUID().uuidString
+        role = json["role"] as? String ?? "user"
+        content = json["content"] as? String ?? ""
+        made = Date(timeIntervalSince1970: TimeInterval(json["made"] as? Int ?? 0))
     }
 }
