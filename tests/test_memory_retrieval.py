@@ -56,3 +56,19 @@ class MemoryRetrievalTest(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class CommonWordsTest(unittest.TestCase):
+    """几乎每张卡都有的词（她的名字）对上了不算数，不然问什么都是一堆写着 Morry 的卡。"""
+
+    def test_her_name_does_not_outweigh_the_rare_words(self):
+        from app.memory_retrieval import rank_memory_cards
+        cards = [{"id": f"c{i}", "content": f"Morry 说过第{i}件小事，和工作有关。", "importance": "normal",
+                  "status": "active", "memory_type": "stable_fact", "topics": []} for i in range(12)]
+        cards.append({"id": "cat", "content": "布丁是她的猫，早上爱闹腾。", "importance": "normal",
+                      "status": "active", "memory_type": "stable_fact", "topics": []})
+        ranked = rank_memory_cards(cards, "Morry：布丁在6点闹腾，我睡不好", explain=True)
+        self.assertEqual(ranked[0]["id"], "cat")
+        self.assertNotIn("morry", ranked[0]["recall_why"]["shared"])
+        rest = [c for c in ranked if c["id"] != "cat"]
+        self.assertTrue(all("morry" not in c["recall_why"]["shared"] for c in rest))

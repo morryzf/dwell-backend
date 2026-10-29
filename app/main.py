@@ -5336,11 +5336,13 @@ def _recall_reasons(card: dict) -> list[str]:
     """演练页每张卡底下那行小字：它为什么被找出来。"""
     why = card.get("recall_why") or {}
     reasons = []
-    vector = float(why.get("vector") or 0)
-    if vector >= 0.6:
-        reasons.append("意思很接近")
-    elif vector > 0:
-        reasons.append("意思有点接近")
+    # 按向量那一路的名次说，不按相似度的绝对值：不同的向量模型给的数差得很远，
+    # 0.3 在一个模型里算接近，换一个就什么都不是。
+    vector_rank = why.get("vector_rank")
+    if vector_rank and vector_rank <= 3:
+        reasons.append("意思最接近")
+    elif vector_rank and vector_rank <= 10:
+        reasons.append("意思接近")
     shared = sorted(why.get("shared") or [], key=lambda t: (-len(t), t))
     # 「项圈刻」「项圈」都对上时只留长的那个。
     words = []

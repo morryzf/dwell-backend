@@ -136,14 +136,37 @@ def _hint_hit(hints, normalized_query: str, query_terms: set[str]) -> bool:
     return False
 
 
-def _keyword_parts(card: dict, query: str, query_terms: set[str]) -> dict:
+# 一个词出现在多少张卡里，就有多不稀奇。几乎每张都有的词（她的名字、「我们」）
+# 对上了也说明不了什么——不压下去，问什么都会把一堆写着「Morry」的卡顶上来。
+RARE_ENOUGH = 0.35
+COMMON_FLOOR = 0.05
+
+
+def _term_weights(query_terms: set[str], card_terms: list[set[str]]) -> dict[str, float]:
+    """每个查询词的分量，0–1：只在一张卡里出现的是 1，张张都有的是 0。"""
+    total = len(card_terms)
+    if total < 3:
+        return {term: 1.0 for term in query_terms}
+    weights = {}
+    for term in query_terms:
+        seen = sum(1 for terms in card_terms if term in terms)
+        # 留一点底：要找的词真的张张都有时（「铃兰」），还找得到。
+        weights[term] = 1.0 if seen <= 1 else max(COMMON_FLOOR, math.log(total / seen) / math.log(total))
+    return weights
+
+
+def _keyword_parts(card: dict, query: str, query_terms: set[str],
+                   weights: dict[str, float] | None = None) -> dict:
     """关键词这一路的分数，连同是怎么得来的：哪些词对上了、哪些话题对上了。"""
     content = str(card.get("content") or "").strip()
     if not content:
         return {"score": 0.0, "shared": [], "topics": [], "type_hit": False}
     content_terms = _terms(content)
     shared = query_terms & content_terms
-    score = sum(1.6 if len(term) >= 3 else 1.0 for term in shared)
+    weight = (lambda term: weights.get(term, 1.0)) if weights else (lambda term: 1.0)
+    score = sum((1.6 if len(term) >= 3 else 1.0) * weight(term) for term in shared)
+    # 理由里只写真起了作用的词。
+    shared = {term for term in shared if weight(term) >= RARE_ENOUGH}
     normalized_query, normalized_content = _normalized(query), _normalized(content)
     if len(normalized_content) >= 4 and normalized_content in normalized_query:
         score += 5.0
@@ -240,14 +263,13 @@ def rank_memory_cards(
     kw_scores: list[tuple[str, float]] = []
 
     for card in cards:
-        if not _valid_on(card, now.date()):
-            continue
         cid = str(card.get("id") or "")
-        if not cid:
-            continue
-        valid_cards[cid] = card
+        if cid and _valid_on(card, now.date()):
+            valid_cards[cid] = card
+    weights = _term_weights(query_terms, [_terms(card.get("content")) for card in valid_cards.values()])
 
-        parts = _keyword_parts(card, query, query_terms)
+    for cid, card in valid_cards.items():
+        parts = _keyword_parts(card, query, query_terms, weights)
         kw = parts["score"]
         if kw > 0:
             kw_scores.append((cid, kw))
@@ -258,6 +280,10 @@ def rank_memory_cards(
         if explain:
             why[cid] = {"vector": vs, "keyword": kw, "shared": parts["shared"],
                         "topics": parts["topics"], "type_hit": parts["type_hit"]}
+
+    # 有卡是靠稀罕的词对上的，就不让只沾了个常见词（名字）的卡进关键词那一路的排名。
+    if kw_scores and max(score for _, score in kw_scores) >= 1.0:
+        kw_scores = [(cid, score) for cid, score in kw_scores if score >= 0.3]
 
     if not kw_scores and not vec_scores:
         return []
