@@ -1003,17 +1003,24 @@ struct MemorySourceSheet: View {
     @State private var messages: [MemorySourceMessage] = []
     @State private var canExpand = false
     @State private var loading = true
+    /// 卡上现在的字（改过之后就是改后的）。
+    @State private var content: String
+    /// 正在对着原文改：输入框里的字。nil 是没在改。
+    @State private var draftText: String?
+    @State private var saving = false
+
+    init(store: MemoryStore, card: MemoryCard, isDraft: Bool) {
+        _store = ObservedObject(wrappedValue: store)
+        self.card = card
+        self.isDraft = isDraft
+        _content = State(initialValue: card.content)
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(card.content)
-                        .font(.system(size: 14))
-                        .foregroundStyle(Theme.dim)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.banner))
+                    cardBox
                     if loading {
                         ProgressView().frame(maxWidth: .infinity)
                     } else if messages.isEmpty {
@@ -1056,6 +1063,65 @@ struct MemorySourceSheet: View {
             }
             .tint(Theme.text)
             .task { await load(full: false) }
+        }
+    }
+
+    /// 上面那格卡片：点铅笔原地变成输入框，下面的原文照旧能翻着对照（跟网页一样）。
+    /// 主卡是时间线，正文由各个节点拼成，不在这里改。
+    @ViewBuilder
+    private var cardBox: some View {
+        if let text = draftText {
+            VStack(alignment: .leading, spacing: 10) {
+                TextEditor(text: Binding(get: { text }, set: { draftText = $0 }))
+                    .font(.system(size: 14.5))
+                    .foregroundStyle(Theme.text)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 110)
+                HStack(spacing: 10) {
+                    Button(saving ? "正在保存…" : "保存") { Task { await save(text) } }
+                        .buttonStyle(MemoryButtonStyle(kind: .primary))
+                        .disabled(saving || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("取消") { draftText = nil }
+                        .buttonStyle(MemoryButtonStyle(kind: .quiet))
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(MemoryStyle.border, lineWidth: 1))
+        } else {
+            HStack(alignment: .top, spacing: 8) {
+                Text(content)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.dim)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !card.isMain {
+                    Button { draftText = content } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Theme.dim)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("编辑这条记忆")
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.banner))
+        }
+    }
+
+    private func save(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        saving = true
+        defer { saving = false }
+        var edited = card
+        edited.content = trimmed
+        let ok = isDraft ? await store.saveDraftContent(card, trimmed) : await store.save(edited)
+        if ok {
+            content = trimmed
+            draftText = nil
         }
     }
 
