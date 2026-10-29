@@ -55,6 +55,8 @@ def _vector_score(card: dict, query_embedding: list[float]) -> float:
 #
 # 中文词走子串匹配，英文词走分词匹配：_normalized 会删掉所有空格，英文按子串匹
 # 配会乱命中（tea 命中 instead、eat 命中 great、like 命中 unlike）。见 _hint_hit。
+# 中文触发词至少两个字：单个字（「坏」「疼」「吃」）在日常句子里到处都是——
+# 「坏小子」会被当成在聊亲密内容，「不疼了」会被当成在聊健康。
 TOPIC_HINTS = {
     "identity": ("名字", "年龄", "生日", "职业", "身份", "背景", "哪里人",
                  "name", "age", "birthday", "born", "job"),
@@ -64,11 +66,11 @@ TOPIC_HINTS = {
                  "yourself", "wolfie", "strawberry"),
     "daily_life": ("日常", "最近", "今天", "生活", "家里", "每天",
                    "daily", "lately", "routine"),
-    "place": ("哪里", "地点", "住", "搬家", "城市", "旅行", "天气", "上海", "北京",
+    "place": ("哪里", "地点", "住在", "搬家", "城市", "旅行", "天气", "上海", "北京",
               "where", "city", "travel", "weather", "shanghai", "beijing"),
-    "food": ("吃", "喝", "菜", "饭", "餐厅", "口味", "咖啡", "奶茶", "食物",
+    "food": ("吃什么", "喝什么", "吃饭", "好吃", "想吃", "吃了", "喝了", "做饭", "外卖", "餐厅", "口味", "咖啡", "奶茶", "食物",
              "eat", "drink", "food", "meal", "restaurant", "coffee", "tea", "hungry"),
-    "books": ("书", "阅读", "小说", "作者", "读完", "读到",
+    "books": ("看书", "读书", "这本书", "阅读", "小说", "作者", "读完", "读到",
               "book", "read", "reading", "novel", "author"),
     "work_creativity": ("工作", "项目", "创作", "设计", "代码", "产品", "写作", "dwell",
                         "work", "project", "design", "code", "coding", "build", "writing"),
@@ -78,13 +80,13 @@ TOPIC_HINTS = {
     # 卡片无差别加分，把本该空着的召回位填满。
     "relationship": ("关系", "相处", "陪伴", "联系", "在意",
                      "relationship", "dynamic", "together", "distance"),
-    "health_safety": ("身体", "健康", "生病", "疼", "睡眠", "药", "医院", "安全", "情绪",
+    "health_safety": ("身体", "健康", "生病", "头疼", "肚子疼", "胃疼", "睡眠", "吃药", "医院", "安全", "情绪",
                       "health", "sick", "pain", "sleep", "tired", "doctor", "safe"),
-    "entertainment": ("电影", "电视剧", "视频", "游戏", "音乐", "歌", "综艺", "动漫",
+    "entertainment": ("电影", "电视剧", "视频", "游戏", "音乐", "听歌", "这首歌", "综艺", "动漫",
                       "movie", "film", "show", "game", "music", "song", "anime"),
     "family_friends": ("家人", "朋友", "妈妈", "爸爸", "同事", "同学", "亲人", "宠物",
                        "family", "friend", "mom", "mother", "dad", "father", "pet"),
-    "nsfw": ("想要", "操", "鸡巴", "惩罚", "乖", "坏", "脱", "后入", "咬", "打屁股", "安全词", "做爱",
+    "nsfw": ("想要", "操我", "鸡巴", "惩罚", "脱掉", "后入", "咬我", "打屁股", "安全词", "做爱",
              "fuck", "cock", "punish", "spank", "naughty", "safeword"),
 }
 
@@ -105,6 +107,7 @@ COMMON_CJK_GRAMS = {
     "一个", "一些", "这个", "那个", "什么", "怎么", "可以", "需要", "觉得", "还是",
     "已经", "正在", "现在", "今天", "最近", "我们", "你们", "他们", "自己", "事情",
     "喜欢", "知道", "记得", "以后", "时候", "因为", "所以", "但是", "如果", "没有",
+    "是我", "我是", "不是", "就是", "还有", "一下", "一直", "为什么", "怎么样",
 }
 
 
@@ -115,6 +118,8 @@ def _normalized(text: object) -> str:
 def _terms(text: object) -> set[str]:
     raw = str(text or "").casefold()
     terms = {word for word in re.findall(r"[a-z0-9_]{2,}", raw)}
+    # 「6点」「10月」「3次」：数字连着后面那个字算一块，不然数字会把它切没了。
+    terms.update(re.findall(r"[0-9]+[㐀-鿿]", raw))
     for chunk in re.findall(r"[㐀-鿿]{2,}", raw):
         for size in (2, 3):
             terms.update(chunk[index:index + size] for index in range(len(chunk) - size + 1))
@@ -138,6 +143,8 @@ def _hint_hit(hints, normalized_query: str, query_terms: set[str]) -> bool:
 
 # 一个词出现在多少张卡里，就有多不稀奇。几乎每张都有的词（她的名字、「我们」）
 # 对上了也说明不了什么——不压下去，问什么都会把一堆写着「Morry」的卡顶上来。
+TOPIC_BONUS = 0.6
+TYPE_BONUS = 0.4
 RARE_ENOUGH = 0.35
 COMMON_FLOOR = 0.05
 
@@ -155,13 +162,19 @@ def _term_weights(query_terms: set[str], card_terms: list[set[str]]) -> dict[str
     return weights
 
 
+def _card_text(card: dict) -> str:
+    """关键词比对用的卡片文字：正文加上事件名。事件名常常写着另一个叫法
+    （「布丁（Pudding）」），这样两个名字都对得上，不用另外记别名。"""
+    return f"{card.get('content') or ''} {card.get('thread') or ''}"
+
+
 def _keyword_parts(card: dict, query: str, query_terms: set[str],
                    weights: dict[str, float] | None = None) -> dict:
     """关键词这一路的分数，连同是怎么得来的：哪些词对上了、哪些话题对上了。"""
     content = str(card.get("content") or "").strip()
     if not content:
         return {"score": 0.0, "shared": [], "topics": [], "type_hit": False}
-    content_terms = _terms(content)
+    content_terms = _terms(_card_text(card))
     shared = query_terms & content_terms
     weight = (lambda term: weights.get(term, 1.0)) if weights else (lambda term: 1.0)
     score = sum((1.6 if len(term) >= 3 else 1.0) * weight(term) for term in shared)
@@ -174,11 +187,12 @@ def _keyword_parts(card: dict, query: str, query_terms: set[str],
     for topic in card.get("topics") or []:
         if _hint_hit(TOPIC_HINTS.get(str(topic), ()), normalized_query, query_terms):
             topics.append(str(topic))
-    score += min(2, len(topics)) * 2.4
+    # 话题、类型只在分不出先后时帮一把：对上一个话题抵不上对上一个少见的词。
+    score += min(2, len(topics)) * TOPIC_BONUS
     memory_type = str(card.get("memory_type") or "")
     type_hit = _hint_hit(TYPE_HINTS.get(memory_type, ()), normalized_query, query_terms)
     if type_hit:
-        score += 1.4
+        score += TYPE_BONUS
     return {"score": round(score, 4), "shared": sorted(shared), "topics": topics, "type_hit": type_hit}
 
 
@@ -256,6 +270,9 @@ def rank_memory_cards(
     if not query:
         return []
     query_terms = _terms(query)
+    # 每行开头的「Morry：」「Cloudy：」是说话人的标签，不是说了什么，不拿来比对。
+    for speaker in re.findall(r"(?m)^([^：:\n]{1,20})[：:]", query):
+        query_terms -= _terms(speaker)
 
     valid_cards: dict[str, dict] = {}
     why: dict[str, dict] = {}
@@ -266,7 +283,7 @@ def rank_memory_cards(
         cid = str(card.get("id") or "")
         if cid and _valid_on(card, now.date()):
             valid_cards[cid] = card
-    weights = _term_weights(query_terms, [_terms(card.get("content")) for card in valid_cards.values()])
+    weights = _term_weights(query_terms, [_terms(_card_text(card)) for card in valid_cards.values()])
 
     for cid, card in valid_cards.items():
         parts = _keyword_parts(card, query, query_terms, weights)
@@ -301,7 +318,9 @@ def rank_memory_cards(
             rrf += 1.0 / (_RRF_K + kw_rank[cid])
         card = valid_cards[cid]
         boost = _meta_boost(card, now)
-        score = rrf + boost * 0.001
+        # 重要程度、新旧只在名次挨着时分先后：前几名之间 RRF 差 0.0003 左右，
+        # 这一项最多 0.00012，翻不过一个名次。
+        score = rrf + boost * 0.0001
         item = {**card, "selection_score": round(score, 6)}
         if explain:
             item["recall_why"] = {**why[cid], "boost": round(boost, 3),

@@ -7,6 +7,12 @@ struct RecallCard: Identifiable, Equatable {
     /// 0–1：分数和第一名比。只拿来画那条细线，不显示数字。
     let strength: Double
     let reasons: [String]
+    /// 在向量那一路、关键词那一路各排第几；没进那一路是 nil。
+    let vectorRank: Int?
+    let keywordRank: Int?
+    /// 「这张为什么没进来」才有：会带上 / 差一点 / 排得太后 / 两路都没对上……以及一句说明。
+    let verdict: String
+    let note: String
     var id: String { card.id }
 
     init(json: [String: Any]) {
@@ -14,6 +20,17 @@ struct RecallCard: Identifiable, Equatable {
         rank = json["rank"] as? Int
         strength = (json["strength"] as? NSNumber)?.doubleValue ?? 0
         reasons = json["reasons"] as? [String] ?? []
+        vectorRank = json["vector_rank"] as? Int
+        keywordRank = json["keyword_rank"] as? Int
+        verdict = json["verdict"] as? String ?? ""
+        note = json["note"] as? String ?? ""
+    }
+
+    /// 「意思排第 2 · 关键词排第 14」。没拿到向量时只说关键词。
+    func ranksLine(vector: Bool) -> String {
+        let keyword = keywordRank.map { "关键词排第 \($0)" } ?? "关键词没对上"
+        guard vector else { return keyword }
+        return (vectorRank.map { "意思排第 \($0)" } ?? "意思没排上") + " · " + keyword
     }
 }
 
@@ -43,6 +60,10 @@ struct RecallRehearsalView: View {
     @State private var showNear = false
     @State private var showQuery = false
     @State private var editing: MemoryCard?
+    /// 「这张为什么没进来」：她挑的那张，和它的结果。
+    @State private var focusID: String?
+    @State private var focus: RecallCard?
+    @State private var choosingFocus = false
     @State private var toast = ""
     @State private var runTask: Task<Void, Never>?
     /// 上一次拿去找的那句：结果回来把输入框填上时，不要因为「字变了」再找一遍。
@@ -94,6 +115,9 @@ struct RecallRehearsalView: View {
                         }
                     }
                 }
+                if loaded && !text.isEmpty {
+                    focusSection
+                }
                 if thenAt != nil && text == original && !thenItems.isEmpty {
                     thenCard
                 }
@@ -131,6 +155,14 @@ struct RecallRehearsalView: View {
                 guard !Task.isCancelled else { return }
                 await run(value)
             }
+        }
+        .sheet(isPresented: $choosingFocus) {
+            RecallFocusSheet(chatID: store.chatID) { card in
+                choosingFocus = false
+                focusID = card.id
+                Task { await run(text) }
+            }
+            .presentationDetents([.large])
         }
         .sheet(item: $editing) { card in
             NavigationStack {
@@ -257,6 +289,9 @@ struct RecallRehearsalView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.dim)
                 }
+                Text(item.ranksLine(vector: vector))
+                    .font(.system(size: 11.5).monospacedDigit())
+                    .foregroundStyle(Theme.dim.opacity(0.8))
                 if !main {
                     // 跟第一名比有多强：一条细线，不写数字。
                     Capsule().fill(Theme.accent.opacity(0.2))
@@ -292,6 +327,67 @@ struct RecallRehearsalView: View {
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(MemoryStyle.border, lineWidth: 1))
         .opacity(faint ? 0.72 : 1)
         .transition(.opacity)
+    }
+
+    /// 「这张为什么没进来？」：挑一张卡，看它在两路各排第几、差在哪里。
+    @ViewBuilder
+    private var focusSection: some View {
+        if let focus {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("这张为什么没进来")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.dim)
+                    Spacer()
+                    Button("换一张") { choosingFocus = true }
+                    Button {
+                        focusID = nil
+                        withAnimation(.easeOut(duration: 0.2)) { self.focus = nil }
+                    } label: {
+                        Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                    }
+                    .accessibilityLabel("不看这张了")
+                }
+                .font(.system(size: 12.5))
+                .foregroundStyle(Theme.text)
+                .buttonStyle(.plain)
+                Text(focus.card.content.isEmpty ? "这张卡已经不在了" : focus.card.content)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(3)
+                Text(focus.note)
+                    .font(.system(size: 13))
+                    .foregroundStyle(focus.verdict == "picked" ? MemoryStyle.sage : Theme.text)
+                if !["missing", "hidden"].contains(focus.verdict) {
+                    Text(focus.ranksLine(vector: vector))
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(Theme.dim)
+                }
+                if !focus.reasons.isEmpty {
+                    Text("对上的：" + focus.reasons.joined(separator: " · "))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.dim)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MemoryStyle.banner))
+            .padding(.top, 6)
+            .transition(.opacity)
+        } else {
+            Button {
+                choosingFocus = true
+            } label: {
+                Label("有张卡没想起来？看看它为什么没进来", systemImage: "questionmark.circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.text)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(MemoryStyle.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 6)
+        }
     }
 
     /// 那一轮真带了哪几张，跟现在会带的对一对：卡改过之后，看得出改得有没有用。
@@ -339,6 +435,7 @@ struct RecallRehearsalView: View {
         defer { loading = false }
         var body: [String: Any] = [:]
         if let value { body["text"] = value }
+        if let focusID { body["focus_card_id"] = focusID }
         guard let json = try? await API.shared.request("POST", "api/chats/\(store.chatID)/memory-recall/rehearse",
                                                        body: body) else {
             say("没找成，再试一次")
@@ -363,6 +460,7 @@ struct RecallRehearsalView: View {
             picked = (json["picked"] as? [[String: Any]] ?? []).map(RecallCard.init(json:))
             mains = (json["mains"] as? [[String: Any]] ?? []).map(RecallCard.init(json:))
             near = (json["near"] as? [[String: Any]] ?? []).map(RecallCard.init(json:))
+            focus = (json["focus"] as? [String: Any]).map(RecallCard.init(json:))
             if let then = json["then"] as? [String: Any] {
                 thenAt = Date(timeIntervalSince1970: TimeInterval(then["at"] as? Int ?? 0))
                 thenItems = (then["items"] as? [[String: Any]] ?? []).map {
@@ -374,6 +472,87 @@ struct RecallRehearsalView: View {
             loaded = true
             // 第一次打开：一张接一张淡进来。
             appeared = true
+        }
+    }
+}
+
+/// 挑一张卡，看它这次为什么没进来。
+struct RecallFocusSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var memory: MemoryStore
+    @State private var searchTask: Task<Void, Never>?
+    let onPick: (MemoryCard) -> Void
+
+    init(chatID: String, onPick: @escaping (MemoryCard) -> Void) {
+        _memory = StateObject(wrappedValue: MemoryStore(chatID: chatID))
+        self.onPick = onPick
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(Theme.dim)
+                        TextField("搜你想让它想起来的那张", text: $memory.query)
+                            .font(.system(size: 15))
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 40)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(MemoryStyle.field))
+                    .padding(.top, 6)
+                    ForEach(memory.cards) { card in
+                        Button { onPick(card) } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(card.content)
+                                    .font(.system(size: 14.5))
+                                    .foregroundStyle(Theme.text)
+                                    .lineLimit(3)
+                                    .multilineTextAlignment(.leading)
+                                if !card.thread.isEmpty {
+                                    Text((card.isMain ? "主卡 · " : "副卡 · ") + card.thread)
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Theme.dim)
+                                }
+                            }
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MemoryStyle.card))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .onAppear {
+                            if card.id == memory.cards.last?.id, memory.hasMoreCards {
+                                Task { await memory.loadCards(reset: false) }
+                            }
+                        }
+                    }
+                    if memory.loadingCards {
+                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 12)
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.bottom, 24)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(PaperBackground())
+            .navigationTitle("挑一张卡")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { dismiss() } label: { Image(systemName: "xmark") }
+                }
+            }
+            .tint(Theme.text)
+        }
+        .task { await memory.loadCards(reset: true) }
+        .onChange(of: memory.query) { _, _ in
+            searchTask?.cancel()
+            searchTask = Task {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                await memory.loadCards(reset: true)
+            }
         }
     }
 }

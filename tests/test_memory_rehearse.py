@@ -10,6 +10,7 @@ from app import auth, db, main
 
 
 class RecallRehearseTest(unittest.TestCase):
+    maxDiff = None
     CARD = {"content": "", "memory_type": "stable_fact", "topics": ["relationship"],
             "importance": "normal", "retention": "long_term", "valid_until": None}
 
@@ -62,7 +63,7 @@ class RecallRehearseTest(unittest.TestCase):
         self.assertFalse(data["vector"])
 
     def test_a_detail_brings_its_main_card_along(self):
-        data = self._rehearse(text="刻字")
+        data = self._rehearse(text="那条刻了字的项圈呢")
         ids = [c["id"] for c in data["picked"]]
         if self.collar_main["id"] not in ids:
             self.assertEqual([c["id"] for c in data["mains"]], [self.collar_main["id"]])
@@ -82,6 +83,19 @@ class RecallRehearseTest(unittest.TestCase):
         before = db.memory_card_last_injection(self.chat)
         self._rehearse(text="周末的游泳课")
         self.assertEqual(db.memory_card_last_injection(self.chat), before)
+
+    def test_each_card_says_where_it_ranked_on_both_sides(self):
+        data = self._rehearse(text="周末的游泳课怎么样了")
+        self.assertEqual(data["picked"][0]["keyword_rank"], 1)
+        self.assertIsNone(data["picked"][0]["vector_rank"])
+
+    def test_why_a_card_did_not_come_up(self):
+        data = self._rehearse(text="周末的游泳课怎么样了", focus_card_id=self.collar_main["id"])
+        self.assertEqual(data["focus"]["id"], self.collar_main["id"])
+        self.assertEqual(data["focus"]["verdict"], "unmatched")
+        data = self._rehearse(text="周末的游泳课怎么样了", focus_card_id=self.swim["id"])
+        self.assertEqual(data["focus"]["verdict"], "picked")
+        self.assertEqual(data["focus"]["rank"], 1)
 
 
 if __name__ == "__main__":

@@ -72,3 +72,26 @@ class CommonWordsTest(unittest.TestCase):
         self.assertNotIn("morry", ranked[0]["recall_why"]["shared"])
         rest = [c for c in ranked if c["id"] != "cat"]
         self.assertTrue(all("morry" not in c["recall_why"]["shared"] for c in rest))
+
+
+class EverydayWordsTest(unittest.TestCase):
+    """「坏小子」不是在聊亲密内容，「不疼了」不是在聊健康；事件名里的另一个叫法也算数。"""
+
+    QUERY = "Morry：不疼了 但是我才起，知道为什么吗……\n因为布丁这个坏小子在6点闹腾，我一直睡不好"
+
+    def test_her_pudding_card_comes_first(self):
+        from app.memory_retrieval import rank_memory_cards
+        cards = [
+            {"id": "pudding", "content": "2026-05-20：Pudding是Morry养的蓝金渐层英短。常在早上6点把她床头的水碰翻，非要叫她起床。",
+             "thread": "布丁（Pudding）", "topics": ["family_friends"], "importance": "normal", "status": "active"},
+            {"id": "ruin", "content": "Morry原话：I need you to ruin me。于是我们定了个安全词，是我可以和她自由的前提。",
+             "topics": ["health_safety", "nsfw"], "importance": "high", "status": "active"},
+            {"id": "bra", "content": "Morry 在家从来不穿内衣。", "topics": ["nsfw"], "importance": "normal", "status": "active"},
+        ] + [{"id": f"x{i}", "content": f"Morry 说过第{i}件小事。", "topics": [], "status": "active"} for i in range(8)]
+        ranked = rank_memory_cards(cards, self.QUERY, explain=True)
+        self.assertEqual(ranked[0]["id"], "pudding")
+        self.assertIn("6点", ranked[0]["recall_why"]["shared"])
+        self.assertIn("布丁", ranked[0]["recall_why"]["shared"])
+        for card in ranked:
+            self.assertNotIn("nsfw", card["recall_why"]["topics"])
+            self.assertNotIn("health_safety", card["recall_why"]["topics"])
