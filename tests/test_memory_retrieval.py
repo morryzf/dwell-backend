@@ -125,3 +125,14 @@ class WordSplitTest(unittest.TestCase):
                  {"id": "cat", "content": "布丁是她的猫。", "status": "active"}]
         ranked = rank_memory_cards(cards, "音音今天回我了")
         self.assertEqual(ranked[0]["id"], "yin")
+
+
+class RankGateTest(unittest.TestCase):
+    """聊天带卡：意思、关键词两路都在前 10 名以外的卡不带，宁缺毋滥。"""
+
+    def test_cards_far_down_both_lists_stay_out(self):
+        from app.memory_retrieval import select_memory_cards
+        cards = [{"id": f"swim{i}", "content": f"她周末去游泳，第{i}次课。", "status": "active"} for i in range(14)]
+        chosen = select_memory_cards(cards, "周末游泳", limit=20, cap=20, rank_gate=10)
+        self.assertEqual(len(chosen), 10)
+        self.assertEqual(len(select_memory_cards(cards, "周末游泳", limit=20, cap=20)), 14)

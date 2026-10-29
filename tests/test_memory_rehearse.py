@@ -97,6 +97,14 @@ class RecallRehearseTest(unittest.TestCase):
         self.assertEqual(data["focus"]["verdict"], "picked")
         self.assertEqual(data["focus"]["rank"], 1)
 
+    def test_cards_far_down_both_lists_stay_out(self):
+        extra = [db.memory_card_add_manual(self.chat, {**self.CARD, "content": f"她周末的游泳课第{i}次，教练换了。"})
+                 for i in range(12)]
+        data = self._rehearse(text="周末的游泳课怎么样了")
+        self.assertTrue(all(c["keyword_rank"] <= 10 for c in data["picked"] + data["near"]))
+        verdicts = {self._rehearse(text="周末的游泳课怎么样了", focus_card_id=card["id"])["focus"]["verdict"]
+                    for card in extra}
+        self.assertIn("gated", verdicts)
 
 if __name__ == "__main__":
     unittest.main()

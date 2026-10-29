@@ -33,7 +33,7 @@ from app.llm_client import prompt_cache_enabled, reply_language_ok, stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
 from app.web_tools import WebToolError, web_fetch, web_search
 from app.kelivo_import import KelivoImportError, import_conversation as kelivo_import_conversation, preview as kelivo_preview
-from app.memory_retrieval import rank_memory_cards, select_memory_cards
+from app.memory_retrieval import passes_rank_gate, rank_memory_cards, select_memory_cards
 from app.embedding_client import get_embedding, get_embeddings_batch, last_error as embedding_last_error
 from app.openrouter_usage import build_utc_cost_series, fetch_openrouter_snapshot, parse_usd_cny_rate
 
@@ -5330,6 +5330,8 @@ async def memory_cards_get(chat_id: str, include_archived: bool = False, limit: 
 
 RECALL_PICKED = 5
 RECALL_NEAR = 5
+# 聊天时带卡的门槛：意思、关键词两路里至少有一路排进前 10，才有资格被带上。
+RECALL_RANK_GATE = 10
 
 
 def _recall_reasons(card: dict) -> list[str]:
@@ -5372,6 +5374,10 @@ def _recall_card(card: dict, top: float, rank: int | None = None, reasons: list[
         "reasons": _recall_reasons(card) if reasons is None else reasons,
         # 两路各排第几：没进那一路的是 null。
         "vector_rank": why.get("vector_rank"), "keyword_rank": why.get("keyword_rank"),
+        # 意思那一路的相似度原数：之后定「绝对门槛」时拿来对照。
+        "similarity": round(float(why.get("vector") or 0), 3),
+        # 两路都在门槛名次以外：真聊天时不会被带上。
+        "gated": not passes_rank_gate(card, RECALL_RANK_GATE) if why else False,
     }
 
 
@@ -5387,9 +5393,14 @@ def _recall_focus(card_id: str, ranked: list[dict], pool: list[dict], top: float
         return {**_recall_card(card, top), "verdict": "unmatched",
                 "note": "两路都没对上：意思不够近，字面上也一个少见的词都没对上。也可能已经过期了。"}
     found = ranked[index]
-    verdict = "picked" if index < RECALL_PICKED else "near" if index < RECALL_PICKED + RECALL_NEAR else "out"
-    notes = {"picked": "会带上。", "near": "差一点：在第 6 到第 10 名之间。",
-             "out": f"排第 {index + 1} 名，进不了前 {RECALL_PICKED}。"}
+    if not passes_rank_gate(found, RECALL_RANK_GATE):
+        return {**_recall_card(found, top, index + 1), "verdict": "gated",
+                "note": f"两路都在第 {RECALL_RANK_GATE} 名以后，被门槛挡下了，不带。"}
+    passing = [c for c in ranked if passes_rank_gate(c, RECALL_RANK_GATE)]
+    place = next(i for i, c in enumerate(passing) if c.get("id") == card_id)
+    verdict = "picked" if place < RECALL_PICKED else "near" if place < RECALL_PICKED + RECALL_NEAR else "out"
+    notes = {"picked": "会带上。", "near": "差一点：过了门槛，但没挤进前 5。",
+             "out": f"过了门槛，但排第 {place + 1} 名，进不了前 {RECALL_PICKED}。"}
     return {**_recall_card(found, top, index + 1), "verdict": verdict, "note": notes[verdict]}
 
 
@@ -5431,7 +5442,10 @@ async def memory_recall_rehearse(chat_id: str, payload: dict = Body(default={}))
     ranked = rank_memory_cards(pool, query, now=db.cn_now().replace(tzinfo=None),
                                query_embedding=embedding, explain=True)
     top = float(ranked[0]["selection_score"]) if ranked else 0
-    picked = ranked[:RECALL_PICKED]
+    # 和真聊天同一道门槛：两路都在前 10 名以外的卡不带。挡下的放进「差一点」里，标出来。
+    picked = [c for c in ranked if passes_rank_gate(c, RECALL_RANK_GATE)][:RECALL_PICKED]
+    picked_ids = {c.get("id") for c in picked}
+    rest = [c for c in ranked if c.get("id") not in picked_ids]
     mains = _with_thread_mains(picked, pool)[len(picked):]
     focus_id = str(payload.get("focus_card_id") or "")
     return {
@@ -5440,8 +5454,7 @@ async def memory_recall_rehearse(chat_id: str, payload: dict = Body(default={}))
         "vector": bool(embedding),
         "picked": [_recall_card(c, top, i) for i, c in enumerate(picked, 1)],
         "mains": [_recall_card(c, top, None, ["同一件事的主卡，顺带进来的"]) for c in mains],
-        "near": [_recall_card(c, top, i) for i, c in enumerate(ranked[RECALL_PICKED:RECALL_PICKED + RECALL_NEAR],
-                                                                  RECALL_PICKED + 1)],
+        "near": [_recall_card(c, top, i) for i, c in enumerate(rest[:RECALL_NEAR], len(picked) + 1)],
         "then": {"at": then["used_at"], "message_id": then["response_message_id"],
                  "items": [{"id": i["id"], "content": i.get("content") or ""} for i in then["items"]]}
         if then else None,
@@ -6806,6 +6819,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
             db.memory_card_embeddings(chat_id), memory_query, limit=5,
             now=db.cn_now().replace(tzinfo=None),
             query_embedding=query_emb,
+            rank_gate=RECALL_RANK_GATE,
         )
     if selected_memory_cards and not picked_ids:
         selected_memory_cards = _with_thread_mains(selected_memory_cards, db.memory_card_embeddings(chat_id))

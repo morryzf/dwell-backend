@@ -300,8 +300,13 @@ def select_memory_cards(
     now: datetime | None = None,
     query_embedding: list[float] | None = None,
     cap: int = 5,
+    rank_gate: int | None = None,
 ) -> list[dict]:
     """Return at most ``limit`` relevant, active and unexpired cards.
+
+    ``rank_gate``: only cards ranked within this many places on at least one
+    path (meaning or keywords) may come — chat recall uses it so a card that is
+    far down on both lists stays out instead of filling the five places.
 
     ``cap`` bounds ``limit``: chat injection keeps the default 5; the memory MCP
     lets an outside client ask for a few more.
@@ -310,7 +315,15 @@ def select_memory_cards(
     Falls back to keyword-only when no query embedding is provided.
     """
     ranked = rank_memory_cards(cards, context, now=now, query_embedding=query_embedding)
+    if rank_gate:
+        ranked = [card for card in ranked if passes_rank_gate(card, rank_gate)]
     return ranked[: max(0, min(int(cap), int(limit)))]
+
+
+def passes_rank_gate(card: dict, gate: int) -> bool:
+    """意思、关键词两路里，至少有一路排进前 gate 名。"""
+    ranks = card.get("recall_ranks") or {}
+    return any(rank is not None and rank <= gate for rank in (ranks.get("vector"), ranks.get("keyword")))
 
 
 def rank_memory_cards(
@@ -382,7 +395,8 @@ def rank_memory_cards(
         # 重要程度、新旧只在名次挨着时分先后：前几名之间 RRF 差 0.0003 左右，
         # 这一项最多 0.00012，翻不过一个名次。
         score = rrf + boost * 0.0001
-        item = {**card, "selection_score": round(score, 6)}
+        item = {**card, "selection_score": round(score, 6),
+                "recall_ranks": {"vector": vec_rank.get(cid), "keyword": kw_rank.get(cid)}}
         if explain:
             item["recall_why"] = {**why[cid], "boost": round(boost, 3),
                                   "vector_rank": vec_rank.get(cid), "keyword_rank": kw_rank.get(cid)}
