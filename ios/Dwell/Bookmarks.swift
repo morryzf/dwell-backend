@@ -94,7 +94,7 @@ struct BookmarkCardView: View {
     /// 概括还在写、没写出来时说什么。
     static func title(_ card: MemoryCard) -> String {
         if !card.label.isEmpty { return card.label }
-        return card.labelState == "pending" ? "正在概括…" : "没概括出来，点编辑自己写一句"
+        return card.labelState == "pending" ? "正在概括…" : "没概括出来，点这里自己写一句"
     }
 }
 
@@ -302,7 +302,7 @@ struct BookmarkSuggestionView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "bookmark")
-                Text("推荐书签")
+                Text(card.isOwnPick ? "你圈的书签" : "推荐书签")
             }
             .font(.system(size: 11))
             .foregroundStyle(Theme.accent)
@@ -334,9 +334,9 @@ struct BookmarkSuggestionView: View {
                     editingLabel = true
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(card.content)
-                            .font(.system(size: 14.5, weight: .medium))
-                            .foregroundStyle(Theme.text)
+                        Text(BookmarkCardView.title(MemoryCard(json: ["label": card.content, "label_state": card.labelState])))
+                            .font(.system(size: 14.5, weight: card.content.isEmpty ? .regular : .medium))
+                            .foregroundStyle(card.content.isEmpty ? Theme.dim : Theme.text)
                             .multilineTextAlignment(.leading)
                         Image(systemName: "pencil")
                             .font(.system(size: 11))
@@ -351,6 +351,12 @@ struct BookmarkSuggestionView: View {
                 ForEach(card.lines) { line in
                     lineRow(line)
                 }
+            }
+
+            if !card.why.isEmpty {
+                Text("为什么记：" + card.why)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.dim)
             }
 
             Text("点一句把它圈进来或去掉")

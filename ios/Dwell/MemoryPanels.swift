@@ -28,10 +28,8 @@ struct MemorySummaryPanel: View {
             if summary.hasDraft {
                 section("新摘要（待确认）") {
                     VStack(alignment: .leading, spacing: 12) {
-                        TextEditor(text: $draftText)
-                            .font(.system(size: 14))
+                        StableTextView(text: $draftText, grows: true)
                             .frame(minHeight: 420)
-                            .scrollContentBackground(.hidden)
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
                         HStack(spacing: 10) {
@@ -50,10 +48,8 @@ struct MemorySummaryPanel: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if editing {
                         // 编辑时给足高度：摘要动辄好几百字，框太矮就只能一小截一小截地翻。
-                        TextEditor(text: $draftText)
-                            .font(.system(size: 14))
+                        StableTextView(text: $draftText, grows: true)
                             .frame(minHeight: 520)
-                            .scrollContentBackground(.hidden)
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
                         HStack(spacing: 10) {

@@ -6372,7 +6372,10 @@ bookmarkForm.onsubmit = async event => {
     await memoryJson('api/chats/' + encodeURIComponent(chat.id) + '/bookmarks', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message_ids: bookmarkPickIds, why: bookmarkWhy.value.trim()})});
     closeBookmarkSheet();
     setMessageSelectionMode(false);
-    note('（收进记忆了，正在概括这段在讲什么）');
+    note('（放进待确认了，概括好就能收下）');
+    // 待确认的数字、三个点上的提示点顺手跟上；记忆面板下次打开会整页重拿
+    updateMemoryTabCount('review', 1);
+    refreshMemoryBadge();
   } catch (e) {
     bookmarkSave.disabled = false;
     note('（没收进去：' + e.message + '）', 'err');
@@ -13650,7 +13653,7 @@ async function currentChatForMemory() {
   const data = await (await fetch('api/chats?scope=live', {cache:'no-store'})).json();
   return (data.items || []).find(item => item.current) || null;
 }
-function stopLongContextPoll() { if (longContextPoll) { clearTimeout(longContextPoll); longContextPoll = null; } stopBookmarkPoll(); }
+function stopLongContextPoll() { if (longContextPoll) { clearTimeout(longContextPoll); longContextPoll = null; } stopBookmarkPoll(); stopBookmarkDraftPoll(); }
 let memoryConsoleTab = 'cards';
 let memoryConsoleQuery = '';
 let memoryConsoleFilter = 'all';
@@ -13987,7 +13990,7 @@ function memoryBookmarkLines(item, editing) {
   return lines.map(line => {
     const cont = prev && prev.role === line.role && Math.abs(Number(line.made || 0) - Number(prev.made || 0)) < 600;
     prev = line;
-    const who = line.role === 'user' ? '我' : assistantName;
+    const who = line.role === 'user' ? 'Morry' : assistantName;
     const when = memorySourceTime(line.made);
     return `<div class="mc-bm-line${cont ? ' cont' : ''}" data-bm-line="${instructionEsc(line.message_id)}">`
       + (cont ? '' : `<div class="mc-bm-who">${instructionEsc(who)}${when ? ' · ' + instructionEsc(when) : ''}</div>`)
@@ -14102,7 +14105,8 @@ function memoryBookmarkDraftPicked(item) {
 }
 function memoryBookmarkDraftLabel(item) {
   const text = String(item.content || '').trim();
-  return `<button type="button" class="mc-bmd-label${text ? '' : ' dim'}" data-bmd-label aria-label="改这句概括">${instructionEsc(text || '还没有概括，点这里写一句')}<span class="mc-bmd-pen" aria-hidden="true">✎</span></button>`;
+  const empty = item.label_state === 'pending' ? '正在概括…' : '还没有概括，点这里写一句';
+  return `<button type="button" class="mc-bmd-label${text ? '' : ' dim'}" data-bmd-label aria-label="改这句概括">${instructionEsc(text || empty)}<span class="mc-bmd-pen" aria-hidden="true">✎</span></button>`;
 }
 // 和书签卡一样排成一小段对话（谁 · 几时）；同一个人十分钟内接着说的不再重复抬头。
 function memoryBookmarkDraftLines(item, picked) {
@@ -14110,7 +14114,7 @@ function memoryBookmarkDraftLines(item, picked) {
   return (item.lines || []).map(line => {
     const cont = prev && prev.role === line.role && Math.abs(Number(line.made || 0) - Number(prev.made || 0)) < 600;
     prev = line;
-    const who = line.role === 'user' ? '我' : assistantName;
+    const who = line.role === 'user' ? 'Morry' : assistantName;
     const when = memorySourceTime(line.made);
     const on = picked.has(Number(line.rowid));
     return `<button type="button" class="mc-bmd-line${on ? ' picked' : ''}" data-bmd-row="${Number(line.rowid)}" aria-pressed="${on}">`
@@ -14122,9 +14126,10 @@ function memoryBookmarkDraftLines(item, picked) {
 function memoryBookmarkDraftView(item) {
   const picked = memoryBookmarkDraftPicked(item);
   return `<article class="mc-card mc-bmd" data-bmd-item="${instructionEsc(item.id)}"><div class="mc-card-view">`
-    + '<div class="mc-bmd-kicker"><span class="mc-bmd-mark" aria-hidden="true"></span>推荐书签</div>'
+    + `<div class="mc-bmd-kicker"><span class="mc-bmd-mark" aria-hidden="true"></span>${item.origin === 'manual' ? '你圈的书签' : '推荐书签'}</div>`
     + `<div data-bmd-label-wrap>${memoryBookmarkDraftLabel(item)}</div>`
     + `<div class="mc-bmd-lines" role="group" aria-label="圈进书签的句子">${memoryBookmarkDraftLines(item, picked)}</div>`
+    + (String(item.why || '').trim() ? `<div class="mc-bm-why">为什么记：${instructionEsc(String(item.why).trim())}</div>` : '')
     + '<div class="mc-bmd-hint">点一句把它圈进来或去掉</div><div class="ap-msg" data-bmd-msg></div>'
     + '<div class="mc-actions"><button class="mc-btn primary" type="button" data-bmd-accept>收下</button><button class="mc-btn quiet" type="button" data-bmd-discard>忽略</button></div>'
     + '</div></article>';
@@ -14157,6 +14162,7 @@ function wireMemoryBookmarkDraft(card, item, chat, cardState) {
     else picked.add(rowid);
     const on = picked.has(rowid);
     line.classList.toggle('picked', on); line.setAttribute('aria-pressed', String(on));
+    card._bmdTouched = Date.now();
     const mine = ++seq;
     try {
       const d = await memoryJson(url, {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({rowids: sorted()})});
@@ -14197,6 +14203,9 @@ function wireMemoryBookmarkDraft(card, item, chat, cardState) {
     const end = input.value.length; try { input.setSelectionRange(end, end); } catch (e) {}
   }
   showLabel();
+  // 给下面的「正在概括…」轮询用：她在改概括、刚点过一句、PUT 还没回来，这一轮就别动这张
+  card._bmdBusy = () => !!labelWrap.querySelector('form') || seq !== settled || Date.now() - (card._bmdTouched || 0) < 1500;
+  card._bmdLabelReady = fresh => { item.content = fresh.content; item.label_state = fresh.label_state; showLabel(); };
   const accept = card.querySelector('[data-bmd-accept]'), discard = card.querySelector('[data-bmd-discard]');
   accept.onclick = async () => {
     // 概括正在改、还没点保存：按框里写的收
@@ -14261,6 +14270,37 @@ function watchBookmarkLabels(chat, allItems) {
       }
     } catch (e) {}
     if (gen === bookmarkPollGen) watchBookmarkLabels(chat, allItems);
+  }, 3000);
+}
+// 待确认里的书签也一样：概括在后台写。还有「正在概括…」就每 3 秒悄悄拿一次待确认，
+// 只换那一行概括；她正在改、刚点过一句的那张这一轮跳过。最多问 10 次。
+let bookmarkDraftPoll = 0, bookmarkDraftPollGen = 0;
+function stopBookmarkDraftPoll() { if (bookmarkDraftPoll) { clearTimeout(bookmarkDraftPoll); bookmarkDraftPoll = 0; } bookmarkDraftPollGen++; }
+function watchBookmarkDraftLabels(chat, cardState, triesLeft) {
+  stopBookmarkDraftPoll();
+  const gen = bookmarkDraftPollGen;
+  const left = triesLeft == null ? 10 : triesLeft;
+  const pendingCards = () => [...document.querySelectorAll('[data-bmd-item]')]
+    .map(card => [card, (cardState.drafts || []).find(value => value.action === 'bookmark' && value.id === card.dataset.bmdItem)])
+    .filter(([, item]) => item && item.label_state === 'pending');
+  if (left <= 0 || !pendingCards().length) return;
+  bookmarkDraftPoll = setTimeout(async () => {
+    bookmarkDraftPoll = 0;
+    const waiting = pendingCards();
+    if (waiting.length && !waiting.some(([card]) => card._bmdBusy && card._bmdBusy())) {
+      try {
+        // 只要 drafts：limit=1、只看书签，卡片那边几乎不用算
+        const d = await memoryJson('api/chats/' + encodeURIComponent(chat.id) + '/memory-cards?limit=1&kind=bookmarks', {cache: 'no-store'});
+        if (gen !== bookmarkDraftPollGen) return;
+        const fresh = Object.fromEntries((d.drafts || []).map(value => [value.id, value]));
+        for (const [card, item] of pendingCards()) {
+          const next = fresh[item.id];
+          if (!next || next.label_state === 'pending' || (card._bmdBusy && card._bmdBusy())) continue;
+          if (card._bmdLabelReady) card._bmdLabelReady(next);
+        }
+      } catch (e) {}
+    }
+    if (gen === bookmarkDraftPollGen) watchBookmarkDraftLabels(chat, cardState, left - 1);
   }, 3000);
 }
 function memoryEmpty(title, text, button) {
@@ -14529,7 +14569,7 @@ async function loadLongContext(quiet) {
     if(memoryConsoleTab==='summary')wireMemorySummary(chat,summary);
     if(memoryConsoleTab==='settings')wireMemorySettings(chat,cards,sigilloState,shopState);
     if(memoryConsoleTab==='cards'||memoryConsoleTab==='review')wireMemoryCards(chat,cards,cards.items||[]);
-    if(memoryConsoleTab==='review')wireMemoryBookmarkDrafts(chat,cards);
+    if(memoryConsoleTab==='review'){ wireMemoryBookmarkDrafts(chat,cards); watchBookmarkDraftLabels(chat,cards); }
     if(memoryConsoleTab==='cards'){ wireMemoryBookmarks(chat,cards.items||[]); watchBookmarkLabels(chat,cards.items||[]); }
     // 只看书签时，类别、事件这些筛不到书签，一并放下
     body.querySelectorAll('[data-mc-kind]').forEach(chip=>chip.onclick=()=>{ const kind=chip.dataset.mcKind; if(kind===memoryConsoleKind)return; memoryConsoleKind=kind; if(kind==='bookmarks'){ memoryConsoleTopic=''; memoryConsoleThread=''; if(!['all','active'].includes(memoryConsoleFilter))memoryConsoleFilter='all'; } memoryCardLimit=MEMORY_PAGE; loadLongContext(true); });

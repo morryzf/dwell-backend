@@ -111,6 +111,8 @@ struct MemoryCard: Identifiable, Equatable {
     let why: String
     /// 书签：圈起来的原话（副本）。
     let lines: [BookmarkLine]
+    /// 推荐的书签：model（整理模型挑的）/ manual（她自己圈的）。
+    let origin: String
 
     init(json: [String: Any]) {
         id = json["id"] as? String ?? UUID().uuidString
@@ -143,11 +145,14 @@ struct MemoryCard: Identifiable, Equatable {
         labelState = json["label_state"] as? String ?? ""
         why = json["why"] as? String ?? ""
         lines = (json["lines"] as? [[String: Any]] ?? []).map(BookmarkLine.init(json:))
+        origin = json["origin"] as? String ?? ""
     }
 
     var isBookmark: Bool { kind == "bookmark" }
     /// 整理模型推荐的书签（待确认里）：content 是「这段在讲什么」，lines 是圈中的句子和前后文。
     var isBookmarkSuggestion: Bool { action == "bookmark" }
+    /// 推荐的书签是她自己在聊天里圈的（不是整理模型挑的）。
+    var isOwnPick: Bool { origin == "manual" }
 
     var isHidden: Bool { status == "hidden" }
     var isMain: Bool { !thread.isEmpty && threadRole == "main" }

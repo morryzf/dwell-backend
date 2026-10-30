@@ -5761,7 +5761,8 @@ async def memory_card_drafts_accept_all(chat_id: str):
         except (LookupError, ValueError):
             continue
         kept += 1
-        asyncio.create_task(_bookmark_embed(chat_id, bookmark["id"]))
+        asyncio.create_task(_bookmark_label(chat_id, bookmark["id"]) if not bookmark.get("label")
+                            else _bookmark_embed(chat_id, bookmark["id"]))
     provider, model_id = _embedding_model()
     if provider and items:
         async def _backfill_batch():
@@ -5798,10 +5799,13 @@ async def memory_card_draft_accept(chat_id: str, draft_id: str, request: Request
     if draft.get("action") == "bookmark":
         # 推荐的书签：照她最后圈定的句子和概括收下。
         try:
-            bookmark = db.bookmark_draft_accept(chat_id, draft_id, payload.get("rowids"), payload.get("label"))
+            # 概括还没写好时收下：label 是空的，就不动它，收下后再在后台写。
+            bookmark = db.bookmark_draft_accept(chat_id, draft_id, payload.get("rowids"),
+                                                str(payload.get("label") or "").strip() or None)
         except (LookupError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
-        asyncio.create_task(_bookmark_embed(chat_id, bookmark["id"]))
+        asyncio.create_task(_bookmark_label(chat_id, bookmark["id"]) if not bookmark.get("label")
+                            else _bookmark_embed(chat_id, bookmark["id"]))
         return {"ok": True, "item": _bookmark_public(bookmark), "state": _memory_card_review_state(chat_id)}
     chosen = dict(draft)
     for field in ("content", "memory_type", "topics", "importance", "retention", "valid_until",
@@ -6122,6 +6126,28 @@ async def _bookmark_label(chat_id: str, bookmark_id: str) -> None:
     await _bookmark_embed(chat_id, bookmark_id)
 
 
+async def _bookmark_draft_label(chat_id: str, draft_id: str) -> None:
+    """她自己圈的那条待确认：在后台写「这段在讲什么」。写不出来她可以自己写。"""
+    draft = next((d for d in db.memory_card_draft_list(chat_id, with_lines=True) if d["id"] == draft_id), None)
+    if not draft:
+        return
+    label = ""
+    try:
+        selection, provider, _explicit = _long_context_model(chat_id)
+        if not provider or not provider.get("enabled") or not selection.get("model_id"):
+            raise RuntimeError("还没有选整理记忆用的模型")
+        picked = [line for line in draft["lines"] if line.get("picked")]
+        data = await _memory_json_completion(
+            provider, selection["model_id"], _memory_voice_prompt(chat_id) + BOOKMARK_LABEL_RULES,
+            db.bookmark_text("", draft.get("why") or "", picked,
+                             db.assistant_name(db.chat_assistant(chat_id)))[:MEMORY_CARD_SOURCE_CHARS],
+        )
+        label = str(data.get("label") or "").strip()
+    except Exception:
+        label = ""
+    db.bookmark_draft_write_label(chat_id, draft_id, label)
+
+
 async def _bookmark_embed(chat_id: str, bookmark_id: str) -> None:
     item = db.bookmark_get(chat_id, bookmark_id)
     if not item:
@@ -6147,12 +6173,13 @@ async def bookmark_post(chat_id: str, payload: dict = Body(...)):
     ids = payload.get("message_ids")
     if not isinstance(ids, list):
         raise HTTPException(400, "message_ids 必须是列表")
+    # 她自己圈的也先进待确认：概括是模型写的，她看过、收下了才算数。
     try:
-        item = db.bookmark_create(chat_id, ids, str(payload.get("why") or ""))
+        item = db.bookmark_draft_create(chat_id, ids, str(payload.get("why") or ""))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    asyncio.create_task(_bookmark_label(chat_id, item["id"]))
-    return {"ok": True, "item": _bookmark_public(item)}
+    asyncio.create_task(_bookmark_draft_label(chat_id, item["id"]))
+    return {"ok": True, "item": item, "pending": True}
 
 
 @app.get("/api/chats/{chat_id}/bookmarks", dependencies=authed)

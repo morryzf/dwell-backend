@@ -47,8 +47,11 @@ class MemoryCardBlocksTest(unittest.TestCase):
         payload = build_bridge_payload("sonnet", messages, state=state)
 
         self.assertEqual(payload["resume"], "sess-1")
-        self.assertNotIn("喜欢 吃 辣", payload["prompt"])
-        self.assertIn("最近在减脂", payload["prompt"])
+        cards = payload["prompt"].split("</cards>")[0]
+        self.assertNotIn("喜欢 吃 辣", cards)
+        self.assertIn("最近在减脂", cards)
+        # 递过的那张只提一句，不再整张递。
+        self.assertIn("这轮又相关的记忆", payload["prompt"])
         self.assertEqual(payload["_seen_cards"], ["c1", "c2"])
 
 

@@ -1667,7 +1667,6 @@ struct EditMessageSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var text: String
-    @FocusState private var focused: Bool
 
     /// parts：要一起改的那几条（他的一整轮回复会拆成好几条），中间空一行连起来。
     init(message: Message, parts: [Message], onSave: @escaping (String) -> Void) {
@@ -1679,9 +1678,7 @@ struct EditMessageSheet: View {
 
     var body: some View {
         NavigationStack {
-            TextEditor(text: $text)
-                .focused($focused)
-                .scrollContentBackground(.hidden)
+            StableTextView(text: $text, fontSize: 17, focusOnAppear: true)
                 .padding(.horizontal, 12)
                 .background(Theme.background)
                 .navigationTitle(message.kind == .me ? "改我说的话" : "改这条回复")
@@ -1698,7 +1695,6 @@ struct EditMessageSheet: View {
                         .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
-                .onAppear { focused = true }
         }
     }
 }

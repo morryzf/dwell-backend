@@ -81,6 +81,21 @@ class MemoryConsoleStaticTest(unittest.TestCase):
         self.assertIn("点一句把它圈进来或去掉", self.html)
         self.assertIn("收进书签了", self.html)
 
+    def test_manual_bookmark_drafts_wait_for_label(self):
+        self.assertIn("你圈的书签", self.html)
+        self.assertIn("item.origin === 'manual'", self.html)
+        self.assertIn("item.label_state === 'pending' ? '正在概括…'", self.html)
+        self.assertIn("watchBookmarkDraftLabels(chat,cards)", self.html)
+        self.assertIn("为什么记：", self.html)
+
+    def test_selection_flow_says_draft_is_pending(self):
+        self.assertIn("放进待确认了，概括好就能收下", self.html)
+        self.assertNotIn("收进记忆了，正在概括这段在讲什么", self.html)
+
+    def test_bookmark_speaker_is_morry(self):
+        self.assertIn("line.role === 'user' ? 'Morry' : assistantName", self.html)
+        self.assertNotIn("line.role === 'user' ? '我' : assistantName", self.html)
+
 
 if __name__ == "__main__":
     unittest.main()

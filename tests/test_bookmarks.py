@@ -43,9 +43,48 @@ class BookmarkTest(unittest.TestCase):
                 os.remove(self.path + suffix)
 
     def _create(self, ids, why=""):
+        """她圈几句：先进待确认，收下了才是书签。"""
         r = self.client.post(f"/api/chats/{self.chat}/bookmarks", json={"message_ids": ids, "why": why})
         self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["pending"])
+        draft = r.json()["item"]
+        r = self.client.post(f"/api/chats/{self.chat}/memory-card-drafts/{draft['id']}/accept",
+                             json={"label": ""})
+        self.assertEqual(r.status_code, 200, r.text)
         return r.json()["item"]
+
+    def test_her_own_pick_waits_in_review_with_the_label_written_for_her(self):
+        r = self.client.post(f"/api/chats/{self.chat}/bookmarks",
+                             json={"message_ids": [self.a["id"], self.c["id"]], "why": "她喜欢被布丁叫醒"})
+        draft = r.json()["item"]
+        self.assertEqual(draft["action"], "bookmark")
+        self.assertEqual(draft["label_state"], "pending")
+        self.assertEqual(db.bookmark_list(self.chat), [])
+
+        async def fake(provider, model_id, system, user):
+            self.assertIn("她喜欢被布丁叫醒", user)
+            self.assertNotIn("坏小子", user)
+            return {"label": "布丁当闹钟"}
+
+        with mock.patch.object(main, "_memory_json_completion", fake), \
+             mock.patch.object(main, "_long_context_model",
+                               lambda chat: ({"model_id": "m"}, {"id": "p", "enabled": 1}, True)):
+            asyncio.run(main._bookmark_draft_label(self.chat, draft["id"]))
+        draft = next(d for d in db.memory_card_draft_list(self.chat) if d["id"] == draft["id"])
+        self.assertEqual((draft["content"], draft["label_state"], draft["origin"]), ("布丁当闹钟", "ready", "manual"))
+
+        r = self.client.post(f"/api/chats/{self.chat}/memory-card-drafts/{draft['id']}/accept",
+                             json={"label": "布丁当闹钟"})
+        bookmark = r.json()["item"]
+        self.assertEqual((bookmark["label"], bookmark["why"]), ("布丁当闹钟", "她喜欢被布丁叫醒"))
+        self.assertEqual(db.memory_card_draft_list(self.chat), [])
+
+    def test_a_label_she_wrote_is_not_overwritten_by_the_late_model(self):
+        r = self.client.post(f"/api/chats/{self.chat}/bookmarks", json={"message_ids": [self.a["id"]]})
+        draft = r.json()["item"]
+        self.client.put(f"/api/chats/{self.chat}/memory-card-drafts/{draft['id']}", json={"label": "我写的"})
+        db.bookmark_draft_write_label(self.chat, draft["id"], "模型写的")
+        self.assertEqual(db.memory_card_draft_list(self.chat)[0]["content"], "我写的")
 
     def test_picked_lines_are_copied_in_order(self):
         item = self._create([self.c["id"], self.a["id"], self.empty["id"]], why="她喜欢被布丁叫醒")

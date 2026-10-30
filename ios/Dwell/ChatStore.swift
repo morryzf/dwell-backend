@@ -472,14 +472,14 @@ final class ChatStore: ObservableObject {
     }
 
     /// 多选删除：跟网页一样一次发过去。
-    /// 把勾的几句收成一个书签；概括在后台写。
+    /// 把勾的几句收成一个书签：先进待确认，概括在后台写，她看过再收下。
     func bookmark(_ ids: [String], why: String) async -> Bool {
         guard !ids.isEmpty, !chatID.isEmpty else { return false }
         do {
             _ = try await api.request("POST", "api/chats/\(chatID)/bookmarks", body: [
                 "message_ids": ids, "why": why.trimmingCharacters(in: .whitespacesAndNewlines),
             ])
-            flash("收进记忆了，正在概括这段在讲什么")
+            flash("放进待确认了，概括好就能收下")
             return true
         } catch {
             handle(error)
