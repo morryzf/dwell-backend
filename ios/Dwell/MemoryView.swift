@@ -930,10 +930,8 @@ struct MemoryCardEditor: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
             } else {
-                TextEditor(text: $card.content)
-                    .font(.system(size: 14))
+                StableTextView(text: $card.content, grows: true)
                     .frame(minHeight: 96)
-                    .scrollContentBackground(.hidden)
                     .padding(8)
                     .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MemoryStyle.field))
             }
@@ -1151,10 +1149,8 @@ struct MemorySourceSheet: View {
     private var cardBox: some View {
         if let text = draftText {
             VStack(alignment: .leading, spacing: 10) {
-                TextEditor(text: Binding(get: { text }, set: { draftText = $0 }))
-                    .font(.system(size: 14.5))
-                    .foregroundStyle(Theme.text)
-                    .scrollContentBackground(.hidden)
+                StableTextView(text: Binding(get: { draftText ?? "" }, set: { draftText = $0 }),
+                               fontSize: 14.5, grows: true)
                     .frame(minHeight: 110)
                 HStack(spacing: 10) {
                     Button(saving ? "正在保存…" : "保存") { Task { await save(text) } }
@@ -1501,10 +1497,8 @@ struct MemoryTimelineSheet: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("删掉这一步")
                     }
-                    TextEditor(text: $node.text)
-                        .font(.system(size: 14))
+                    StableTextView(text: $node.text, grows: true)
                         .frame(minHeight: 80)
-                        .scrollContentBackground(.hidden)
                         .padding(8)
                         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(MemoryStyle.field))
                 }

@@ -134,6 +134,54 @@ def forget_seen_cards(messages: list, seen: set[str]) -> list:
     return kept
 
 
+# 递过的卡隔了这么多轮又被挑中，就整张重递：埋得太深，光提一句他未必翻得回去。
+REOFFER_AFTER_TURNS = 20
+
+
+def _card_preview(text: str) -> str:
+    """递过的卡在提醒里只露一小截：书签露概括，卡片露正文开头。"""
+    lines = [line.strip() for line in str(text or "").removeprefix("- ").splitlines() if line.strip()]
+    if not lines:
+        return ""
+    head = lines[0]
+    if head.startswith("[Morry 收藏的原话") and len(lines) > 1:
+        head = lines[1]
+    elif head.startswith("[") and "] " in head:
+        head = head.split("] ", 1)[1]
+    return head[:30] + ("…" if len(head) > 30 else "")
+
+
+def seen_card_reminder(messages: list, seen: set[str]) -> str:
+    """这一轮又挑中、但会话里早就递过的卡：不再整张递，提一句让他回头看。"""
+    previews = []
+    for message in messages or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if isinstance(part, dict) and str(part.get(MEMORY_CARD_KEY) or "") in seen:
+                preview = _card_preview(part.get("text"))
+                if preview and preview not in previews:
+                    previews.append(preview)
+    if not previews:
+        return ""
+    return ("【这轮又相关的记忆：前面已经递给过你，往前翻一下会话里的原文】\n"
+            + "\n".join(f"- {p}" for p in previews))
+
+
+def _seen_turns(state: dict | None) -> dict[str, int]:
+    raw = state.get("seen_turns") if isinstance(state, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for key, value in raw.items():
+        try:
+            out[str(key)] = int(value)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _seen_cards(state: dict | None) -> set[str]:
     raw = state.get("seen_cards") if isinstance(state, dict) else None
     if not isinstance(raw, list):
@@ -309,7 +357,8 @@ def load_state(chat_key: str) -> dict | None:
 
 def save_state(chat_key: str, sid: str, model_id: str, system: str,
                turns: list[tuple[str, str]], cards: str = "",
-               seen_cards: list[str] | None = None, reply: str = "") -> None:
+               seen_cards: list[str] | None = None, reply: str = "",
+               seen_turns: dict[str, int] | None = None, turn_no: int = 0) -> None:
     """记下 Claude Code 这次的会话 id，以及它已经听过哪些轮次。
 
     存的是「递出去时」最后几轮的指纹。下一轮按内容找回这个位置，它后面的
@@ -328,6 +377,9 @@ def save_state(chat_key: str, sid: str, model_id: str, system: str,
             "anchor_len": size,
             "cards": cards,
             "seen_cards": sorted(seen_cards or []),
+            # 每张卡是第几轮递的；turn_no 是这段会话说到第几轮了。
+            "seen_turns": {k: v for k, v in (seen_turns or {}).items() if k in set(seen_cards or [])},
+            "turn_no": int(turn_no),
             "reply": reply,
         }, ensure_ascii=False))
     except Exception:
@@ -400,8 +452,18 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
     resume, outgoing = plan_turn(state, str(model_id or ""), system, turns, cards_version)
     # 从头讲的会话里还没有任何卡，续上的会话里递过的那些它都记着。
     seen = _seen_cards(state) if resume else set()
-    if seen:
-        _, _, context = split_history(forget_seen_cards(messages, seen))
+    turn_no = (int(state.get("turn_no") or 0) + 1) if resume and isinstance(state, dict) else 1
+    seen_at = _seen_turns(state) if resume else {}
+    seen_at = {cid: seen_at.get(cid, turn_no) for cid in seen}
+    # 递得太久以前的，这轮又挑中就整张重递；近的只提一句。
+    held = {cid for cid in seen if turn_no - seen_at[cid] < REOFFER_AFTER_TURNS}
+    offered = offered_cards(messages)
+    if held:
+        reminder = seen_card_reminder(messages, held & offered)
+        _, _, context = split_history(forget_seen_cards(messages, held))
+        if reminder:
+            context = context + [reminder]
+    seen_at.update({cid: turn_no for cid in offered - held})
     # 临时上下文跟着本轮走，不进 system，也不算进轮次指纹。
     prompt = "\n\n".join(context + [build_prompt(outgoing)] + tail)
     images = image_blocks(messages)
@@ -418,7 +480,9 @@ def build_bridge_payload(model_id: str, messages: list, tools: list | None = Non
         "_turns": turns,
         "_system": system,
         "_cards": cards_version,
-        "_seen_cards": sorted(seen | offered_cards(messages)),
+        "_seen_cards": sorted(seen | offered),
+        "_seen_turns": seen_at,
+        "_turn_no": turn_no,
     }
     if images:
         payload["images"] = images
@@ -599,6 +663,8 @@ async def stream_bridge_chat(provider: dict, model_id: str, messages: list,
                         payload["_system"], payload["_turns"], payload.get("_cards", ""),
                         seen_cards=[] if compacted else payload.get("_seen_cards", []),
                         reply="".join(said),
+                        seen_turns={} if compacted else payload.get("_seen_turns", {}),
+                        turn_no=payload.get("_turn_no", 0),
                     )
                 return
     except httpx.RequestError as exc:

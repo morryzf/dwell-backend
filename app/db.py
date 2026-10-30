@@ -719,6 +719,13 @@ def init_db():
             cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN source_rowids_json TEXT NOT NULL DEFAULT '[]'")
         if "thread" not in draft_cols:
             cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN thread TEXT NOT NULL DEFAULT ''")
+        # 推荐的书签：她自己圈的（origin=manual）带着她写的「为什么记」，概括在后台写（label_state）。
+        if "why" not in draft_cols:
+            cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN why TEXT NOT NULL DEFAULT ''")
+        if "origin" not in draft_cols:
+            cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN origin TEXT NOT NULL DEFAULT ''")
+        if "label_state" not in draft_cols:
+            cx.execute("ALTER TABLE memory_card_drafts ADD COLUMN label_state TEXT NOT NULL DEFAULT ''")
         # 在这件事里是主卡还是副卡。一件事只有一张主卡：写清是什么事、跟谁有关、现在到哪一步。
         if "thread_role" not in mc_cols:
             cx.execute("ALTER TABLE memory_cards ADD COLUMN thread_role TEXT NOT NULL DEFAULT ''")
@@ -2916,12 +2923,12 @@ def _insert_draft(cx: sqlite3.Connection, row: dict) -> None:
         """INSERT INTO memory_card_drafts
            (id,chat_id,action,target_card_id,content,memory_type,topics_json,importance,
             retention,valid_until,surface_scope,source_segment_id,source_start_rowid,
-            source_end_rowid,source_rowids_json,made,thread,thread_role,node_date)
+            source_end_rowid,source_rowids_json,made,thread,thread_role,node_date,why,origin,label_state)
            VALUES (:id,:chat_id,:action,:target_card_id,:content,:memory_type,:topics_json,
                    :importance,:retention,:valid_until,:surface_scope,:source_segment_id,
                    :source_start_rowid,:source_end_rowid,:source_rowids_json,:made,:thread,:thread_role,
-                   :node_date)""",
-        {"thread": "", "thread_role": "", "node_date": "", **row},
+                   :node_date,:why,:origin,:label_state)""",
+        {"thread": "", "thread_role": "", "node_date": "", "why": "", "origin": "", "label_state": "", **row},
     )
 
 
@@ -3511,9 +3518,47 @@ def bookmark_stage(chat_id: str, segment_id: str | None, proposals: list[dict]) 
                 "surface_scope": "chat_only", "source_segment_id": segment_id,
                 "source_start_rowid": rowids[0], "source_end_rowid": rowids[-1],
                 "source_rowids_json": json.dumps(rowids), "made": now,
+                "origin": "model", "label_state": "ready",
             })
             inserted += 1
     return inserted
+
+
+def bookmark_draft_create(chat_id: str, message_ids: list[str], why: str = "") -> dict:
+    """她在聊天里自己圈的几句：先放进待确认，概括在后台写好，她看过再收下。"""
+    ids = list(dict.fromkeys(str(i) for i in message_ids if i))[:BOOKMARK_LINES_MAX]
+    if not ids:
+        raise ValueError("至少要选一句")
+    with conn() as cx:
+        found = [int(r["rowid"]) for r in cx.execute(
+            f"SELECT rowid FROM messages WHERE chat_id=? AND id IN ({','.join('?' for _ in ids)})",
+            [chat_id, *ids]).fetchall()]
+    rowids = _chat_rowids(chat_id, found)
+    if not rowids:
+        raise ValueError("选的消息里没有能收的原话")
+    draft_id = new_id()
+    with conn() as cx:
+        _insert_draft(cx, {
+            "id": draft_id, "chat_id": chat_id, "action": "bookmark", "target_card_id": None,
+            "content": "", "memory_type": "bookmark", "topics_json": "[]",
+            "importance": "normal", "retention": "long_term", "valid_until": None,
+            "surface_scope": "chat_only", "source_segment_id": None,
+            "source_start_rowid": rowids[0], "source_end_rowid": rowids[-1],
+            "source_rowids_json": json.dumps(rowids), "made": int(time.time()),
+            "why": str(why or "").strip()[:BOOKMARK_WHY_MAX], "origin": "manual", "label_state": "pending",
+        })
+    return next(d for d in memory_card_draft_list(chat_id, with_lines=True) if d["id"] == draft_id)
+
+
+def bookmark_draft_write_label(chat_id: str, draft_id: str, label: str) -> None:
+    """后台写好的概括。她已经自己写了（manual）就不覆盖。"""
+    label = str(label or "").strip()[:BOOKMARK_LABEL_MAX]
+    with conn() as cx:
+        cx.execute(
+            "UPDATE memory_card_drafts SET content=?, label_state=? "
+            "WHERE id=? AND chat_id=? AND action='bookmark' AND label_state<>'manual'",
+            (label, "ready" if label else "error", draft_id, chat_id),
+        )
 
 
 def bookmark_draft_set(chat_id: str, draft_id: str, rowids=None, label: str | None = None) -> dict:
@@ -3534,6 +3579,7 @@ def bookmark_draft_set(chat_id: str, draft_id: str, rowids=None, label: str | No
         if not label:
             raise ValueError("概括不能为空")
         fields["content"] = label
+        fields["label_state"] = "manual"
     if fields:
         with conn() as cx:
             cx.execute(
@@ -3553,7 +3599,7 @@ def bookmark_draft_accept(chat_id: str, draft_id: str, rowids=None, label: str |
         ids = [r["id"] for r in cx.execute(
             f"SELECT id FROM messages WHERE chat_id=? AND rowid IN ({','.join('?' for _ in clean)})",
             [chat_id, *clean]).fetchall()]
-    item = bookmark_create(chat_id, ids, label=draft["content"])
+    item = bookmark_create(chat_id, ids, why=draft.get("why") or "", label=draft["content"])
     with conn() as cx:
         cx.execute("DELETE FROM memory_card_drafts WHERE id=? AND chat_id=?", (draft_id, chat_id))
     return item

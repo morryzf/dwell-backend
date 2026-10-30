@@ -553,25 +553,47 @@ class MemoryCardDedupeTest(unittest.TestCase):
         payload = build_bridge_payload("sonnet", messages, state=state)
 
         self.assertEqual(payload["resume"], "sess-1")
-        self.assertNotIn("喜欢吃辣", payload["prompt"])
-        self.assertIn("最近在减脂", payload["prompt"])
+        cards = payload["prompt"].split("</cards>")[0]
+        self.assertNotIn("喜欢吃辣", cards)
+        self.assertIn("最近在减脂", cards)
         self.assertIn("【本轮按需取回的记忆卡】", payload["prompt"])
         self.assertTrue(payload["prompt"].endswith("今天吃什么"))
 
-    def test_when_every_card_was_seen_the_card_note_is_left_out(self):
+    def test_when_every_card_was_seen_only_a_short_reminder_goes(self):
         history, state = _resumable(seen_cards=["c1", "c2"])
         messages = history + [
             {"role": "user", "content": "今天吃什么"},
             {"role": "system", "content": "【Morry设备时间】周二"},
+            _card_message(("c1", "[2026-10-01 · 偏好] 喜欢吃辣，越辣越好，每顿都要放小米辣和花椒油"),
+                          ("c2", "[Morry 收藏的原话 · 10月3日]\n布丁当闹钟\n2026-10-03 07:00 Morry：布丁又闹我")),
+        ]
+
+        payload = build_bridge_payload("sonnet", messages, state=state)
+
+        self.assertNotIn("<cards>", payload["prompt"])
+        self.assertIn("这轮又相关的记忆", payload["prompt"])
+        self.assertIn("- 喜欢吃辣，越辣越好，每顿都要放小米辣和花椒油", payload["prompt"])
+        self.assertIn("- 布丁当闹钟", payload["prompt"])
+        self.assertNotIn("布丁又闹我", payload["prompt"])
+        # 别的临时上下文照常走
+        self.assertIn("【Morry设备时间】周二", payload["prompt"])
+
+    def test_a_card_offered_long_ago_is_offered_again_in_full(self):
+        history, state = _resumable(seen_cards=["c1", "c2"])
+        state["turn_no"] = 30
+        state["seen_turns"] = {"c1": 5, "c2": 29}
+        messages = history + [
+            {"role": "user", "content": "今天吃什么"},
             _card_message(("c1", "喜欢吃辣"), ("c2", "最近在减脂")),
         ]
 
         payload = build_bridge_payload("sonnet", messages, state=state)
 
-        self.assertNotIn("记忆卡", payload["prompt"])
-        self.assertNotIn("<cards>", payload["prompt"])
-        # 别的临时上下文照常走
-        self.assertIn("【Morry设备时间】周二", payload["prompt"])
+        self.assertIn("喜欢吃辣", payload["prompt"])
+        self.assertIn("<cards>", payload["prompt"])
+        self.assertIn("- 最近在减脂", payload["prompt"].split("这轮又相关的记忆")[1])
+        self.assertEqual(payload["_turn_no"], 31)
+        self.assertEqual(payload["_seen_turns"], {"c1": 31, "c2": 29})
 
     def test_a_fresh_session_gets_every_card_regardless_of_old_bookkeeping(self):
         history, state = _resumable(seen_cards=["c1", "c2"])
@@ -642,7 +664,7 @@ class CompactionBookkeepingTest(unittest.TestCase):
             for row in bridge_rows:
                 yield row
 
-        def fake_save(chat_key, sid, model_id, system, turns, cards="", seen_cards=None, reply=""):
+        def fake_save(chat_key, sid, model_id, system, turns, cards="", seen_cards=None, reply="", **_):
             saved["reply"] = reply
             saved["sid"] = sid
             saved["seen_cards"] = seen_cards

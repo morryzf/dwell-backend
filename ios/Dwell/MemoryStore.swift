@@ -379,7 +379,8 @@ final class MemoryStore: ObservableObject {
 
     /// 刚收的书签，概括还在后台写：隔几秒悄悄重拉一次，写好就换上，最多等半分钟。
     private func watchLabels() {
-        guard cards.contains(where: { $0.isBookmark && $0.labelState == "pending" }) else {
+        guard cards.contains(where: { $0.isBookmark && $0.labelState == "pending" })
+                || drafts.contains(where: { $0.isBookmarkSuggestion && $0.labelState == "pending" }) else {
             labelChecks = 0
             return
         }
