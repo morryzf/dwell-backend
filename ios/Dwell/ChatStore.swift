@@ -53,6 +53,8 @@ final class ChatStore: ObservableObject {
     @Published private(set) var streamShown = 0
     /// 每冒一个就加一，聊天页跟着滚到底。
     @Published private(set) var revealTick = 0
+    /// 整页换过一次（存着的那页换成服务器的、换了聊天）：聊天页据此重新贴底。
+    @Published private(set) var pageSwapTick = 0
     private var revealTask: Task<Void, Never>?
     private var lastReveal = Date.distantPast
 
@@ -113,6 +115,7 @@ final class ChatStore: ObservableObject {
         hasMore = page.more
         loadedChatID = chat
         rememberedChatID = chat
+        pageSwapTick += 1
         chatName = api.rememberedChats()?.first { $0.id == chat }?.name ?? chatName
     }
 
@@ -181,8 +184,10 @@ final class ChatStore: ObservableObject {
         } else {
             shown = [:]
         }
+        let swapped = loadedChatID != chat || fromRemembered
         loadedChatID = chat
         messages = older + fresh
+        if swapped { pageSwapTick += 1 }
         let ids = Set(messages.map(\.id))
         shown = shown.filter { ids.contains($0.key) }
         streamingText = ""

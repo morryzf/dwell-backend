@@ -11,6 +11,11 @@ struct ChatView: View {
     /// 不会让侧边栏卡在半路、左边一截被切掉。
     @GestureState(resetTransaction: Transaction(animation: .easeOut(duration: 0.2)))
     private var drawerDrag: CGFloat = 0
+    /// 从左往右拉开侧栏时，手指拉出来多少。nil：还没看出往哪拉；负数：是上下翻，不管；
+    /// 0 以上：在拉侧栏，侧栏跟着手指出来，聊天记录先不上下动。
+    @GestureState(resetTransaction: Transaction(animation: .easeOut(duration: 0.2)))
+    private var openDrag: CGFloat? = nil
+    @State private var drawerWidth: CGFloat = 292
     @State private var showSettings = false
     @State private var page: NativePage?
     @State private var showMemory = false
@@ -50,6 +55,8 @@ struct ChatView: View {
             chatScroll
                 // 网页上气泡最宽占这一行的 85%。
                 .environment(\.bubbleMaxWidth, (geo.size.width - 36) * 0.85)
+                .onAppear { drawerWidth = Self.drawerWidth(geo.size.width) }
+                .onChange(of: geo.size.width) { _, width in drawerWidth = Self.drawerWidth(width) }
         }
         .background(ChatBackground(assistant: store.assistant?.id ?? "cloudy",
                                    paused: showSettings || page != nil || showCamera))
@@ -296,23 +303,19 @@ struct ChatView: View {
                 .padding(.vertical, 14)
             }
             .defaultScrollAnchor(.bottom)
+            // 正在往右拉侧栏：聊天记录别跟着上下动。
+            .scrollDisabled(isOpeningDrawer)
             // 原生 app 最舒服的一点：往下一拖，键盘跟着手指收回去。
             .scrollDismissesKeyboard(.interactively)
             // 点一下聊天记录的空白处，键盘也收起来（跟系统信息 app 一样）。
             .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
-            // 在聊天记录上任何地方往右一划，侧边栏就出来（不用非得从屏幕最边上划）。
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 24)
-                    .onEnded { value in
-                        let dx = value.translation.width, dy = value.translation.height
-                        if !drawerOpen && dx > 70 && abs(dy) < dx * 0.6 {
-                            inputFocused = false
-                            withAnimation(.easeOut(duration: 0.24)) { drawerOpen = true }
-                        }
-                    }
-            )
+            // 在聊天记录上任何地方往右拉，侧边栏就跟着手指出来（不用非得从屏幕最边上划）。
+            .simultaneousGesture(openDrawerGesture(minimumDistance: 10))
             // 只在最底下多了新消息时才滚到底；往上翻出更早的消息时不能把人拽回去。
             .onChange(of: store.messages.last?.id) { _, _ in scrollToBottom(proxy) }
+            // 整页换过（先摆的是存着的那页、换了聊天）：最后一条没变也要重新贴底，
+            // 不然懒加载按旧高度算的位置会停在一片空白里。
+            .onChange(of: store.pageSwapTick) { _, _ in scrollToBottom(proxy, animated: false) }
             .onChange(of: store.streamingText) { _, _ in scrollToBottom(proxy, animated: false) }
             .onChange(of: store.revealTick) { _, _ in scrollToBottom(proxy) }
             // 点输入框：原来就在最底下的，等键盘升上来再贴底；正往上翻着看的，就别动她的位置。
@@ -692,12 +695,39 @@ struct ChatView: View {
 
     /// 网页的 #drawer：从左边滑出来，宽 min(76%, 292)，后面一层半透明的遮罩，点遮罩或往左划收起。
     /// 没开的时候左边缘留一条窄缝，从屏幕边往右划也能拉出来。
+    private static func drawerWidth(_ screen: CGFloat) -> CGFloat { min(screen * 0.76, 292) }
+
+    private var isOpeningDrawer: Bool { (openDrag ?? -1) >= 0 }
+
+    /// 往右拉出侧栏：先看手指头一下往哪走，横着往右才算拉侧栏，侧栏跟着手指；上下走的就是翻聊天记录。
+    /// 松手时拉过三分之一（或者甩得够快）就打开，不够就缩回去。
+    private func openDrawerGesture(minimumDistance: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: minimumDistance)
+            .updating($openDrag) { value, state, _ in
+                let dx = value.translation.width, dy = value.translation.height
+                if state == nil {
+                    state = (!drawerOpen && dx > 0 && dx > abs(dy) * 1.2) ? dx : -1
+                } else if let current = state, current >= 0 {
+                    state = max(0, dx)
+                }
+            }
+            .onEnded { value in
+                let dx = value.translation.width, dy = value.translation.height
+                let flung = value.predictedEndTranslation.width > drawerWidth * 0.6
+                guard !drawerOpen, dx > 0, abs(dy) < dx, dx > drawerWidth * 0.33 || flung else { return }
+                inputFocused = false
+                withAnimation(.easeOut(duration: 0.24)) { drawerOpen = true }
+            }
+    }
+
     private var drawer: some View {
         GeometryReader { geo in
-            let width = min(geo.size.width * 0.76, 292)
+            let width = Self.drawerWidth(geo.size.width)
+            // 正拉着往外出的那一截；拉过了侧栏宽度就停住。
+            let reveal: CGFloat? = isOpeningDrawer && !drawerOpen ? min(openDrag ?? 0, width) : nil
             ZStack(alignment: .leading) {
-                if drawerOpen {
-                    Color.black.opacity(0.18)
+                if drawerOpen || reveal != nil {
+                    Color.black.opacity(0.18 * (reveal.map { $0 / width } ?? 1))
                         .ignoresSafeArea()
                         .onTapGesture { closeDrawer() }
                         .transition(.opacity)
@@ -712,7 +742,7 @@ struct ChatView: View {
                     .frame(width: width)
                     // 侧栏的玻璃不接手指，空白处会点穿到后面的遮罩上把侧栏关掉；整块都算侧栏。
                     .contentShape(Rectangle())
-                    .offset(x: min(0, drawerDrag))
+                    .offset(x: reveal.map { $0 - width } ?? min(0, drawerDrag))
                     .gesture(
                         DragGesture(minimumDistance: 12)
                             .updating($drawerDrag) { value, state, _ in state = value.translation.width }
@@ -721,18 +751,13 @@ struct ChatView: View {
                             }
                     )
                     .transition(.move(edge: .leading))
-                } else {
+                }
+                // 屏幕最左边那一条：拉的时候侧栏已经冒出来了，它也得一直在，不然手势半路就断了。
+                if !drawerOpen {
                     Color.clear
                         .frame(width: 12)
                         .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 16)
-                                .onEnded { value in
-                                    if value.translation.width > 50 {
-                                        withAnimation(.easeOut(duration: 0.24)) { drawerOpen = true }
-                                    }
-                                }
-                        )
+                        .gesture(openDrawerGesture(minimumDistance: 4))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
