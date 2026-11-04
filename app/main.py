@@ -5511,7 +5511,8 @@ async def memory_cards_get(chat_id: str, include_archived: bool = False, limit: 
         "taxonomy": _memory_card_taxonomy(),
         "items": items,
         **paging,
-        "drafts": drafts,
+        # 待确认：最新出的排在最上面。
+        "drafts": drafts[::-1],
         "injection_enabled": db.memory_card_injection_enabled(chat_id),
         "shared_enabled": db.memory_shared_enabled(chat_id),
         "last_injection": db.memory_card_last_injection(chat_id),
