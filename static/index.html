@@ -2030,6 +2030,41 @@ html[data-theme="dark"] .hl-row + .hl-row { border-top-color: rgba(255,255,255,.
   .tl-item .tk { font-size: 12.5px; color: var(--dim); margin-top: 3px; line-height: 1.7;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
+  /* Cloudy 的日记本：列表借用时间线的 tl-*，这里只补密码框、锁和日记闹钟 */
+  .cd-head { padding: 0 4px 12px; }
+  .cd-h { font-family: var(--serif); font-size: 20px; line-height: 1.4; }
+  .cd-s { color: var(--dim); font-size: 12.5px; line-height: 1.75; margin-top: 3px; }
+  .cd-pass { margin: 0 0 18px; }
+  .cd-pass-row { display: flex; gap: 8px; align-items: center; }
+  .cd-pass-row .ap-in { flex: 1; min-width: 0; font-size: 16px; }
+  .cd-pass-row .go, .cd-run, .cd-want { flex: none; border: 0; border-radius: 999px; padding: 10px 20px;
+    font: inherit; font-size: 13.5px; font-weight: 500; background: var(--text); color: var(--bg);
+    touch-action: manipulation; transition: transform 140ms var(--ease-out), opacity .2s; }
+  .cd-pass-row .go:active, .cd-run:active, .cd-want:active { transform: scale(.97); }
+  .cd-pass-row .go:disabled, .cd-run:disabled { opacity: .5; }
+  .cd-pass-msg { min-height: 1.6em; padding: 5px 4px 0; color: var(--dim); font-size: 13px; }
+  .cd-pass-row.wrong { animation: cdShake .32s cubic-bezier(.36,.07,.19,.97); }
+  @keyframes cdShake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+  .tl-item.cd-locked { color: var(--dim); padding: 9px 0 14px; }
+  .tl-item .cd-one { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cd-lockp { text-align: center; padding: 18px 6px 24px; }
+  .cd-lockp-ic { color: var(--dim); }
+  .cd-lockp-t { font-family: var(--serif); font-size: 17px; margin: 10px 0 18px; }
+  .cd-lockp .cd-pass { text-align: left; margin-bottom: 8px; }
+  .cd-want { background: var(--panel); color: var(--text); padding: 10px 24px; }
+  .cd-want:disabled { color: var(--dim); }
+  .cd-lockp-hint { color: var(--dim); font-size: 12.5px; line-height: 1.7; margin-top: 12px; }
+  .cd-wake { background: var(--panel); border-radius: 16px; padding: 10px 16px 16px; margin: 0 0 16px; }
+  .cd-wake-field { display: block; margin-top: 10px; font-size: 13px; color: var(--dim); }
+  .cd-wake-field > span:first-child { display: block; margin: 0 2px 5px; }
+  .cd-wake-field .ap-in { font-size: 16px; }
+  .cd-wake-hint { display: block; margin: 4px 2px 0; font-size: 11.5px; }
+  .cd-wake-status { margin: 12px 2px; font-size: 13px; line-height: 1.6; word-break: break-word; }
+  @media (prefers-reduced-motion: reduce) {
+    .cd-pass-row.wrong { animation: none; }
+    .cd-pass-row .go, .cd-run, .cd-want { transition: none; }
+  }
+
   .bn-motto { font-family: var(--serif); font-style: italic; color: var(--dim);
     font-size: 14px; margin: 2px 0 16px; }
   .bn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -5536,6 +5571,7 @@ const ICONS = {
   box: S('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>'),
   zap: S('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'),
   camera: S('<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>'),
+  lock: S('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
   clock: S('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'),
   checkSquare: S('<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'),
   calendar: S('<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>'),
@@ -10270,42 +10306,305 @@ function diaryHead(mode) {
   return head;
 }
 
-function renderTimeline() {
-  wallBody.innerHTML = '';
-  wallBody.appendChild(diaryHead('timeline'));
+/* Cloudy 的日记本：他写的，新的一篇都锁着，她只看得到日期。
+   他在聊天里给一次性密码，她在这儿输一次，那一篇就一直开着。以前时间线里的旧日记默认开着。 */
+let cdItems = null;
+let cdWake = null;
+let cdWakeOpen = false;
+
+async function cdLoad() {
+  const r = await fetch('api/cloudy-diary', { cache: 'no-store' });
+  const d = await r.json();
+  if (!r.ok || !d.ok) throw new Error(d.detail || '没打开');
+  cdItems = d.items || [];
+  cdWake = d.wake || cdWake;
+}
+function cdPutItem(item) {
+  if (!cdItems || !item) return;
+  const i = cdItems.findIndex(x => x.id === item.id);
+  if (i >= 0) cdItems[i] = item; else cdItems.unshift(item);
+}
+function cdDateText(ds) {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(ds || '')) return ds || '';
+  const y = +ds.slice(0, 4), m = +ds.slice(5, 7), d = +ds.slice(8, 10);
+  return (y === new Date().getFullYear() ? '' : y + '年') + m + '月' + d + '日';
+}
+function cdPreview(it) {
+  if (it.title) return it.title;
+  return (it.body || '').split('\n').map(s => s.trim()).find(Boolean) || '（空白的一页）';
+}
+
+/* 密码框：大小写、空格、标点后端都不计较；不限次数。 */
+function cdPasswordRow(onOpen) {
   const wrap = document.createElement('div');
-  [...boardDates].reverse().forEach(date => {
+  wrap.className = 'cd-pass';
+  const row = document.createElement('div');
+  row.className = 'cd-pass-row';
+  const inp = document.createElement('input');
+  inp.className = 'ap-in'; inp.type = 'text'; inp.placeholder = 'Cloudy 给的密码';
+  inp.autocomplete = 'off'; inp.autocapitalize = 'off'; inp.spellcheck = false;
+  inp.setAttribute('autocorrect', 'off'); inp.setAttribute('aria-label', 'Cloudy 给的密码');
+  const go = document.createElement('button');
+  go.className = 'go'; go.type = 'button'; go.textContent = '打开';
+  const msg = document.createElement('div');
+  msg.className = 'cd-pass-msg'; msg.setAttribute('aria-live', 'polite');
+  let msgTimer = 0;
+  go.onclick = async () => {
+    const password = inp.value.trim();
+    if (!password) { inp.focus(); return; }
+    go.disabled = true;
+    try {
+      const r = await fetch('api/cloudy-diary/unlock', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok || !d.item) throw new Error(d.detail || '不对哦');
+      inp.value = ''; msg.textContent = '';
+      cdPutItem(d.item);
+      onOpen(d.item);
+    } catch (e) {
+      msg.textContent = e.message || '不对哦';
+      row.classList.remove('wrong'); void row.offsetWidth; row.classList.add('wrong');
+      clearTimeout(msgTimer);
+      msgTimer = setTimeout(() => { msg.textContent = ''; row.classList.remove('wrong'); }, 2400);
+      inp.select();
+    } finally { go.disabled = false; }
+  };
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) go.onclick(); });
+  row.append(inp, go);
+  wrap.append(row, msg);
+  return wrap;
+}
+
+function cdShowEntry(it) {
+  document.getElementById('noteTitle').textContent = cdDateText(it.date);
+  const body = document.getElementById('noteBody');
+  body.innerHTML = '<div class="note-full"><div class="nft"></div><div class="nfb"></div></div>';
+  const t = body.querySelector('.nft');
+  if (it.title) t.textContent = it.title; else t.remove();
+  body.querySelector('.nfb').textContent = it.body || '';
+  sheets.note.classList.add('open');
+  body.scrollTop = 0;
+}
+
+function cdShowLocked(it) {
+  document.getElementById('noteTitle').textContent = cdDateText(it.date);
+  const body = document.getElementById('noteBody');
+  body.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = 'cd-lockp';
+  const lk = icEl('lock', 30); lk.classList.add('cd-lockp-ic');
+  const line = document.createElement('div');
+  line.className = 'cd-lockp-t'; line.textContent = '这一篇还锁着';
+  box.append(lk, line, cdPasswordRow((item) => {
+    cdShowEntry(item);
+    if (wallMode === 'cloudy') renderCloudyDiary(true);
+  }));
+  const want = document.createElement('button');
+  want.type = 'button'; want.className = 'cd-want';
+  const setWanted = () => { want.textContent = '已经告诉他了'; want.disabled = true; };
+  if (it.wanted) setWanted(); else want.textContent = '想看这篇';
+  want.onclick = async () => {
+    want.disabled = true;
+    try {
+      const r = await fetch('api/cloudy-diary/' + encodeURIComponent(it.id) + '/want', { method: 'POST' });
+      if (r.status === 404) { sheets.note.classList.remove('open'); if (wallMode === 'cloudy') renderCloudyDiary(); return; }
+      if (!r.ok) throw 0;
+      it.wanted = true; setWanted();
+    } catch (e) { want.disabled = false; note0('（没告诉成，再点一次）'); }
+  };
+  const hint = document.createElement('div');
+  hint.className = 'cd-lockp-hint';
+  hint.textContent = '下次聊天时他会知道你想看。给不给密码，他自己决定。';
+  box.append(want, hint);
+  body.appendChild(box);
+  sheets.note.classList.add('open');
+  body.scrollTop = 0;
+}
+
+function cdWakeStatus(w) {
+  if (!w) return '';
+  const s = w.last_status || '';
+  let t = s === 'written' ? '写好了' : s === 'skipped' ? '这次没写'
+    : s === 'error' ? '出错：' + (w.last_error || '不知道哪儿不对') : s === 'writing' ? '正在写…' : '还没叫过他';
+  if (w.last_at && s !== 'writing') {
+    const dt = new Date(w.last_at * 1000);
+    t += ' · ' + (dt.getMonth() + 1) + '月' + dt.getDate() + '日 '
+      + String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
+  }
+  return t;
+}
+
+/* 日记闹钟：每天什么时候给他一次写日记的机会，带多少上下文。 */
+function cdWakePanel() {
+  const w = cdWake || { on: false, time: '23:30', tokens: 24000, tokens_range: [4000, 64000] };
+  const box = document.createElement('div');
+  box.className = 'cd-wake';
+  const status = document.createElement('div');
+  status.className = 'cd-wake-status'; status.setAttribute('aria-live', 'polite');
+  status.textContent = cdWakeStatus(w);
+  const put = async (patch) => {
+    const r = await fetch('api/cloudy-diary/wake', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) throw new Error(d.detail || '没存上');
+    cdWake = d.wake; status.textContent = cdWakeStatus(cdWake);
+    return d.wake;
+  };
+
+  const sw = document.createElement('button');
+  sw.type = 'button'; sw.className = 'mc-switch-row';
+  sw.innerHTML = '<span class="mc-switch-text">每天叫他写日记<span class="mc-switch-hint">到点给他一次机会，写不写他自己定。</span></span><span class="sw" role="switch"></span>';
+  const knob = sw.querySelector('.sw');
+  const paint = (on) => { knob.classList.toggle('on', !!on); knob.setAttribute('aria-checked', on ? 'true' : 'false'); };
+  paint(w.on);
+  sw.onclick = async () => {
+    const next = !knob.classList.contains('on');
+    paint(next); knob.classList.add('wait');
+    try { paint((await put({ on: next })).on); }
+    catch (e) { paint(!next); note0('（' + e.message + '）'); }
+    knob.classList.remove('wait');
+  };
+
+  const field = (label, input, hintText) => {
+    const l = document.createElement('label'); l.className = 'cd-wake-field';
+    const s = document.createElement('span'); s.textContent = label;
+    l.append(s, input);
+    if (hintText) { const h = document.createElement('span'); h.className = 'cd-wake-hint'; h.textContent = hintText; l.appendChild(h); }
+    return l;
+  };
+  const time = document.createElement('input');
+  time.type = 'time'; time.className = 'ap-in'; time.value = w.time || '23:30';
+  time.onchange = async () => {
+    if (!time.value) return;
+    try { time.value = (await put({ time: time.value })).time; }
+    catch (e) { note0('（' + e.message + '）'); }
+  };
+  const [low, high] = w.tokens_range || [4000, 64000];
+  const tokens = document.createElement('input');
+  tokens.type = 'number'; tokens.className = 'ap-in'; tokens.inputMode = 'numeric';
+  tokens.min = low; tokens.max = high; tokens.step = 1000; tokens.value = w.tokens;
+  tokens.onchange = async () => {
+    const v = parseInt(tokens.value, 10);
+    if (!Number.isFinite(v)) { tokens.value = (cdWake || w).tokens; return; }
+    try { tokens.value = (await put({ tokens: v })).tokens; }
+    catch (e) { note0('（' + e.message + '）'); }
+  };
+
+  const run = document.createElement('button');
+  run.type = 'button'; run.className = 'cd-run'; run.textContent = '现在叫他写一篇';
+  run.onclick = async () => {
+    run.disabled = true; run.textContent = '叫他去了…';
+    status.textContent = '正在写…（可能要一分钟）';
+    try {
+      const r = await fetch('api/cloudy-diary/wake/run', { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (d.wake) cdWake = d.wake;
+      if (d.status === 'busy') status.textContent = '他已经在写了，等一会儿再看';
+      else if (!r.ok || (!d.ok && d.status !== 'error')) throw new Error(d.detail || '没叫醒他');
+      else status.textContent = cdWakeStatus(cdWake);
+      if (wallMode === 'cloudy') { await cdLoad().catch(() => {}); cdPaintList(); }
+    } catch (e) {
+      status.textContent = '出错：' + e.message;
+    }
+    run.disabled = false; run.textContent = '现在叫他写一篇';
+  };
+
+  box.append(sw,
+    field('每天几点', time),
+    field('上下文 tokens', tokens, '可以填 ' + low + '–' + high),
+    status, run);
+  return box;
+}
+
+function cdPaintList() {
+  const list = document.getElementById('cdList');
+  if (!list) return;
+  list.innerHTML = '';
+  const items = cdItems || [];
+  if (!items.length) {
+    list.innerHTML = '<div class="dm-none">本子还是空的<div class="s">他写下第一篇以后，这里会多出一个日期。</div></div>';
+    return;
+  }
+  const thisYear = String(new Date().getFullYear());
+  const days = [];
+  items.forEach(it => {
+    const last = days[days.length - 1];
+    if (last && last.date === it.date) last.items.push(it); else days.push({ date: it.date, items: [it] });
+  });
+  days.forEach(({ date, items: group }) => {
     const day = document.createElement('div');
     day.className = 'tl-day';
     const left = document.createElement('div');
     left.className = 'tl-left';
     const num = document.createElement('div');
-    num.className = 'tl-num'; num.textContent = date.slice(8);
+    num.className = 'tl-num'; num.textContent = (date || '').slice(8, 10);
     const mon = document.createElement('div');
-    mon.className = 'tl-mon'; mon.textContent = parseInt(date.slice(5, 7), 10) + ' 月';
+    mon.className = 'tl-mon';
+    mon.textContent = ((date || '').slice(0, 4) === thisYear ? '' : (date || '').slice(0, 4) + ' · ')
+      + parseInt((date || '').slice(5, 7), 10) + ' 月';
     left.append(num, mon);
     const line = document.createElement('div');
     line.className = 'tl-line';
-    const items = document.createElement('div');
-    items.className = 'tl-items';
-    wallBricks.filter(b => b.date === date).forEach(b => {
-      const it = document.createElement('button');
-      it.className = 'tl-item';
-      const tt = document.createElement('div');
-      tt.className = 'tt'; tt.textContent = b.title || '（没有落款的一段）';
-      it.appendChild(tt);
-      if (b.kw) {
-        const tk = document.createElement('div');
-        tk.className = 'tk'; tk.textContent = b.kw;
-        it.appendChild(tk);
+    const box = document.createElement('div');
+    box.className = 'tl-items';
+    group.forEach(it => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tl-item' + (it.locked ? ' cd-locked' : '');
+      if (it.locked) {
+        b.setAttribute('aria-label', cdDateText(it.date) + '，锁着的一篇');
+        b.appendChild(icEl('lock', 15));
+        b.onclick = () => cdShowLocked(it);
+      } else {
+        const tt = document.createElement('div');
+        tt.className = 'tt cd-one'; tt.textContent = cdPreview(it);
+        b.appendChild(tt);
+        b.onclick = () => cdShowEntry(it);
       }
-      it.onclick = () => openNoteFull(b);
-      items.appendChild(it);
+      box.appendChild(b);
     });
-    day.append(left, line, items);
-    wrap.appendChild(day);
+    day.append(left, line, box);
+    list.appendChild(day);
   });
-  wallBody.appendChild(wrap);
+}
+
+async function renderCloudyDiary(keep) {
+  wallBody.innerHTML = '';
+  const head = diaryHead('cloudy');
+  const gear = document.createElement('button');
+  gear.type = 'button'; gear.setAttribute('aria-label', '日记闹钟'); gear.title = '日记闹钟';
+  gear.setAttribute('aria-expanded', cdWakeOpen ? 'true' : 'false');
+  gear.appendChild(icEl('dots', 14));
+  head.querySelector('.shnav').prepend(gear);
+  wallBody.appendChild(head);
+
+  const title = document.createElement('div');
+  title.className = 'cd-head';
+  title.innerHTML = '<div class="cd-h">Cloudy 的日记本</div><div class="cd-s">他写的。新写的都锁着，你只看得到日期；密码他会在聊天里给你，一个密码开一篇。</div>';
+  wallBody.appendChild(title);
+
+  const wakeSlot = document.createElement('div');
+  wallBody.appendChild(wakeSlot);
+  const paintWake = () => { wakeSlot.innerHTML = ''; if (cdWakeOpen) wakeSlot.appendChild(cdWakePanel()); };
+  gear.onclick = () => { cdWakeOpen = !cdWakeOpen; gear.setAttribute('aria-expanded', cdWakeOpen ? 'true' : 'false'); paintWake(); };
+
+  wallBody.appendChild(cdPasswordRow((item) => { cdShowEntry(item); cdPaintList(); }));
+  const list = document.createElement('div');
+  list.id = 'cdList';
+  wallBody.appendChild(list);
+  if (keep && cdItems) { paintWake(); cdPaintList(); return; }
+  list.innerHTML = '<div class="dm-none">翻开中…</div>';
+  try { await cdLoad(); }
+  catch (e) {
+    if (wallMode === 'cloudy') list.innerHTML = '<div class="dm-none">本子这会儿打不开，再试一次</div>';
+    return;
+  }
+  if (wallMode !== 'cloudy' || !list.isConnected) return;
+  paintWake();
+  cdPaintList();
 }
 
 function renderBento() {
@@ -10343,9 +10642,9 @@ function renderBento() {
   const rot = (c, deg) => { c.style.setProperty('--rot', deg); return c; };
   grid.appendChild(rot(card('hero wide', 'special moment', md(latestDate),
     latest.length + ' 段 · ' + (latest[0] ? latest[0].title : ''), 'spark',
-    () => { wallMode = 'timeline'; renderTimeline(); }), '14deg'));
-  grid.appendChild(rot(card('tall', null, '时间线', '一天一天，把我们攒起来。', 'book',
-    () => { wallMode = 'timeline'; renderTimeline(); }), '-12deg'));
+    () => { wallMode = 'cloudy'; renderCloudyDiary(); }), '14deg'));
+  grid.appendChild(rot(card('tall', null, 'Cloudy 的日记本', '他写的，锁着的那几篇要他给密码。', 'book',
+    () => { wallMode = 'cloudy'; renderCloudyDiary(); }), '-12deg'));
   grid.appendChild(rot(card('', null, '我的日记', '你的本子，你来写。', 'pen',
     () => { wallMode = 'her'; renderHerDiary(); }), '10deg'));
   grid.appendChild(rot(card('', null, '最喜欢的话', '你随口说的，我都舍不得删。', 'quote',
@@ -10745,7 +11044,7 @@ async function loadWall() {
       boardIdx = Math.max(0, boardDates.length - 1);   // 打开先看最近的一天
     }
     if (wallMode === 'bento') renderBento();
-    else if (wallMode === 'timeline') renderTimeline();
+    else if (wallMode === 'cloudy') renderCloudyDiary();
     else if (wallMode === 'board') renderBoard();
     else if (wallMode === 'her') renderHerDiary();
     else if (wallMode === 'fav') renderFav();
