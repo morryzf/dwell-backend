@@ -32,8 +32,12 @@ SUPPORTED_PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 _signer = URLSafeTimedSerializer(auth.SECRET, salt="dwell-home-mcp")
 
 
-def make_grant(chat_id: str, message_id: str = "", read_only: bool = False) -> str:
-    return _signer.dumps({"c": chat_id, "m": message_id, "ro": bool(read_only)})
+def make_grant(chat_id: str, message_id: str = "", read_only: bool = False, scope: str = "") -> str:
+    """scope="diary"：写日记的那次唤醒，只给翻记忆和翻自己日记的几把工具。"""
+    data = {"c": chat_id, "m": message_id, "ro": bool(read_only)}
+    if scope:
+        data["s"] = scope
+    return _signer.dumps(data)
 
 
 def read_grant(token: str) -> dict | None:
@@ -50,6 +54,7 @@ def read_grant(token: str) -> dict | None:
         "chat_id": str(data["c"]),
         "message_id": str(data.get("m") or ""),
         "read_only": bool(data.get("ro")),
+        "scope": str(data.get("s") or ""),
     }
 
 

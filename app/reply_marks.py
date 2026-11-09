@@ -1,23 +1,23 @@
-"""回复里的小记号：Cloudy 在回复里顺手写的 [[react:🥺]]、[[quote:那几个字]]。
+"""回复里的小记号：Cloudy 在回复里顺手写的 [[react:🥺]]、[[quote:那几个字]]、[[diarykey:12|密码]]。
 
 不做成工具：工具每调一次就要把整段上下文再发给模型一遍。记号是回复的一部分，
 边说边认出来、做掉，再从显示的文字里摘掉，Morry 看不到记号本身。
 
-只认 react 和 quote 两种；[[sigillo:…]]、[[shop:…]] 这些卡片记号原样留着，前端要靠它们画卡片。
+只认 react、quote、diarykey 三种；[[sigillo:…]]、[[shop:…]] 这些卡片记号原样留着，前端要靠它们画卡片。
 """
 
 from __future__ import annotations
 
 import re
 
-KINDS = ("react", "quote")
-MARK_RE = re.compile(r"\[\[(react|quote):(.*?)\]\]", re.S)
+KINDS = ("react", "quote", "diarykey")
+MARK_RE = re.compile(r"\[\[(react|quote|diarykey):(.*?)\]\]", re.S)
 # 等一个记号收尾最多等这么多字；再长、或者换了行，就不是记号，原样放出去。
 MAX_MARK = 300
 
 
 def strip_marks(text: str) -> str:
-    """去掉文字里所有的 react / quote 记号（判断语言、比对原文时用）。"""
+    """去掉文字里所有的 react / quote / diarykey 记号（判断语言、比对原文时用）。"""
     return MARK_RE.sub("", str(text or ""))
 
 
