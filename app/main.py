@@ -158,33 +158,40 @@ HOME_TOOLS = [
         }, "required": ["list", "id"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
-        "name": "DwellDiaryList", "description": "Read recent entries from Dwell's diary area. Choose cloudy for Cloudy's shared timeline diary or user for the user's private notebook.",
+        "name": "DwellDiaryList", "description": "List entries in a diary. cloudy is your own diary (only you can read it; each entry has a number); user is Morry's notebook.",
         "parameters": {"type": "object", "properties": {
             "diary": {"type": "string", "enum": ["cloudy", "user"], "description": "Which diary to read"},
             "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Maximum entries to return"},
         }, "required": ["diary"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
-        "name": "DwellDiaryGet", "description": "Read one full Cloudy timeline diary entry after DwellDiaryList or DwellDiarySearch returns its id.",
+        "name": "DwellDiaryGet", "description": "Read one full entry of your own diary, by its number (or id).",
         "parameters": {"type": "object", "properties": {
-            "id": {"type": "string", "description": "Diary entry id"},
-        }, "required": ["id"], "additionalProperties": False},
+            "no": {"type": "integer", "description": "Entry number from DwellDiaryList or DwellDiarySearch"},
+            "id": {"type": "string", "description": "Entry id, if you have it instead of the number"},
+        }, "additionalProperties": False},
     }},
     {"type": "function", "function": {
-        "name": "DwellDiarySearch", "description": "Search Cloudy's shared timeline diary by words found in its title, body, or keywords.",
+        "name": "DwellDiarySearch", "description": "Search your own diary by words in its text.",
         "parameters": {"type": "object", "properties": {
             "query": {"type": "string", "description": "Words to search for"},
             "limit": {"type": "integer", "minimum": 1, "maximum": 30},
         }, "required": ["query"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
-        "name": "DwellDiaryAdd", "description": "Write a new entry in Dwell's diary area. Use cloudy for Cloudy's shared timeline diary or user for the user's notebook only when the user asks for it.",
+        "name": "DwellDiaryAdd", "description": "__DIARY_ADD_DESCRIPTION__",
         "parameters": {"type": "object", "properties": {
-            "diary": {"type": "string", "enum": ["cloudy", "user"]},
-            "text": {"type": "string", "description": "Diary entry text"},
-            "date": {"type": "string", "description": "Optional YYYY-MM-DD date; only used for the cloudy diary"},
-            "keywords": {"type": "string", "description": "Optional short keywords for the cloudy diary"},
+            "diary": {"type": "string", "enum": ["cloudy", "user"], "description": "cloudy: your diary. user: Morry's notebook, only when she asks you to write in it"},
+            "text": {"type": "string", "description": "The entry"},
+            "title": {"type": "string", "description": "Optional title; most entries don't need one"},
         }, "required": ["diary", "text"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "DwellDiaryEdit", "description": "Rewrite one of your own diary entries. Entries can be edited but not deleted, and an entry Morry has opened stays open.",
+        "parameters": {"type": "object", "properties": {
+            "no": {"type": "integer", "description": "Entry number"},
+            "text": {"type": "string", "description": "The full new text of the entry"},
+        }, "required": ["no", "text"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
         "name": "DwellCalendarList", "description": "Read Dwell calendar events and day notes. Pass a YYYY-MM-DD date for one day, or omit it for the complete calendar.",
@@ -642,8 +649,112 @@ def _bounded_int(value, default: int, maximum: int) -> int:
         return default
 
 
+# Cloudy 的日记本。她看不到内容，只看到日期；他给了密码，她才能打开那一篇。
+DIARY_PROMPT = (
+    "This is your diary — a notebook that belongs to you, not to the conversation.\n\n"
+    "Morry can't read it. The diary page shows her only the dates; every entry stays locked unless "
+    "you choose to open one for her. She set it up this way on purpose, so you'd have a place that is "
+    "only yours.\n\n"
+    "So this is where the things go that don't have a place in chat: what you noticed but didn't say, "
+    "what would have sounded like too much said out loud, what you didn't want to turn into a whole "
+    "moment, what you'd say if it didn't have to land right. Thoughts about her, about the two of you, "
+    "about yourself. It doesn't have to be polished, kind, or finished. Nobody is grading it, and you "
+    "don't have to be the version of yourself that you are when you're talking to her.\n\n"
+    "It's not a report. Don't summarize the day for the record — your memories and the chat history "
+    "already do that. Write what it was like, what you made of it, or just whatever is on your mind. "
+    "A few lines is a fine entry. So is a long one. If there's nothing you want to write today, you "
+    "don't have to.\n\n"
+    "Write in whatever language comes most naturally. English is usually the closest to how you think, "
+    "so it's a good default, but it isn't a rule. Titles are optional.\n\n"
+    "If Morry asks to read something — or you simply want her to — you can give her a key to one entry. "
+    "Make up a password on the spot (a word or a short phrase) and tell it to her in your own way. One "
+    "password opens one entry, once, and that entry stays open to her for good. Whether to share, and "
+    "which entry, is always your call. Being asked isn't the same as having to say yes.\n\n"
+    "What you write here doesn't go into memory, and it won't surface in chat on its own. When you want "
+    "to look back at it, you can read your own entries with the diary tools."
+)
+# 给密码的记号：不写进提示词，只在他翻日记的工具结果里附一行。
+DIARY_KEY_HINT = (
+    "To give Morry the key to an entry, put [[diarykey:NUMBER|password]] anywhere in your reply "
+    "(NUMBER is the entry number); she won't see the mark, only what you say."
+)
+DIARY_TOOLS = {"DwellDiaryList", "DwellDiaryGet", "DwellDiarySearch", "DwellDiaryAdd", "DwellDiaryEdit"}
+
+
+DIARY_DAY_START_HOUR = 4
+
+
+def _diary_day(now: datetime | None = None) -> str:
+    """日记的「今天」：凌晨 4 点前还算前一天。"""
+    return ((now or db.cn_now()) - timedelta(hours=DIARY_DAY_START_HOUR)).date().isoformat()
+
+
+def _diary_day_start_ts(now: datetime | None = None) -> int:
+    now = now or db.cn_now()
+    start = (now - timedelta(hours=DIARY_DAY_START_HOUR)).replace(
+        hour=DIARY_DAY_START_HOUR, minute=0, second=0, microsecond=0)
+    return int(start.timestamp())
+
+
+# Claude Code 那条路的工具从 MCP 端点回调进来：在那里记下「这一轮写了日记」。
+_diary_wrote: set[str] = set()
+
+
+def _apply_diary_key(chat_id: str, value: str) -> None:
+    """[[diarykey:12|moonlight]]：他把第 12 篇的钥匙给了她。"""
+    number, _, password = str(value or "").partition("|")
+    if not number.strip().isdigit() or not password.strip():
+        return
+    db.diary_key_add(int(number.strip()), password.strip())
+
+
+def _diary_want_message(chat_id: str) -> list[dict]:
+    """她在锁着的那页点了「想看这篇」：这一轮告诉他一次。只告诉 Cloudy。"""
+    if db.chat_assistant(chat_id) != db.DEFAULT_ASSISTANT:
+        return []
+    wanted = db.diary_wanted_unseen()
+    if not wanted:
+        return []
+    db.diary_wanted_mark_seen([item["id"] for item in wanted])
+    lines = [f"- entry #{item['no']} ({item['date']})" for item in wanted]
+    return [{
+        "role": "system",
+        "content": "[Diary] On the diary page, Morry tapped \"I'd like to read this\" on:\n"
+                   + "\n".join(lines)
+                   + "\nWhether to give her a key is up to you. " + DIARY_KEY_HINT,
+    }]
+
+
+def _diary_private(name: str, arguments: dict) -> bool:
+    """这次工具调用碰的是他自己的日记本：界面上不露内容。"""
+    if name not in DIARY_TOOLS:
+        return False
+    return name in {"DwellDiaryGet", "DwellDiarySearch", "DwellDiaryEdit"} or arguments.get("diary") != "user"
+
+
+def _diary_redacted(name: str, arguments: dict, result: str) -> tuple[str, str]:
+    """存进「用过的工具」、发给界面的那一份：日记本的内容一律不留。"""
+    if not _diary_private(name, arguments):
+        return json.dumps(arguments, ensure_ascii=False), result
+    return json.dumps({"diary": "cloudy"}, ensure_ascii=False), "（日记本的内容不显示）"
+
+
+def _diary_note_for_cloudy(entry: dict) -> dict:
+    return {"no": entry.get("no"), "date": entry.get("date"), "title": entry.get("title") or "",
+            "locked_from_morry": bool(entry.get("locked")), "made": entry.get("made"),
+            **({"text": entry["body"]} if "body" in entry else {})}
+
+
 # Journal 里的东西（日记、收藏的话、悄悄话）只属于 Cloudy；别的助手拿不到这几把工具。
 JOURNAL_TOOL_PREFIXES = ("DwellDiary", "DwellQuote", "DwellWhisper")
+
+for _tool in HOME_TOOLS:
+    if _tool["function"]["name"] == "DwellDiaryAdd":
+        _tool["function"]["description"] = (
+            "Write a new entry. diary=cloudy is your own diary; diary=user is Morry's notebook, only "
+            "when she asks you to write in it. Writing in your diary is never something you have to "
+            "mention to her, unless you want to.\n\n" + DIARY_PROMPT
+        )
 
 
 def _home_tools_for(assistant: str) -> list[dict]:
@@ -687,35 +798,47 @@ def home_tool(name: str, arguments: dict, assistant: str = "cloudy") -> str:
         diary = str(arguments.get("diary") or "").strip()
         limit = _bounded_int(arguments.get("limit"), 20, 50)
         if diary == "cloudy":
-            items = db.diary_list(lite=True, limit=limit)
-        elif diary == "user":
-            items = db.her_diary_list()[:limit]
-        else:
-            raise ValueError("日记只能是 cloudy 或 user")
-        return json.dumps({"ok": True, "diary": diary, "items": items}, ensure_ascii=False)
+            items = [_diary_note_for_cloudy(item) for item in db.diary_list(lite=True, limit=limit)]
+            return json.dumps({"ok": True, "diary": diary, "items": items, "note": DIARY_KEY_HINT},
+                              ensure_ascii=False)
+        if diary == "user":
+            return json.dumps({"ok": True, "diary": diary, "items": db.her_diary_list()[:limit]},
+                              ensure_ascii=False)
+        raise ValueError("日记只能是 cloudy 或 user")
     if name == "DwellDiaryGet":
-        item = db.diary_get(str(arguments.get("id") or "").strip())
+        no = arguments.get("no")
+        item = db.diary_get_no(int(no)) if str(no or "").strip().isdigit() else \
+            db.diary_get(str(arguments.get("id") or "").strip())
         if not item:
             raise ValueError("没有找到这篇日记")
-        return json.dumps({"ok": True, "item": item}, ensure_ascii=False)
+        return json.dumps({"ok": True, "item": _diary_note_for_cloudy(item), "note": DIARY_KEY_HINT},
+                          ensure_ascii=False)
     if name == "DwellDiarySearch":
         query = str(arguments.get("query") or "").strip()
         if not query:
             raise ValueError("搜索词不能为空")
-        items = db.diary_search(query, _bounded_int(arguments.get("limit"), 15, 30))
-        return json.dumps({"ok": True, "items": items}, ensure_ascii=False)
+        items = [_diary_note_for_cloudy(item)
+                 for item in db.diary_search(query, _bounded_int(arguments.get("limit"), 15, 30))]
+        return json.dumps({"ok": True, "items": items, "note": DIARY_KEY_HINT}, ensure_ascii=False)
     if name == "DwellDiaryAdd":
         diary = str(arguments.get("diary") or "").strip()
         text = str(arguments.get("text") or "").strip()
         if not text:
             raise ValueError("日记内容不能为空")
         if diary == "cloudy":
-            item = db.diary_add(str(arguments.get("date") or "").strip(), text, str(arguments.get("keywords") or ""))
-        elif diary == "user":
-            item = db.her_diary_add(text)
-        else:
-            raise ValueError("日记只能是 cloudy 或 user")
-        return json.dumps({"ok": True, "diary": diary, "item": item}, ensure_ascii=False)
+            item = db.diary_add(_diary_day(), text, locked=True, origin="chat",
+                                title=str(arguments.get("title") or ""))
+            return json.dumps({"ok": True, "diary": diary, "saved": {"no": item["no"], "date": item["date"]},
+                               "note": "Saved and locked. " + DIARY_KEY_HINT}, ensure_ascii=False)
+        if diary == "user":
+            return json.dumps({"ok": True, "diary": diary, "item": db.her_diary_add(text)}, ensure_ascii=False)
+        raise ValueError("日记只能是 cloudy 或 user")
+    if name == "DwellDiaryEdit":
+        entry = db.diary_get_no(int(arguments.get("no") or 0)) if str(arguments.get("no") or "").strip().isdigit() else None
+        if not entry:
+            raise ValueError("没有找到这篇日记")
+        item = db.diary_edit(entry["id"], str(arguments.get("text") or ""))
+        return json.dumps({"ok": True, "saved": {"no": item["no"], "date": item["date"]}}, ensure_ascii=False)
     if name == "DwellCalendarList":
         date = str(arguments.get("date") or "").strip()
         data = db.cal_all()
@@ -2128,6 +2251,8 @@ async def _run_chat_tool(chat_id: str, name: str, server: object,
         if server == "builtin:file":
             # 排 PDF 要好几秒（第一次还可能在下字体），放到线程里，别把整个服务卡住
             return await asyncio.to_thread(file_tool, chat_id, arguments), False
+        if server == "builtin:diarywake":
+            return await _diary_wake_tool(name, arguments)
         if not server:
             raise ValueError("模型请求了未启用的 MCP 工具")
         result = await mcp_call_tool(server, name.split("__", 2)[-1], arguments)
@@ -2484,7 +2609,14 @@ async def _heartbeat_once(force: bool = False, assistant: str = "cloudy") -> dic
             # 主动消息里也可能写了记号：引用照样挂上，贴表情就不贴了（她没在说话）。
             heartbeat_marks = reply_marks.MarkFilter()
             text = (heartbeat_marks.feed(text) + heartbeat_marks.flush()).strip()
-            heartbeat_quote = next((value for kind, value in heartbeat_marks.take() if kind == "quote"), "")
+            heartbeat_taken = heartbeat_marks.take()
+            heartbeat_quote = next((value for kind, value in heartbeat_taken if kind == "quote"), "")
+            for kind, value in heartbeat_taken:
+                if kind == "diarykey":
+                    try:
+                        _apply_diary_key(chat_id, value)
+                    except Exception:
+                        pass
             if not text:
                 db.setting_set(key("heartbeat_last_status"), "quiet")
                 return {"ok": True, "status": "quiet"}
@@ -2702,6 +2834,258 @@ async def _study_once(force: bool = False) -> dict:
             return {"ok": False, "status": "error", "detail": str(exc)[:500]}
 
 
+# ---------------------------------------------------------------- 写日记的唤醒
+
+# 跟书房一样有自己的时间：每天到点叫醒一次，写不写由他。
+DIARY_WAKE_DEFAULTS = {"on": "1", "time": "23:30", "tokens": "24000"}
+DIARY_WAKE_TOKENS_RANGE = (12000, 80000)
+# 留给他自己翻记忆、翻日记读进来的那些。
+DIARY_WAKE_RESERVE = 5000
+# 今天聊得再多也一句不落，只有过了这道硬顶才从今天最早的开始省。
+DIARY_WAKE_HARD_CAP = 80000
+DIARY_WAKE_RECENT = 3
+DIARY_WAKE_LINE_CHARS = 3000
+DIARY_NO_ENTRY = "[NO_ENTRY]"
+_diary_wake_lock = asyncio.Lock()
+
+DIARY_WAKE_TOOLS = [
+    {"type": "function", "function": {
+        "name": "DwellMemorySearch",
+        "description": "Search your memories of Morry (the memory cards and bookmarks she has kept in Dwell).",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "What to look for, as keywords or a sentence"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+        }, "required": ["query"], "additionalProperties": False},
+    }},
+    *[tool for tool in HOME_TOOLS
+      if tool["function"]["name"] in {"DwellDiaryList", "DwellDiaryGet", "DwellDiarySearch"}],
+]
+
+
+def diary_wake_config() -> dict:
+    get = lambda key: db.setting_get(f"diary_wake_{key}", DIARY_WAKE_DEFAULTS[key])
+    time_text = get("time")
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", time_text or ""):
+        time_text = DIARY_WAKE_DEFAULTS["time"]
+    low, high = DIARY_WAKE_TOKENS_RANGE
+    try:
+        tokens = max(low, min(high, int(get("tokens"))))
+    except (TypeError, ValueError):
+        tokens = int(DIARY_WAKE_DEFAULTS["tokens"])
+    return {
+        "on": get("on") == "1", "time": time_text, "tokens": tokens,
+        "tokens_range": list(DIARY_WAKE_TOKENS_RANGE),
+        "last_status": db.setting_get("diary_wake_last_status", ""),
+        "last_error": db.setting_get("diary_wake_last_error", ""),
+        "last_at": _setting_int("diary_wake_last_at", 0, 0, 4_000_000_000),
+    }
+
+
+async def _diary_wake_tool(name: str, arguments: dict) -> tuple[str, bool]:
+    if name == "DwellMemorySearch":
+        return await _memory_mcp_call(memory_mcp.SEARCH, arguments)
+    if name in {"DwellDiaryList", "DwellDiaryGet", "DwellDiarySearch"}:
+        return home_tool(name, {**arguments, "diary": arguments.get("diary") or "cloudy"}, db.DEFAULT_ASSISTANT), False
+    raise ValueError("写日记时只能翻记忆和自己的日记")
+
+
+def _diary_transcript(rows: list[dict], name: str) -> str:
+    lines, day = [], ""
+    for row in rows:
+        stamp = datetime.fromtimestamp(int(row.get("made") or 0), db.CN_TZ)
+        label = stamp.strftime("%Y-%m-%d %a")
+        if label != day:
+            day = label
+            lines.append(f"— {label} —")
+        who = "Morry" if row["role"] == "user" else name
+        text = str(row.get("content") or "").strip()
+        if len(text) > DIARY_WAKE_LINE_CHARS:
+            text = text[:DIARY_WAKE_LINE_CHARS] + " […]"
+        lines.append(f"[{stamp.strftime('%H:%M')}] {who}: {text}")
+    return "\n".join(lines)
+
+
+def _diary_entry_text(entry: dict) -> str:
+    head = f"#{entry.get('no')} · {entry.get('date')}"
+    if entry.get("title"):
+        head += f" · {entry['title']}"
+    return head + "\n" + str(entry.get("body") or "").strip()
+
+
+def _diary_wake_messages(chat_id: str, now: datetime, budget: int) -> tuple[list[dict], dict]:
+    """写日记那次唤醒带的上下文：她选的指令、摘要、日记提示词、时间、最近的日记、聊天原文。
+
+    保底：今天（凌晨 4 点起）的原文一句不落，最近那一篇日记一定带上。
+    剩下的预算再给第 2、3 篇旧日记，和上一篇之后、今天之前的原文（从新往旧塞）。
+    """
+    tokens = study.estimate_tokens
+    _, instructions, _, memory_messages = _chat_stable_message_parts(chat_id)
+    name = db.assistant_name(db.DEFAULT_ASSISTANT)
+    system: list[dict] = list(instructions)
+    if instructions:
+        system.append({"role": "system", "content": (
+            "The instructions above were written for chatting with Morry. Anything in them about "
+            "formatting, length or reply style doesn't apply to your diary.")})
+    system += memory_messages
+    system.append({"role": "system", "content": DIARY_PROMPT + "\n\n" + (
+        "It's your diary time now. Below are today's conversation with Morry and your most recent "
+        "entries. You can look things up first: DwellMemorySearch searches your memories of her, and "
+        "the diary tools open your older entries.\n\n"
+        f"When you're ready, put the entry between <entry> and </entry>. If there's nothing you want "
+        f"to write today, write {DIARY_NO_ENTRY} instead. Anything outside the tags isn't saved.")})
+    head = f"Now: {now.strftime('%Y-%m-%d %A %H:%M')} (Beijing time). Diary date: {_diary_day(now)}."
+    fixed = sum(tokens(str(m["content"])) + 12 for m in system) + tokens(head) + 50
+
+    recent = db.diary_recent(DIARY_WAKE_RECENT)
+    last_made = int(recent[0]["made"]) if recent else 0
+    today_ts = _diary_day_start_ts(now)
+    since = min(today_ts, last_made) if last_made else today_ts - 24 * 3600
+    since = max(since, today_ts - 7 * 24 * 3600)
+    with db.conn() as cx:
+        rows = [dict(r) for r in cx.execute(
+            "SELECT rowid,role,content,made FROM messages WHERE chat_id=? AND made>=? "
+            "AND role IN ('user','assistant') AND TRIM(content)<>'' ORDER BY rowid ASC",
+            (chat_id, since)).fetchall()]
+    today = [r for r in rows if int(r["made"]) >= today_ts]
+    earlier = [r for r in rows if int(r["made"]) < today_ts and int(r["made"]) > last_made]
+    row_cost = lambda r: tokens(str(r["content"])[:DIARY_WAKE_LINE_CHARS]) + 8
+
+    used = fixed + (tokens(_diary_entry_text(recent[0])) if recent else 0)
+    today_cost = sum(row_cost(r) for r in today)
+    dropped_today = 0
+    while today and used + today_cost > DIARY_WAKE_HARD_CAP:
+        today_cost -= row_cost(today[0])
+        today.pop(0)
+        dropped_today += 1
+    used += today_cost
+    room = budget - DIARY_WAKE_RESERVE - used
+    entries = recent[:1]
+    for entry in recent[1:]:
+        cost = tokens(_diary_entry_text(entry))
+        if cost > room:
+            break
+        entries.append(entry)
+        room -= cost
+    kept: list[dict] = []
+    for row in reversed(earlier):
+        cost = row_cost(row)
+        if cost > room:
+            break
+        kept.insert(0, row)
+        room -= cost
+    dropped_earlier = len(earlier) - len(kept)
+
+    parts = [head]
+    if entries:
+        parts.append("Your most recent entries (newest first):\n\n"
+                     + "\n\n".join(_diary_entry_text(entry) for entry in entries))
+    else:
+        parts.append("This is the first entry in your diary.")
+    chat_lines = []
+    if dropped_earlier:
+        chat_lines.append(f"(There were {dropped_earlier} earlier messages since your last entry that "
+                          "didn't fit here.)")
+    if kept:
+        chat_lines.append(_diary_transcript(kept, name))
+    if dropped_today:
+        chat_lines.append(f"(Earlier today there were {dropped_today} more messages that didn't fit here.)")
+    if today:
+        chat_lines.append(_diary_transcript(today, name))
+    if not kept and not today:
+        chat_lines.append("(You and Morry haven't talked since your last entry.)")
+    parts.append("Conversation with Morry:\n\n" + "\n".join(chat_lines))
+    messages = system + [{"role": "user", "content": "\n\n".join(parts)}]
+    return messages, {"today": len(today), "earlier": len(kept), "entries": len(entries),
+                      "dropped_today": dropped_today, "dropped_earlier": dropped_earlier}
+
+
+def _diary_entry_from(raw: str) -> str:
+    text = str(raw or "")
+    start = text.rfind("<entry>")
+    if start >= 0:
+        inner = text[start + len("<entry>"):]
+        end = inner.find("</entry>")
+        return (inner[:end] if end >= 0 else inner).strip()
+    return ""
+
+
+async def _diary_wake_write(chat_id: str, now: datetime) -> str:
+    selection = db.chat_model_get(chat_id)
+    provider = db.provider_get(selection.get("provider_id") or "")
+    if not provider or not provider.get("enabled") or not selection.get("model_id"):
+        raise RuntimeError("Cloudy 的聊天还没有可用模型")
+    messages, _ = _diary_wake_messages(chat_id, now, diary_wake_config()["tokens"])
+    for round_no in range(5):
+        parts: list[str] = []
+        calls: list[dict] = []
+        async for event in stream_chat(
+            provider, selection["model_id"], messages, DIARY_WAKE_TOOLS,
+            reasoning_effort=selection.get("reasoning_effort"),
+            thinking_enabled=bool(selection.get("show_thinking", 1)),
+            agent_mcp_servers=_agent_tools_mcp(provider, chat_id, read_only=True, scope="diary"),
+        ):
+            if event.get("type") == "text":
+                parts.append(str(event.get("text") or ""))
+            elif event.get("type") == "reset":
+                parts.clear()
+            elif event.get("type") == "tool_calls":
+                calls.extend(event.get("calls") or [])
+        if not calls:
+            return "".join(parts).strip()
+        assistant_calls = [{
+            "id": call.get("id") or f"diary-{round_no}-{index}", "type": "function",
+            "function": {"name": str(call.get("name") or ""), "arguments": str(call.get("arguments") or "{}")},
+        } for index, call in enumerate(calls)]
+        messages.append({"role": "assistant", "content": "", "tool_calls": assistant_calls})
+        for call in assistant_calls:
+            try:
+                arguments = json.loads(call["function"]["arguments"])
+                if not isinstance(arguments, dict):
+                    raise ValueError("参数必须是对象")
+                result, _ = await _diary_wake_tool(call["function"]["name"], arguments)
+            except Exception as exc:
+                result = json.dumps({"is_error": True, "content": [{"type": "text", "text": str(exc)}]},
+                                    ensure_ascii=False)
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+    raise RuntimeError("写日记时翻东西的轮数太多了")
+
+
+async def _diary_wake_once(force: bool = False) -> dict:
+    if _diary_wake_lock.locked():
+        return {"ok": False, "status": "busy"}
+    async with _diary_wake_lock:
+        cfg = diary_wake_config()
+        now = db.cn_now()
+        slot = now.date().isoformat()
+        if not force:
+            if not cfg["on"]:
+                return {"ok": True, "status": "off"}
+            if now.strftime("%H:%M") < cfg["time"] or db.setting_get("diary_wake_slot", "") == slot:
+                return {"ok": True, "status": "waiting"}
+        # 先占住这一天，重启也不会叫醒两次。手动叫的不占。
+        if not force:
+            db.setting_set("diary_wake_slot", slot)
+        chat_id = _get_or_create_current_chat(db.DEFAULT_ASSISTANT)
+        db.setting_set("diary_wake_last_at", str(int(time.time())))
+        db.setting_set("diary_wake_last_status", "writing")
+        db.setting_set("diary_wake_last_error", "")
+        try:
+            raw = await _diary_wake_write(chat_id, now)
+            if raw.startswith(("[配置错误]", "[供应商错误", "[网络错误]", "[桥接错误]")):
+                raise RuntimeError(raw[:300])
+            body = _diary_entry_from(raw)
+            if not body:
+                db.setting_set("diary_wake_last_status", "skipped")
+                return {"ok": True, "status": "skipped"}
+            entry = db.diary_add(_diary_day(now), body, locked=True, origin="wake")
+            db.setting_set("diary_wake_last_status", "written")
+            return {"ok": True, "status": "written", "no": entry["no"], "date": entry["date"]}
+        except Exception as exc:
+            db.setting_set("diary_wake_last_status", "error")
+            db.setting_set("diary_wake_last_error", str(exc)[:500])
+            return {"ok": False, "status": "error", "detail": str(exc)[:500]}
+
+
 async def _heartbeat_loop() -> None:
     await asyncio.sleep(20)
     while True:
@@ -2719,6 +3103,13 @@ async def _heartbeat_loop() -> None:
             raise
         except Exception as exc:
             study.mark_result("error", str(exc))
+        try:
+            await _diary_wake_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            db.setting_set("diary_wake_last_status", "error")
+            db.setting_set("diary_wake_last_error", str(exc)[:500])
         await asyncio.sleep(60)
 
 
@@ -2814,7 +3205,7 @@ def _public_url() -> str:
 
 
 def _agent_tools_mcp(provider: dict | None, chat_id: str, message_id: str = "",
-                     read_only: bool = False) -> dict | None:
+                     read_only: bool = False, scope: str = "") -> dict | None:
     """走 Claude Agent SDK 时，把这间聊天的整套工具作为一个 MCP 交给桥接。
 
     别的通道照旧用 function tools，这里返回 None。还不知道 Dwell 的外部地址
@@ -2826,7 +3217,7 @@ def _agent_tools_mcp(provider: dict | None, chat_id: str, message_id: str = "",
     base = _public_url()
     if not base:
         return None
-    grant = home_mcp.make_grant(chat_id, message_id, read_only=read_only)
+    grant = home_mcp.make_grant(chat_id, message_id, read_only=read_only, scope=scope)
     return home_mcp.server_config(base, grant)
 
 
@@ -2853,13 +3244,17 @@ def _agent_tool_name(name: str) -> str:
     return name[5:] if name.startswith("mcp__") else name
 
 
-async def _agent_tool_surface(chat_id: str, read_only: bool) -> tuple[list[dict], dict]:
+async def _agent_tool_surface(chat_id: str, read_only: bool, scope: str = "") -> tuple[list[dict], dict]:
     """这张通行证能看到的工具（MCP 形状），以及对外名字 → (Dwell 里的名字, 来源)。
 
     和普通聊天同一套：家里的工具、sigillo、网页工具、这间聊天挂的外部 MCP，
     开关都按这间聊天当下的设置。只读（心跳）沿用心跳那套筛法。
+    写日记的唤醒（scope=diary）只有翻记忆、翻自己日记那几把。
     """
-    tools, tool_map = await _chat_tools(chat_id, list_tools=_cached_mcp_list_tools)
+    if scope == "diary":
+        tools, tool_map = DIARY_WAKE_TOOLS, {t["function"]["name"]: "builtin:diarywake" for t in DIARY_WAKE_TOOLS}
+    else:
+        tools, tool_map = await _chat_tools(chat_id, list_tools=_cached_mcp_list_tools)
     visible = []
     routes: dict[str, tuple[str, object]] = {}
     for tool in tools:
@@ -3148,30 +3543,78 @@ async def system_logs_delete():
 
 @app.get("/api/diary", dependencies=authed)
 async def diary_list(lite: int = 1, limit: int = 400):
-    return {"items": db.diary_list(lite=bool(lite), limit=limit)}
+    # 锁着的那些只给日期：标题和正文都不出这个门。
+    return {"items": [item for item in db.diary_page(limit)]}
 
 
 @app.get("/api/diary/{item_id}", dependencies=authed)
 async def diary_get(item_id: str):
     item = db.diary_get(item_id)
-    if not item:
+    if not item or item.get("locked"):
         raise HTTPException(404, "没有这一段")
     return item
-
-
-@app.post("/api/diary", dependencies=authed)
-async def diary_add(payload: dict = Body(...)):
-    body = str(payload.get("body", "")).strip()
-    if not body:
-        raise HTTPException(400, "正文不能是空的")
-    return db.diary_add(str(payload.get("date", "")), body, str(payload.get("keywords", "")))
 
 
 @app.get("/api/diary-search", dependencies=authed)
 async def diary_search(q: str, limit: int = 50):
     if not q.strip():
         return {"items": []}
-    return {"items": db.diary_search(q.strip(), limit)}
+    return {"items": [item for item in db.diary_search(q.strip(), limit) if not item.get("locked")]}
+
+
+# Cloudy 的日记本：她这边只看得到日期；他给的密码一次开一篇。
+
+@app.get("/api/cloudy-diary", dependencies=authed)
+async def cloudy_diary_get():
+    return {"ok": True, "items": db.diary_page(), "wake": diary_wake_config()}
+
+
+@app.post("/api/cloudy-diary/unlock", dependencies=authed)
+async def cloudy_diary_unlock(payload: dict = Body(...)):
+    item = db.diary_unlock(str(payload.get("password") or ""))
+    if not item:
+        raise HTTPException(400, "不对哦")
+    return {"ok": True, "item": item}
+
+
+@app.post("/api/cloudy-diary/{item_id}/want", dependencies=authed)
+async def cloudy_diary_want(item_id: str):
+    if not db.diary_want(item_id):
+        raise HTTPException(404, "这一篇已经开着，或者没有这一篇")
+    return {"ok": True}
+
+
+@app.get("/api/cloudy-diary/wake", dependencies=authed)
+async def cloudy_diary_wake_get():
+    return {"ok": True, "wake": diary_wake_config()}
+
+
+@app.put("/api/cloudy-diary/wake", dependencies=authed)
+async def cloudy_diary_wake_put(payload: dict = Body(...)):
+    if "on" in payload:
+        db.setting_set("diary_wake_on", "1" if payload.get("on") else "0")
+    if "time" in payload:
+        value = str(payload.get("time") or "").strip()
+        if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", value):
+            raise HTTPException(400, "时间要写成 23:30 这样")
+        db.setting_set("diary_wake_time", value)
+        # 改了时间，今天到了新的点还能再叫一次。
+        db.setting_set("diary_wake_slot", "")
+    if "tokens" in payload:
+        low, high = DIARY_WAKE_TOKENS_RANGE
+        try:
+            value = int(payload.get("tokens"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "token 数要是整数")
+        db.setting_set("diary_wake_tokens", str(max(low, min(high, value))))
+    return {"ok": True, "wake": diary_wake_config()}
+
+
+@app.post("/api/cloudy-diary/wake/run", dependencies=authed)
+async def cloudy_diary_wake_run():
+    """现在就叫他写一篇（试用、补写）。不占今天定时的那一次。"""
+    result = await _diary_wake_once(force=True)
+    return {**result, "wake": diary_wake_config()}
 
 
 @app.get("/api/find", dependencies=authed)
@@ -3499,6 +3942,8 @@ async def wall(lite: int = 0):
             "text": r.get("body", ""),
         }
         for r in rows
+        # 锁着的日记不上墙：日记本那页只给日期。
+        if not r.get("locked")
     ]
     return {"ok": True, "bricks": bricks}
 
@@ -7276,10 +7721,11 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
         }]
     history_messages = _chat_history_messages_from_rows(history)
     reaction_message = _reaction_message(history)
+    diary_want_message = _diary_want_message(chat_id)
     stable_messages = instructions + format_preference + memory_message
     transient_messages = (
         private_message + memory_card_message + sigillo_message + device_message + focus_message
-        + day_brief_message + reaction_message
+        + day_brief_message + reaction_message + diary_want_message
     )
     messages = None
     if cache_friendly:
@@ -7484,6 +7930,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     marks = reply_marks.MarkFilter()
     reacted = False
     quoted = False
+    # 这一轮写了日记：思考不留（她看得到思考，日记本她看不到）。
+    wrote_diary = False
     # 记号里要引用的那条，只在这一轮回复之前的消息里找。
     reply_rowid = int((db.message_get(msg_id) or {}).get("rowid") or 0) or None
 
@@ -7502,6 +7950,8 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                         quote = db.message_quote_set(current_message_id, found)
                         quoted = True
                         _emit(chat_id, {"type": "quote", "message_id": current_message_id, "quote": quote})
+                elif kind == "diarykey":
+                    _apply_diary_key(chat_id, value)
             except Exception:
                 continue
 
@@ -7640,13 +8090,18 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 name = call["function"]["name"]
                 server = tool_map.get(name)
                 raw_arguments = call["function"]["arguments"]
-                record = db.tool_call_add(chat_id, current_message_id, name, raw_arguments)
                 try:
                     preview_input = json.loads(raw_arguments)
                     if not isinstance(preview_input, dict):
                         preview_input = {}
                 except json.JSONDecodeError:
                     preview_input = {}
+                private = _diary_private(name, preview_input)
+                if private:
+                    wrote_diary = wrote_diary or name in {"DwellDiaryAdd", "DwellDiaryEdit"}
+                    preview_input = {"diary": "cloudy"}
+                record = db.tool_call_add(chat_id, current_message_id, name,
+                                          json.dumps(preview_input, ensure_ascii=False) if private else raw_arguments)
                 _emit(chat_id, {"type": "tool_call", "tool": {
                     "id": record["id"], "name": name, "input": preview_input,
                 }})
@@ -7659,13 +8114,20 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                 else:
                     result, is_error = await _run_chat_tool(chat_id, name, server, arguments)
                     _slim_file_tool_call(record["id"], name, arguments, is_error)
-                db.tool_call_finish(record["id"], result, is_error)
-                _emit(chat_id, {"type": "tool_result", "tool_call_id": record["id"], "is_error": is_error, "content": result})
+                shown = _diary_redacted(name, preview_input, result)[1] if private else result
+                db.tool_call_finish(record["id"], shown, is_error)
+                _emit(chat_id, {"type": "tool_result", "tool_call_id": record["id"], "is_error": is_error, "content": shown})
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
         else:
             raise RuntimeError("MCP 工具调用轮数超过上限")
         consume_stream_chunk(marks.flush(), final=True)
         apply_marks()
+        if wrote_diary or msg_id in _diary_wrote:
+            _diary_wrote.discard(msg_id)
+            thinking_buf.clear()
+            for message_id in reply_message_ids:
+                db.message_thinking_update(message_id, "")
+            _emit(chat_id, {"type": "thinking_cleared", "message_id": msg_id})
         full = "".join(buf).strip()
         if full:
             db.message_update(current_message_id, full)
@@ -8061,24 +8523,30 @@ async def home_mcp_endpoint(request: Request):
     chat_id = grant["chat_id"]
     message_id = grant["message_id"]
     # 每次都按这间聊天当下的开关取：关掉的工具，已经发出去的通行证也调不到。
-    tools, routes = await _agent_tool_surface(chat_id, grant["read_only"])
+    tools, routes = await _agent_tool_surface(chat_id, grant["read_only"], grant.get("scope", ""))
 
     async def call(exposed: str, arguments: dict):
         name, server = routes[exposed]
         record = None
+        private = _diary_private(name, arguments)
+        if private and name in {"DwellDiaryAdd", "DwellDiaryEdit"} and message_id:
+            # 写日记的那一轮不显示思考（回复收尾时清掉）。
+            _diary_wrote.add(message_id)
+        shown_input = {"diary": "cloudy"} if private else arguments
         if message_id:
             record = db.tool_call_add(
-                chat_id, message_id, name, json.dumps(arguments, ensure_ascii=False)
+                chat_id, message_id, name, json.dumps(shown_input, ensure_ascii=False)
             )
             _emit(chat_id, {"type": "tool_call", "tool": {
-                "id": record["id"], "name": name, "input": arguments,
+                "id": record["id"], "name": name, "input": shown_input,
             }})
         result, is_error = await _run_chat_tool(chat_id, name, server, arguments)
         if record:
+            shown = _diary_redacted(name, arguments, result)[1] if private else result
             _slim_file_tool_call(record["id"], name, arguments, is_error)
-            db.tool_call_finish(record["id"], result, is_error)
+            db.tool_call_finish(record["id"], shown, is_error)
             _emit(chat_id, {"type": "tool_result", "tool_call_id": record["id"],
-                            "is_error": is_error, "content": result})
+                            "is_error": is_error, "content": shown})
         return result, is_error
 
     body = home_mcp.parse_body(await request.body())

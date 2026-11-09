@@ -85,8 +85,9 @@ class HomeMcpTest(unittest.TestCase):
         self.assertIn("订餐厅", [item["text"] for item in db.todos_all()["mine"]])
 
         self._call(grant, "DwellDiaryAdd", {"diary": "cloudy", "text": "今天她笑了好几次"})
-        self.assertTrue(any("她笑了" in json.dumps(item, ensure_ascii=False)
-                            for item in db.diary_list(lite=True, limit=5)))
+        # 写进 Cloudy 的日记本：锁着。
+        entry = db.diary_recent(1)[0]
+        self.assertEqual((entry["body"], entry["locked"]), ("今天她笑了好几次", 1))
 
     def test_bad_arguments_come_back_as_tool_errors(self):
         grant = home_mcp.make_grant(self.chat_id)

@@ -9,12 +9,14 @@
 """
 
 import bisect
+import hashlib
 import json
 import os
 import re
 import secrets
 import sqlite3
 import time
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -643,6 +645,24 @@ def init_db():
                 "INSERT INTO settings (key,value) VALUES (?,?)",
                 (cache_scope_key, "1"),
             )
+        # Cloudy 的日记本：新写的锁着，旧的时间线日记默认开着。no 是给他认的编号（给密码时用）。
+        diary_cols = {r["name"] for r in cx.execute("PRAGMA table_info(diary)").fetchall()}
+        for column, ddl in (("locked", "INTEGER NOT NULL DEFAULT 0"), ("no", "INTEGER"),
+                            ("unlocked_at", "INTEGER"), ("edited", "INTEGER"),
+                            ("wanted_at", "INTEGER"), ("wanted_seen", "INTEGER NOT NULL DEFAULT 0"),
+                            ("origin", "TEXT NOT NULL DEFAULT ''")):
+            if column not in diary_cols:
+                cx.execute(f"ALTER TABLE diary ADD COLUMN {column} {ddl}")
+        if cx.execute("SELECT 1 FROM diary WHERE no IS NULL LIMIT 1").fetchone():
+            top = cx.execute("SELECT COALESCE(MAX(no),0) FROM diary").fetchone()[0]
+            for offset, row in enumerate(cx.execute(
+                    "SELECT id FROM diary WHERE no IS NULL ORDER BY date ASC, made ASC").fetchall(), 1):
+                cx.execute("UPDATE diary SET no=? WHERE id=?", (top + offset, row["id"]))
+        cx.execute(
+            """CREATE TABLE IF NOT EXISTS diary_keys (
+                   id TEXT PRIMARY KEY, entry_id TEXT NOT NULL, key_hash TEXT NOT NULL,
+                   made INTEGER NOT NULL, used_at INTEGER)"""
+        )
         message_cols = {r["name"] for r in cx.execute("PRAGMA table_info(messages)").fetchall()}
         if "origin" not in message_cols:
             cx.execute("ALTER TABLE messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'chat'")
@@ -833,36 +853,48 @@ def parse_segment(seg: str) -> dict:
     return out
 
 
-def diary_add(date: str, body: str, keywords: str = "") -> dict:
-    """写一段日记。标记从正文里解析，不用单独传。"""
+def diary_add(date: str, body: str, keywords: str = "", locked: bool = False,
+              origin: str = "", title: str = "") -> dict:
+    """写一段日记。标记从正文里解析，不用单独传。
+
+    locked：Cloudy 日记本里新写的都锁着，她要拿到他给的密码才能看。
+    """
     fields = parse_segment(body)
     # diary.keywords is NOT NULL. A tool caller can name keywords explicitly;
     # otherwise store parsed keywords or an empty string, never NULL.
     fields["keywords"] = str(keywords or fields.get("keywords") or "").strip()[:300]
+    if title:
+        fields["title"] = str(title).strip()[:120]
+    elif locked:
+        # 日记本里不要求标题；别从正文第一行替他截一个。
+        fields["title"] = ""
     row = {
         "id": new_id(),
         "date": date or today_str(),
-        "body": body.strip()[:8000],
+        "body": body.strip()[:12000],
         "made": int(time.time()),
         **fields,
     }
     for key in ("title", "keywords", "her_mood", "my_mood"):
         row[key] = str(row.get(key) or "")
+    row["locked"] = 1 if locked else 0
+    row["origin"] = str(origin or "")[:20]
     with conn() as cx:
+        row["no"] = cx.execute("SELECT COALESCE(MAX(no),0)+1 FROM diary").fetchone()[0]
         cx.execute(
             """INSERT INTO diary
                (id,date,title,body,keywords,her_mood,my_mood,
-                strength,valence,arousal,made)
+                strength,valence,arousal,made,locked,no,origin)
                VALUES (:id,:date,:title,:body,:keywords,:her_mood,:my_mood,
-                       :strength,:valence,:arousal,:made)""",
+                       :strength,:valence,:arousal,:made,:locked,:no,:origin)""",
             row,
         )
     return row
 
 
 def diary_list(lite: bool = True, limit: int = 400) -> list:
-    """列表。lite=True 不返回正文——全文几十万字，列表页不该背着它跑。"""
-    cols = "id,date,title,keywords,her_mood,my_mood,strength,valence,arousal,made"
+    """列表（Cloudy 自己看的，锁着的也列）。lite=True 不返回正文。"""
+    cols = "id,no,date,title,keywords,her_mood,my_mood,strength,valence,arousal,made,locked,edited"
     if not lite:
         cols += ",body"
     with conn() as cx:
@@ -879,12 +911,18 @@ def diary_get(item_id: str) -> dict | None:
     return dict(r) if r else None
 
 
+def diary_get_no(no: int) -> dict | None:
+    with conn() as cx:
+        r = cx.execute("SELECT * FROM diary WHERE no=?", (int(no),)).fetchone()
+    return dict(r) if r else None
+
+
 def diary_search(q: str, limit: int = 50) -> list:
     """检索。情绪强的优先浮上来——跟人一样，重的事记得牢。"""
     like = f"%{q}%"
     with conn() as cx:
         rows = cx.execute(
-            """SELECT id,date,title,keywords,strength,valence,arousal,made
+            """SELECT id,no,date,title,keywords,strength,valence,arousal,made,locked
                FROM diary
                WHERE body LIKE ? OR title LIKE ? OR keywords LIKE ?
                ORDER BY COALESCE(strength,0) DESC, date DESC
@@ -892,6 +930,111 @@ def diary_search(q: str, limit: int = 50) -> list:
             (like, like, like, limit),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def diary_edit(item_id: str, body: str) -> dict | None:
+    """他改自己写过的一篇。日记不能删，也不能重新锁上。"""
+    body = str(body or "").strip()[:12000]
+    if not body:
+        raise ValueError("日记内容不能为空")
+    with conn() as cx:
+        cur = cx.execute("UPDATE diary SET body=?, edited=? WHERE id=?", (body, int(time.time()), item_id))
+    return diary_get(item_id) if cur.rowcount else None
+
+
+def diary_recent(limit: int = 3, before: int | None = None) -> list[dict]:
+    """最近几篇（含正文），新的在前。"""
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT * FROM diary WHERE (? IS NULL OR made<?) ORDER BY made DESC LIMIT ?",
+            (before, before, int(limit)),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def diary_page(limit: int = 400) -> list[dict]:
+    """她看的日记本：锁着的只有日期和锁，标题、正文都不给。"""
+    out = []
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT id,no,date,title,body,made,locked,unlocked_at,edited,wanted_at FROM diary "
+            "ORDER BY date DESC, made DESC LIMIT ?", (int(limit),),
+        ).fetchall()
+    for r in rows:
+        item = {"id": r["id"], "date": r["date"], "made": r["made"], "locked": bool(r["locked"]),
+                "wanted": bool(r["wanted_at"])}
+        if not r["locked"]:
+            item.update(title=r["title"], body=r["body"], unlocked_at=r["unlocked_at"], edited=r["edited"])
+        out.append(item)
+    return out
+
+
+def diary_key_norm(password: str) -> str:
+    """密码比对时不分大小写，空格和标点不算。"""
+    text = unicodedata.normalize("NFKC", str(password or "")).casefold()
+    return re.sub(r"[\W_]+", "", text)
+
+
+def _diary_key_hash(password: str) -> str:
+    return hashlib.sha256(diary_key_norm(password).encode("utf-8")).hexdigest()
+
+
+def diary_key_add(no: int, password: str) -> dict:
+    """他给她一把钥匙：开第 no 篇。同一篇还没用过的旧钥匙作废，换这把。"""
+    if not diary_key_norm(password):
+        raise ValueError("密码不能是空的")
+    entry = diary_get_no(no)
+    if not entry:
+        raise LookupError("没有这一篇日记")
+    row = {"id": new_id(), "entry_id": entry["id"], "key_hash": _diary_key_hash(password),
+           "made": int(time.time())}
+    with conn() as cx:
+        cx.execute("DELETE FROM diary_keys WHERE entry_id=? AND used_at IS NULL", (entry["id"],))
+        if entry["locked"]:
+            cx.execute("INSERT INTO diary_keys (id,entry_id,key_hash,made) VALUES (:id,:entry_id,:key_hash,:made)", row)
+    return {"entry_id": entry["id"], "no": entry["no"], "already_open": not entry["locked"]}
+
+
+def diary_unlock(password: str) -> dict | None:
+    """她输了一个密码：对上哪把没用过的钥匙，就开哪一篇。钥匙一次性，开了就一直开着。"""
+    digest = _diary_key_hash(password)
+    now = int(time.time())
+    with conn() as cx:
+        key = cx.execute(
+            "SELECT * FROM diary_keys WHERE key_hash=? AND used_at IS NULL ORDER BY made DESC LIMIT 1",
+            (digest,),
+        ).fetchone()
+        if not key:
+            return None
+        cx.execute("UPDATE diary_keys SET used_at=? WHERE id=?", (now, key["id"]))
+        cx.execute("UPDATE diary SET locked=0, unlocked_at=? WHERE id=? AND locked=1", (now, key["entry_id"]))
+    return next((item for item in diary_page() if item["id"] == key["entry_id"]), None)
+
+
+def diary_want(item_id: str) -> bool:
+    """她在锁着的那页点了「想看这篇」：他下次聊天时会知道。"""
+    with conn() as cx:
+        cur = cx.execute(
+            "UPDATE diary SET wanted_at=?, wanted_seen=0 WHERE id=? AND locked=1",
+            (int(time.time()), item_id),
+        )
+    return cur.rowcount > 0
+
+
+def diary_wanted_unseen() -> list[dict]:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT id,no,date FROM diary WHERE locked=1 AND wanted_at IS NOT NULL AND wanted_seen=0 "
+            "ORDER BY wanted_at ASC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def diary_wanted_mark_seen(ids: list[str]) -> None:
+    if not ids:
+        return
+    with conn() as cx:
+        cx.execute(f"UPDATE diary SET wanted_seen=1 WHERE id IN ({','.join('?' for _ in ids)})", ids)
 
 
 # ---------------------------------------------------------------- 你的本子
@@ -2051,7 +2194,7 @@ def find_everywhere(query: str, limit: int = 80, assistant: str | None = None) -
         ).fetchall()
         diary = cx.execute(
             """SELECT date,title,body,keywords,made FROM diary
-               WHERE title LIKE ? OR body LIKE ? OR keywords LIKE ?
+               WHERE locked=0 AND (title LIKE ? OR body LIKE ? OR keywords LIKE ?)
                ORDER BY date DESC,made DESC LIMIT ?""", (like, like, like, limit)
         ).fetchall()
         personal = cx.execute("SELECT text,at FROM her_diary WHERE text LIKE ? ORDER BY at DESC LIMIT ?", (like, limit)).fetchall()
