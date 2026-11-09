@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 「Journal」，先只搬「最喜欢的话」：聊天里摘下来的话，每句下面可以写为什么喜欢。
+/// 「Journal」：Cloudy 的日记本，和「最喜欢的话」（聊天里摘下来的话，每句下面可以写为什么喜欢）。
 /// 心事簿、悄悄话、夜记这些还在网页里，页底有个入口。
 struct JournalPage: View {
     @EnvironmentObject private var store: ChatStore
@@ -28,27 +28,36 @@ struct JournalPage: View {
     @State private var noteDraft = ""
     @State private var deleting: Quote?
     @State private var showWeb = false
+    @State private var tab: Tab = .diary
+    @State private var showDiarySettings = false
     @FocusState private var noteFocused: Bool
 
+    enum Tab: Hashable { case diary, quotes }
+
     var body: some View {
-        PageScaffold(title: "Journal", subtitle: "最喜欢的话 · \(quotes.count) 句") {
-            Text("在聊天里点开一条回复，「⋯」→「摘进最喜欢的话」，那一轮的完整回复就收到这里。每句下面可以写写为什么喜欢。")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.dim)
-                .lineSpacing(3)
-                .padding(.top, 6)
-
-            VStack(spacing: 14) {
-                ForEach(quotes) { item in card(item) }
+        PageScaffold(title: "Journal", subtitle: tab == .diary ? "Cloudy 的日记本" : "最喜欢的话 · \(quotes.count) 句") {
+            if tab == .diary {
+                Button { showDiarySettings = true } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 17))
+                        .foregroundStyle(Theme.dim)
+                        .frame(width: 40, height: 40)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("写日记的设置")
             }
-            .padding(.top, 18)
+        } content: {
+            Picker("", selection: $tab) {
+                Text("Cloudy 的日记本").tag(Tab.diary)
+                Text("最喜欢的话").tag(Tab.quotes)
+            }
+            .pickerStyle(.segmented)
+            .padding(.top, 6)
 
-            if loaded && quotes.isEmpty {
-                Text(failed ? "摘录暂时没拿到，下拉再试一次" : "还没摘下来的话")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Theme.dim)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 40)
+            if tab == .diary {
+                CloudyDiarySection(showSettings: $showDiarySettings)
+            } else {
+                quotesContent
             }
 
             Button { showWeb = true } label: {
@@ -78,6 +87,28 @@ struct JournalPage: View {
             }
             Button("取消", role: .cancel) {}
         }
+    }
+
+    @ViewBuilder
+    private var quotesContent: some View {
+            Text("在聊天里点开一条回复，「⋯」→「摘进最喜欢的话」，那一轮的完整回复就收到这里。每句下面可以写写为什么喜欢。")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.dim)
+                .lineSpacing(3)
+                .padding(.top, 6)
+
+            VStack(spacing: 14) {
+                ForEach(quotes) { item in card(item) }
+            }
+            .padding(.top, 18)
+
+            if loaded && quotes.isEmpty {
+                Text(failed ? "摘录暂时没拿到，下拉再试一次" : "还没摘下来的话")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.dim)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+            }
     }
 
     private func card(_ item: Quote) -> some View {
