@@ -4186,8 +4186,26 @@ def system_log_clear() -> int:
     return cur.rowcount
 
 
-def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -> dict:
-    rows = message_list(chat_id, limit, before)
+def message_list_after(chat_id: str, after: int, limit: int) -> list:
+    """after 之后的 limit 条，按先后排（从一段旧消息往下接）。"""
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT rowid, * FROM messages WHERE chat_id=? AND rowid>? ORDER BY rowid ASC LIMIT ?",
+            (chat_id, int(after), int(limit)),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None,
+                    after: int | None = None, around: int | None = None, pad: int = 30) -> dict:
+    """before：这一条之前的最近 limit 条；after：这一条之后的 limit 条；
+    around：这一条连同前后各 pad 条（搜索里点开很早的一句，只拿它附近）。"""
+    if around:
+        rows = message_list(chat_id, pad, around) + message_list_after(chat_id, around - 1, pad + 1)
+    elif after is not None:
+        rows = message_list_after(chat_id, after, limit)
+    else:
+        rows = message_list(chat_id, limit, before)
     # The toggle controls future generation only. Persisted thinking remains part of history.
     assistant_ids = [row["id"] for row in rows if row["role"] == "assistant"]
     images_by_message = message_attachments([row["id"] for row in rows])
@@ -4243,7 +4261,14 @@ def message_ui_list(chat_id: str, limit: int = 400, before: int | None = None) -
                 (chat_id, msgs[0]["seq"]),
             ).fetchone()
         more = bool(r)
-    return {"msgs": msgs, "more": more, "upto": msgs[-1]["seq"] if msgs else message_max_id(chat_id)}
+    out = {"msgs": msgs, "more": more, "upto": msgs[-1]["seq"] if msgs else message_max_id(chat_id)}
+    if around or after is not None:
+        # 这一段后面还有没有（还没接到最新）。
+        last = msgs[-1]["seq"] if msgs else (after or around or 0)
+        with conn() as cx:
+            out["newer"] = bool(cx.execute(
+                "SELECT 1 FROM messages WHERE chat_id=? AND rowid>? LIMIT 1", (chat_id, last)).fetchone())
+    return out
 
 
 # ---------------------------------------------------------------- 设置

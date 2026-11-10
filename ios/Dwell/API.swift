@@ -155,15 +155,23 @@ final class API {
     // MARK: - 消息
 
     /// 最近的一页；传 before 就是比这条更早的一页。
-    /// reach：一路往上拿到这条为止（搜索里点开很早的一句时用）。
-    func messages(chatID: String, limit: Int = 200, before: Int? = nil,
-                  reach: String? = nil) async throws -> (msgs: [Message], more: Bool) {
+    func messages(chatID: String, limit: Int = 200, before: Int? = nil) async throws -> (msgs: [Message], more: Bool) {
         var query = ["chat_id": chatID, "limit": String(limit)]
         if let before { query["before"] = String(before) }
-        if let reach { query["reach"] = reach }
         // 只存每间聊天最近的那一页（连着里面的照片），往上翻的不存。
         let json = try await request("GET", "api/messages", query: query, remember: before == nil)
         return Self.messagePage(json)
+    }
+
+    /// 一段不连着最新的消息：around 是那一句和前后各 30 条，after 是从这一段往下接。
+    func messageWindow(chatID: String, around: String? = nil, after: Int? = nil,
+                       limit: Int = 100) async throws -> (msgs: [Message], more: Bool, newer: Bool) {
+        var query = ["chat_id": chatID, "limit": String(limit)]
+        if let around { query["around"] = around }
+        if let after { query["after"] = String(after) }
+        let json = try await request("GET", "api/messages", query: query)
+        let page = Self.messagePage(json)
+        return (page.msgs, page.more, json["newer"] as? Bool ?? false)
     }
 
     func rememberedMessages(chatID: String, limit: Int = 200) -> (msgs: [Message], more: Bool)? {
