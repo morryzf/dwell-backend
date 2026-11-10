@@ -468,12 +468,27 @@ final class ChatStore: ObservableObject {
     /// 切到那一间，往上翻到那句为止（最多翻十几页），再让聊天页把它滚到正中。
     func open(chat chatID: String, message messageID: String) async {
         if chatID != self.chatID { await switchChat(chatID) }
-        var tries = 0
-        while !messages.contains(where: { $0.id == messageID }) && hasMore && tries < 15 {
-            await loadOlder()
-            tries += 1
+        // 以前一页页往上翻，翻到第 15 页就停，早一点的那句就到不了。现在一次拿到那句为止。
+        if !messages.contains(where: { $0.id == messageID }), hasMore,
+           let oldest = messages.first(where: { $0.seq > 0 })?.seq {
+            loadingOlder = true
+            defer { loadingOlder = false }
+            do {
+                let chat = self.chatID
+                let page = try await api.messages(chatID: chat, limit: 100, before: oldest, reach: messageID)
+                if chat == self.chatID {
+                    messages = page.msgs.filter { !$0.isEmpty } + messages
+                    hasMore = page.more
+                }
+            } catch { handle(error) }
         }
-        if messages.contains(where: { $0.id == messageID }) { jumpTarget = messageID }
+        guard messages.contains(where: { $0.id == messageID }) else {
+            flash("没找到这一句，可能已经删掉了")
+            return
+        }
+        // 等新拿到的那一大段先摆上，再跳。
+        try? await Task.sleep(for: .milliseconds(150))
+        jumpTarget = messageID
     }
 
     /// 多选删除：跟网页一样一次发过去。

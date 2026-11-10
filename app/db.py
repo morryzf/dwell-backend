@@ -932,6 +932,14 @@ def diary_search(q: str, limit: int = 50) -> list:
     return [dict(r) for r in rows]
 
 
+def diary_for_day(date: str) -> dict | None:
+    """这一天他已经写的那篇（日记本一天一篇）。"""
+    with conn() as cx:
+        r = cx.execute("SELECT * FROM diary WHERE date=? AND origin<>'' ORDER BY made DESC LIMIT 1",
+                       (date,)).fetchone()
+    return dict(r) if r else None
+
+
 def diary_edit(item_id: str, body: str) -> dict | None:
     """他改自己写过的一篇。日记不能删，也不能重新锁上。"""
     body = str(body or "").strip()[:12000]

@@ -154,6 +154,14 @@ class ChatToolTest(DiaryTestBase):
         self.assertEqual(db.message_get(reply)["content"], "密码是 lantern")
         self.assertIn("the secret one", db.diary_unlock("LANTERN")["body"])
 
+    def test_one_entry_a_day(self):
+        main.home_tool("DwellDiaryAdd", {"diary": "cloudy", "text": "first try"})
+        with self.assertRaises(ValueError) as caught:
+            main.home_tool("DwellDiaryAdd", {"diary": "cloudy", "text": "second try"})
+        self.assertIn("DwellDiaryEdit", str(caught.exception))
+        self.assertIn("first try", str(caught.exception))
+        self.assertEqual(len(db.diary_recent(5)), 1)
+
     def test_his_own_reading_tools_see_everything(self):
         db.diary_add("2026-11-08", "locked words", locked=True)
         listed = json.loads(main.home_tool("DwellDiaryList", {"diary": "cloudy"}))
@@ -218,6 +226,22 @@ class WakeTest(DiaryTestBase):
         self.assertEqual(first["status"], "written")
         self.assertEqual(db.diary_get_no(first["no"])["locked"], 1)
         self.assertEqual(second["status"], "skipped")
+
+    def test_a_second_wake_the_same_day_rewrites_todays_entry(self):
+        self._add("user", "hi", self.now - timedelta(hours=1))
+        replies = iter(["<entry>first</entry>", "<entry>first, and then more</entry>"])
+
+        async def fake_write(chat_id, now):
+            return next(replies)
+
+        with mock.patch.object(main, "_diary_wake_write", fake_write), \
+                mock.patch.object(main.db, "cn_now", lambda: self.now):
+            asyncio.run(main._diary_wake_once(force=True))
+            messages, _ = main._diary_wake_messages(self.chat, self.now, 24000)
+            asyncio.run(main._diary_wake_once(force=True))
+        self.assertIn("You already wrote today's entry", messages[-1]["content"])
+        entries = db.diary_recent(5)
+        self.assertEqual([e["body"] for e in entries], ["first, and then more"])
 
     def test_it_wakes_once_a_day_after_its_time(self):
         db.setting_set("diary_wake_time", "23:00")
