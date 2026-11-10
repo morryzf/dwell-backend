@@ -193,7 +193,7 @@ private struct FindCalendar: View {
             HStack {
                 Button { shift(-1) } label: { Image(systemName: "chevron.left") }
                 Spacer()
-                Text("\(cal.component(.year, from: month)) 年 \(cal.component(.month, from: month)) 月")
+                Text(verbatim: "\(cal.component(.year, from: month)) 年 \(cal.component(.month, from: month)) 月")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Button { shift(1) } label: { Image(systemName: "chevron.right") }
@@ -206,7 +206,8 @@ private struct FindCalendar: View {
                 ForEach(["一", "二", "三", "四", "五", "六", "日"], id: \.self) { w in
                     Text(w).font(.system(size: 11)).foregroundStyle(Theme.dim)
                 }
-                ForEach(0..<lead, id: \.self) { _ in Color.clear.frame(height: 36) }
+                // 空格子的 id 用负数：跟日子共用 1、2、3… 的话，前几号会被当成同一格丢掉。
+                ForEach(-lead ..< 0, id: \.self) { _ in Color.clear.frame(height: 36) }
                 ForEach(1...dayCount, id: \.self) { n in
                     let key = monthKey + String(format: "-%02d", n)
                     let has = days[key] != nil

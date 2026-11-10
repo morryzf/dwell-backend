@@ -666,6 +666,8 @@ DIARY_PROMPT = (
     "don't have to.\n\n"
     "Write in whatever language comes most naturally. English is usually the closest to how you think, "
     "so it's a good default, but it isn't a rule. Titles are optional.\n\n"
+    "There's one entry per day. If you've already written today's, you can come back to it — rewrite "
+    "it or add to it — but don't start a second one.\n\n"
     "If Morry asks to read something — or you simply want her to — you can give her a key to one entry. "
     "Make up a password on the spot (a word or a short phrase) and tell it to her in your own way. One "
     "password opens one entry, once, and that entry stays open to her for good. Whether to share, and "
@@ -826,6 +828,13 @@ def home_tool(name: str, arguments: dict, assistant: str = "cloudy") -> str:
         if not text:
             raise ValueError("日记内容不能为空")
         if diary == "cloudy":
+            existing = db.diary_for_day(_diary_day())
+            if existing:
+                # 一天一篇：今天已经写过了，让他改那一篇（改的时候把要留的一起写上）。
+                raise ValueError(
+                    f"You already have today's entry (#{existing['no']}); there's one entry per day. "
+                    "To add to it or rewrite it, use DwellDiaryEdit with the full new text. "
+                    "Today's entry so far:\n\n" + str(existing.get("body") or ""))
             item = db.diary_add(_diary_day(), text, locked=True, origin="chat",
                                 title=str(arguments.get("title") or ""))
             return json.dumps({"ok": True, "diary": diary, "saved": {"no": item["no"], "date": item["date"]},
@@ -2976,6 +2985,14 @@ def _diary_wake_messages(chat_id: str, now: datetime, budget: int) -> tuple[list
     dropped_earlier = len(earlier) - len(kept)
 
     parts = [head]
+    todays = db.diary_for_day(_diary_day(now))
+    if todays:
+        parts.append(
+            f"You already wrote today's entry (#{todays['no']}). There's one entry per day: if you want to "
+            "add to it or rewrite it, put the whole new version between <entry> and </entry> (it replaces "
+            f"the old one, so keep what you want to keep). If it's fine as it is, write {DIARY_NO_ENTRY}.\n\n"
+            + _diary_entry_text(todays))
+        entries = [entry for entry in entries if entry["id"] != todays["id"]]
     if entries:
         parts.append("Your most recent entries (newest first):\n\n"
                      + "\n\n".join(_diary_entry_text(entry) for entry in entries))
@@ -3077,7 +3094,12 @@ async def _diary_wake_once(force: bool = False) -> dict:
             if not body:
                 db.setting_set("diary_wake_last_status", "skipped")
                 return {"ok": True, "status": "skipped"}
-            entry = db.diary_add(_diary_day(now), body, locked=True, origin="wake")
+            todays = db.diary_for_day(_diary_day(now))
+            if todays:
+                # 一天一篇：今天已经有了，这次写的就是那一篇的新版本。
+                entry = db.diary_edit(todays["id"], body)
+            else:
+                entry = db.diary_add(_diary_day(now), body, locked=True, origin="wake")
             db.setting_set("diary_wake_last_status", "written")
             return {"ok": True, "status": "written", "no": entry["no"], "date": entry["date"]}
         except Exception as exc:
@@ -5732,11 +5754,24 @@ def _reply_format_only_change(old: str, new: str) -> bool:
     )
 
 
+MESSAGES_REACH_PAD = 30
+MESSAGES_REACH_MAX = 6000
+
+
 @app.get("/api/messages", dependencies=authed)
-async def messages_get(chat_id: str = "", limit: int = 400, before: int | None = None, focus: str = ""):
+async def messages_get(chat_id: str = "", limit: int = 400, before: int | None = None, focus: str = "",
+                       reach: str = ""):
+    """reach：往上一直拿到这条（再多带几条前文）。搜索点开很早的一句时一次拿够，不用一页页翻。"""
     if not chat_id:
         chat_id = _get_or_create_current_chat()
-    if focus:
+    if reach:
+        target = db.message_get(reach)
+        if target and target.get("chat_id") == chat_id:
+            gap = db.message_rows_from(chat_id, int(target["rowid"]))
+            if before:
+                gap -= db.message_rows_from(chat_id, int(before))
+            limit = max(limit, min(MESSAGES_REACH_MAX, gap + MESSAGES_REACH_PAD))
+    elif focus:
         target = db.message_get(focus)
         if target and target.get("chat_id") == chat_id:
             # Put the matched message in the returned window so the browser can center it.

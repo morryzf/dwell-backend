@@ -155,9 +155,12 @@ final class API {
     // MARK: - 消息
 
     /// 最近的一页；传 before 就是比这条更早的一页。
-    func messages(chatID: String, limit: Int = 200, before: Int? = nil) async throws -> (msgs: [Message], more: Bool) {
+    /// reach：一路往上拿到这条为止（搜索里点开很早的一句时用）。
+    func messages(chatID: String, limit: Int = 200, before: Int? = nil,
+                  reach: String? = nil) async throws -> (msgs: [Message], more: Bool) {
         var query = ["chat_id": chatID, "limit": String(limit)]
         if let before { query["before"] = String(before) }
+        if let reach { query["reach"] = reach }
         // 只存每间聊天最近的那一页（连着里面的照片），往上翻的不存。
         let json = try await request("GET", "api/messages", query: query, remember: before == nil)
         return Self.messagePage(json)
