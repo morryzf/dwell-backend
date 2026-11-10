@@ -271,6 +271,21 @@ struct ChatView: View {
                             .transition(BubbleEntrance.insertion(isMe: message.kind == .me))
                         }
                     }
+                    if store.hasNewer {
+                        Button {
+                            Task { await store.loadNewer() }
+                        } label: {
+                            HStack(spacing: 6) {
+                                if store.loadingNewer { ProgressView().controlSize(.small) }
+                                Text("更新的消息")
+                            }
+                            .font(.footnote)
+                            .foregroundStyle(Theme.dim)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
+                    }
                     Color.clear.frame(height: 16)
                     if !store.streamingThinking.isEmpty {
                         ThinkingView(text: store.streamingThinking, live: store.streamingText.isEmpty)
@@ -312,7 +327,11 @@ struct ChatView: View {
             // 在聊天记录上任何地方往右拉，侧边栏就跟着手指出来（不用非得从屏幕最边上划）。
             .simultaneousGesture(openDrawerGesture(minimumDistance: 10))
             // 只在最底下多了新消息时才滚到底；往上翻出更早的消息时不能把人拽回去。
-            .onChange(of: store.messages.last?.id) { _, _ in scrollToBottom(proxy) }
+            .onChange(of: store.messages.last?.id) { _, _ in
+                // 看旧消息时换的那一段：别拽到底。
+                if store.holdScroll { store.holdScroll = false; return }
+                scrollToBottom(proxy)
+            }
             // 整页换过（先摆的是存着的那页、换了聊天）：最后一条没变也要重新贴底，
             // 不然懒加载按旧高度算的位置会停在一片空白里。
             .onChange(of: store.pageSwapTick) { _, _ in scrollToBottom(proxy, animated: false) }
@@ -340,7 +359,26 @@ struct ChatView: View {
             }
             // 往上翻了：输入框上面一颗小箭头，点一下回到最新。
             .overlay(alignment: .bottom) {
-                if !atBottom {
+                if store.browsing {
+                    // 在看一段旧消息：一直留着这颗，点了回到平常的聊天。
+                    Button {
+                        Task { await store.backToLatest() }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "chevron.down")
+                            Text("回到最新")
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.text)
+                        .padding(.horizontal, 16)
+                        .frame(height: 38)
+                        .buttonGlass(Capsule())
+                        .frostedOnly { $0.shadow(color: Theme.composerShadow, radius: 9, y: 6) }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 10)
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                } else if !atBottom {
                     Button {
                         scrollToBottom(proxy)
                     } label: {

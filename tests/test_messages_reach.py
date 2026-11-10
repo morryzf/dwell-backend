@@ -1,4 +1,4 @@
-"""搜索里点开很早的一句：一次拿到那句为止，不用一页页往上翻（以前翻 15 页就停了）。"""
+"""搜索里点开很早的一句：只拿它前后各 30 条，中间不拿；往下再一段段接到最新。"""
 
 import os
 import unittest
@@ -27,17 +27,19 @@ class MessagesReachTest(unittest.TestCase):
             if os.path.exists(self.path + suffix):
                 os.remove(self.path + suffix)
 
-    def test_one_request_reaches_the_old_message_with_some_lead_in(self):
-        oldest_loaded = self.client.get("/api/messages", params={"chat_id": self.chat, "limit": 100}).json()["msgs"][0]
+    def test_around_takes_only_the_neighbourhood_and_after_walks_down(self):
         target = self.msgs[50]
-        page = self.client.get("/api/messages", params={
-            "chat_id": self.chat, "limit": 100, "before": oldest_loaded["seq"], "reach": target["id"],
-        }).json()
+        page = self.client.get("/api/messages", params={"chat_id": self.chat, "around": target["id"]}).json()
         ids = [m["id"] for m in page["msgs"]]
-        self.assertIn(target["id"], ids)
-        self.assertEqual(ids[-1], self.msgs[299]["id"])
         self.assertEqual(ids[0], self.msgs[20]["id"])
+        self.assertEqual(ids[-1], self.msgs[80]["id"])
         self.assertTrue(page["more"])
+        self.assertTrue(page["newer"])
+        down = self.client.get("/api/messages", params={
+            "chat_id": self.chat, "after": page["msgs"][-1]["seq"], "limit": 400}).json()
+        self.assertEqual(down["msgs"][0]["id"], self.msgs[81]["id"])
+        self.assertEqual(down["msgs"][-1]["id"], self.msgs[399]["id"])
+        self.assertFalse(down["newer"])
 
 
 if __name__ == "__main__":

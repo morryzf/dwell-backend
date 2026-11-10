@@ -5754,29 +5754,29 @@ def _reply_format_only_change(old: str, new: str) -> bool:
     )
 
 
-MESSAGES_REACH_PAD = 30
+MESSAGES_AROUND_PAD = 30
 MESSAGES_REACH_MAX = 6000
 
 
 @app.get("/api/messages", dependencies=authed)
 async def messages_get(chat_id: str = "", limit: int = 400, before: int | None = None, focus: str = "",
-                       reach: str = ""):
-    """reach：往上一直拿到这条（再多带几条前文）。搜索点开很早的一句时一次拿够，不用一页页翻。"""
+                       around: str = "", after: int | None = None):
+    """around：只拿这条和前后各 30 条，中间不拿（搜索里点开很早的一句）；after：从这一段往下接。"""
     if not chat_id:
         chat_id = _get_or_create_current_chat()
-    if reach:
-        target = db.message_get(reach)
-        if target and target.get("chat_id") == chat_id:
-            gap = db.message_rows_from(chat_id, int(target["rowid"]))
-            if before:
-                gap -= db.message_rows_from(chat_id, int(before))
-            limit = max(limit, min(MESSAGES_REACH_MAX, gap + MESSAGES_REACH_PAD))
+    around_rowid = None
+    if around:
+        target = db.message_get(around)
+        if not target or target.get("chat_id") != chat_id:
+            raise HTTPException(404, "没有这一句")
+        around_rowid = int(target["rowid"])
     elif focus:
         target = db.message_get(focus)
         if target and target.get("chat_id") == chat_id:
             # Put the matched message in the returned window so the browser can center it.
             before = int(target["rowid"]) + 1
-    data = db.message_ui_list(chat_id, limit, before)
+    data = db.message_ui_list(chat_id, limit, before, after=after, around=around_rowid,
+                              pad=MESSAGES_AROUND_PAD)
     if db.chat_split_replies_get(chat_id):
         for message in data["msgs"]:
             if message["kind"] == "gu" and message.get("display_split"):

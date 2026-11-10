@@ -161,9 +161,47 @@ final class ChatStore: ObservableObject {
         }
     }
 
+    // MARK: - 看一段旧消息
+
+    /// 搜索里点开很早的一句：聊天页暂时只摆它附近那一段，跟最新的接不上。这时新消息不往下面插。
+    @Published private(set) var browsing = false
+    /// 这一段下面还有（还没接到最新）。
+    @Published private(set) var hasNewer = false
+    @Published private(set) var loadingNewer = false
+    /// 这一下换了消息，但别把聊天页拽到底（她在看旧消息）。
+    var holdScroll = false
+
+    /// 从这一段往下接 100 条；接到最新了就回到平常的聊天。
+    func loadNewer() async {
+        guard browsing, hasNewer, !loadingNewer, let last = messages.last(where: { $0.seq > 0 })?.seq else { return }
+        loadingNewer = true
+        defer { loadingNewer = false }
+        do {
+            let chat = chatID
+            let page = try await api.messageWindow(chatID: chat, after: last)
+            guard chat == chatID else { return }
+            holdScroll = true
+            messages += page.msgs.filter { !$0.isEmpty }
+            hasNewer = page.newer
+            if !page.newer { browsing = false }
+        } catch { handle(error) }
+    }
+
+    /// 回到最新：扔掉这一段，整页换成最近的。
+    func backToLatest() async {
+        guard browsing else { return }
+        browsing = false
+        hasNewer = false
+        messages = []
+        loadedChatID = ""
+        try? await reloadMessages()
+        await syncReplying()
+    }
+
     /// 重拉最近一页。之前往上翻出来的更早消息留着，不然一轮回复结束，翻好的历史就没了。
     func reloadMessages() async throws {
-        guard !chatID.isEmpty else { return }
+        // 在看一段旧消息：先不动她眼前的，回到最新时再拉。
+        guard !chatID.isEmpty, !browsing else { return }
         let chat = chatID
         let page = try await api.messages(chatID: chat)
         guard chat == chatID else { return }
@@ -289,6 +327,8 @@ final class ChatStore: ObservableObject {
     func send(_ raw: String, images: [PendingImage] = [], files: [PendingFile] = []) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !images.isEmpty || !files.isEmpty, !chatID.isEmpty else { return }
+        // 在看旧消息时发：先回到最新，发出去的话接在最新的后面。
+        if browsing { await backToLatest() }
         // 先在本地放一条，echo 回来再换成真的。
         let shown = text.isEmpty && images.isEmpty
             ? "（发来了文件：" + files.map(\.name).joined(separator: "、") + "）" : text
@@ -468,19 +508,19 @@ final class ChatStore: ObservableObject {
     /// 切到那一间，往上翻到那句为止（最多翻十几页），再让聊天页把它滚到正中。
     func open(chat chatID: String, message messageID: String) async {
         if chatID != self.chatID { await switchChat(chatID) }
-        // 以前一页页往上翻，翻到第 15 页就停，早一点的那句就到不了。现在一次拿到那句为止。
-        if !messages.contains(where: { $0.id == messageID }), hasMore,
-           let oldest = messages.first(where: { $0.seq > 0 })?.seq {
-            loadingOlder = true
-            defer { loadingOlder = false }
+        // 不在手上的那句：只拿它前后各 30 条，中间不拿。聊天页暂时只摆这一段，跟最新的接不上。
+        if !messages.contains(where: { $0.id == messageID }) {
             do {
                 let chat = self.chatID
-                let page = try await api.messages(chatID: chat, limit: 100, before: oldest, reach: messageID)
-                if chat == self.chatID {
-                    messages = page.msgs.filter { !$0.isEmpty } + messages
-                    hasMore = page.more
-                }
-            } catch { handle(error) }
+                let page = try await api.messageWindow(chatID: chat, around: messageID)
+                guard chat == self.chatID else { return }
+                holdScroll = true
+                shown = [:]
+                messages = page.msgs.filter { !$0.isEmpty }
+                hasMore = page.more
+                hasNewer = page.newer
+                browsing = page.newer
+            } catch {}
         }
         guard messages.contains(where: { $0.id == messageID }) else {
             flash("没找到这一句，可能已经删掉了")
@@ -528,6 +568,8 @@ final class ChatStore: ObservableObject {
     }
 
     func switchChat(_ id: String) async {
+        browsing = false
+        hasNewer = false
         do {
             try await api.switchChat(id)
             await refresh()
@@ -618,6 +660,10 @@ final class ChatStore: ObservableObject {
     }
 
     private func apply(_ event: [String: Any]) async {
+        // 在看一段旧消息：新来的不往这一段下面插，回到最新时会一起拉回来。
+        if browsing, ["echo", "stream_event", "assistant_split", "assistant"].contains(event["type"] as? String ?? "") {
+            return
+        }
         switch event["type"] as? String {
         case "echo":
             messages.removeAll { $0.isLocal }
