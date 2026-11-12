@@ -645,6 +645,15 @@ def init_db():
                 "INSERT INTO settings (key,value) VALUES (?,?)",
                 (cache_scope_key, "1"),
             )
+        # 失败现场：出错时模型原样回了什么、哪里读不懂、完整的报错。普通日志只记一句话，
+        # 这里要能把问题找出来，所以会有聊天原文——只留最近 30 次、14 天。
+        cx.execute(
+            """CREATE TABLE IF NOT EXISTS failure_reports (
+                   id TEXT PRIMARY KEY, made INTEGER NOT NULL, report_json TEXT NOT NULL)"""
+        )
+        log_cols = {r["name"] for r in cx.execute("PRAGMA table_info(system_logs)").fetchall()}
+        if "report_id" not in log_cols:
+            cx.execute("ALTER TABLE system_logs ADD COLUMN report_id TEXT NOT NULL DEFAULT ''")
         # Cloudy 的日记本：新写的锁着，旧的时间线日记默认开着。no 是给他认的编号（给密码时用）。
         diary_cols = {r["name"] for r in cx.execute("PRAGMA table_info(diary)").fetchall()}
         for column, ddl in (("locked", "INTEGER NOT NULL DEFAULT 0"), ("no", "INTEGER"),
@@ -4155,6 +4164,58 @@ def system_log_finish(
         )
 
 
+FAILURE_REPORT_KEEP = 30
+FAILURE_REPORT_DAYS = 14
+
+
+def failure_report_add(report: dict) -> str:
+    report_id = new_id()
+    now = int(time.time())
+    with conn() as cx:
+        cx.execute("INSERT INTO failure_reports (id,made,report_json) VALUES (?,?,?)",
+                   (report_id, now, json.dumps(report, ensure_ascii=False)))
+        cx.execute("DELETE FROM failure_reports WHERE made<?", (now - FAILURE_REPORT_DAYS * 86400,))
+        cx.execute(
+            "DELETE FROM failure_reports WHERE id IN (SELECT id FROM failure_reports "
+            "ORDER BY made DESC, rowid DESC LIMIT -1 OFFSET ?)", (FAILURE_REPORT_KEEP,))
+    return report_id
+
+
+def failure_report_get(report_id: str) -> dict | None:
+    with conn() as cx:
+        row = cx.execute("SELECT * FROM failure_reports WHERE id=?", (report_id,)).fetchone()
+    if not row:
+        return None
+    try:
+        report = json.loads(row["report_json"])
+    except (TypeError, json.JSONDecodeError):
+        report = {}
+    return {"id": row["id"], "made": row["made"], **(report if isinstance(report, dict) else {})}
+
+
+def system_log_attach_report(log_id: str, report_id: str) -> None:
+    with conn() as cx:
+        cx.execute("UPDATE system_logs SET report_id=? WHERE id=?", (report_id, log_id))
+
+
+def system_log_record(category: str, action: str, status: str, *, chat_id: str = "",
+                      provider: str = "", model_id: str = "", detail: str = "",
+                      report_id: str = "", duration_ms: int | None = None) -> str:
+    """一条已经结束的记录（任务里面某一步失败了，外层任务照样算成功的那种）。"""
+    log_id = new_id()
+    now = int(time.time())
+    with conn() as cx:
+        _system_log_prune(cx)
+        cx.execute(
+            """INSERT INTO system_logs (id,category,action,status,chat_id,provider,model_id,
+               duration_ms,detail,made,finished_at,report_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (log_id, str(category)[:40], str(action)[:120], str(status)[:30], str(chat_id)[:80],
+             str(provider)[:120], str(model_id)[:200], duration_ms,
+             str(detail).replace("\r", " ").replace("\n", " ")[:500], now, now, report_id),
+        )
+    return log_id
+
+
 def system_log_list(
     *, category: str = "", status: str = "", limit: int = 300
 ) -> list[dict]:
@@ -4172,7 +4233,7 @@ def system_log_list(
         _system_log_prune(cx)
         rows = cx.execute(
             """SELECT id,category,action,status,chat_id,message_id,provider,model_id,
-                      duration_ms,status_code,detail,made,finished_at
+                      duration_ms,status_code,detail,made,finished_at,report_id
                FROM system_logs"""
             + where + " ORDER BY made DESC,rowid DESC LIMIT ?",
             values,

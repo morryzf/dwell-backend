@@ -4057,6 +4057,9 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   .syslog-state.error { color:#b84b4b; background:rgba(184,75,75,.12); }
   .syslog-meta,.syslog-detail { color:var(--dim); font-size:12px; line-height:1.55; overflow-wrap:anywhere; }
   .syslog-detail { margin-top:6px; color:#b84b4b; }
+  .syslog-report { margin:8px 0 0; padding:10px; max-height:360px; overflow:auto; white-space:pre-wrap;
+    overflow-wrap:anywhere; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--text);
+    background:rgba(0,0,0,.04); border-radius:10px; }
 
 
   /* User-tunable glass surfaces. Defaults preserve the existing Dwell material. */
@@ -12427,7 +12430,8 @@ function systemLogAction(item) {
   const names = {
     chat_reply:'消息回复', regenerate:'重新生成回复', watch_reply:'观影消息',
     watch_proactive:'观影主动回复', summary_refresh:'更新摘要',
-    memory_card_generation:'整理记忆（推荐书签）', push_delivery:'手机通知'
+    memory_card_generation:'整理记忆（推荐书签）', push_delivery:'手机通知',
+    bookmark_suggestion:'推荐书签', bookmark_label:'书签概括', diary_wake:'写日记'
   };
   return names[item.action] || item.action || '系统请求';
 }
@@ -12455,9 +12459,12 @@ async function loadSystemLogs() {
         (item.status === 'error' ? 'error' : '') + '">' + instructionEsc(stateName) +
         '</span></div><div class="syslog-meta">' + bits.map(instructionEsc).join(' · ') +
         '</div>' + (item.detail ? '<div class="syslog-detail">' +
-        instructionEsc(item.detail) + '</div>' : '') + '</article>';
+        instructionEsc(item.detail) + '</div>' : '') +
+        (item.report_id ? '<button type="button" class="mc-btn quiet" data-failure-report="' +
+          instructionEsc(item.report_id) + '">看现场</button><pre class="syslog-report" hidden></pre>' : '') +
+        '</article>';
     }).join('');
-    body.innerHTML = '<div class="gnote">仅记录请求信息，不保存聊天正文、图片、密钥或请求头。自动保留最近 7 天，最多 1000 条。</div>' +
+    body.innerHTML = '<div class="gnote">日志只记请求信息，自动保留最近 7 天，最多 1000 条。出错时另存一份现场（会有聊天原文和模型的原样回复，不存密钥），只留最近 30 次、14 天。</div>' +
       '<div class="syslog-toolbar"><select class="ap-in" id="systemLogCategory">' +
       '<option value="">全部类型</option><option value="api_request">界面操作</option>' +
       '<option value="model_request">消息请求</option><option value="memory_task">记忆任务</option>' +
@@ -12470,6 +12477,26 @@ async function loadSystemLogs() {
     const category = document.getElementById('systemLogCategory');
     const status = document.getElementById('systemLogStatus');
     category.value = systemLogCategory; status.value = systemLogStatus;
+    // 失败现场：整段纯文字，展开后点「复制」发给 Claude 查。
+    body.querySelectorAll('[data-failure-report]').forEach(button => button.onclick = async () => {
+      const pre = button.nextElementSibling;
+      if (!pre.hidden) { pre.hidden = true; button.textContent = '看现场'; return; }
+      button.disabled = true;
+      try {
+        const res = await fetch('api/failure-reports/' + encodeURIComponent(button.dataset.failureReport), {cache:'no-store'});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '没读到现场');
+        pre.textContent = data.text || '';
+        pre.hidden = false;
+        button.textContent = '复制现场';
+        button.onclick = async () => {
+          try { await navigator.clipboard.writeText(pre.textContent); button.textContent = '已复制'; }
+          catch (e) { button.textContent = '复制没成功，长按下面的文字复制'; }
+        };
+      } catch (error) {
+        pre.textContent = error.message; pre.hidden = false;
+      } finally { button.disabled = false; }
+    });
     category.onchange = () => { systemLogCategory = category.value; loadSystemLogs(); };
     status.onchange = () => { systemLogStatus = status.value; loadSystemLogs(); };
   } catch (error) {

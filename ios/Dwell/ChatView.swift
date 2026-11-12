@@ -408,7 +408,15 @@ struct ChatView: View {
             Task {
                 await store.loadOlder()
                 // 新的一页插在上面，把原来最上面那条留在原位，免得画面跳。
-                if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                // 新插进来的那几条要等摆上、量过高度才对得准：当场对一下，摆好后再补两下。
+                guard let anchor else { return }
+                var still = Transaction()
+                still.disablesAnimations = true
+                withTransaction(still) { proxy.scrollTo(anchor, anchor: .top) }
+                for wait in [30, 150] {
+                    try? await Task.sleep(for: .milliseconds(wait))
+                    withTransaction(still) { proxy.scrollTo(anchor, anchor: .top) }
+                }
             }
         } label: {
             HStack(spacing: 6) {
@@ -999,8 +1007,21 @@ struct MessageRow: View {
     @State private var showUsage = false
     /// 正在给他这条挑表情。
     @State private var reacting = false
+    @State private var confirmRegenerate = false
 
     var body: some View {
+        rowBody
+            // 重新生成会换掉这一轮回复：先问一句（旧的那版会留在版本记录里）。
+            .confirmationDialog("重新生成这条回复？", isPresented: $confirmRegenerate, titleVisibility: .visible) {
+                Button("重新生成") { Task { await store.regenerate(message) } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("现在这版会留在「查看版本」里。")
+            }
+    }
+
+    @ViewBuilder
+    private var rowBody: some View {
         switch message.kind {
         case .system:
             Text(message.text)
@@ -1115,21 +1136,19 @@ struct MessageRow: View {
 
     private func actions(isMe: Bool) -> some View {
         HStack(spacing: 14) {
-            iconButton("pencil", "编辑消息") { onEdit(message) }
             if !isMe {
                 let playing = voice.currentID == message.id && voice.state != .idle
                 iconButton(playing ? "stop.fill" : "speaker.wave.2", playing ? "停止朗读" : "播放整轮回复") {
                     withAnimation(.spring(duration: 0.35, bounce: 0.15)) { voice.readAloud(message.id) }
                 }
-                iconButton("arrow.clockwise", "重新生成") {
-                    Task { await store.regenerate(message) }
-                }
-                .disabled(store.isReplying)
+                iconButton("arrow.clockwise", "重新生成") { confirmRegenerate = true }
+                    .disabled(store.isReplying)
                 iconButton("face.smiling", "贴个表情") { reacting = true }
             }
             iconButton("arrowshape.turn.up.left", "引用这条") { startQuote() }
             iconButton("trash", "删除消息") { onDelete(message) }
             Menu {
+                Button { onEdit(message) } label: { Label("编辑", systemImage: "pencil") }
                 Button { onSelect() } label: { Label("选择消息", systemImage: "checkmark.circle") }
                 Button {
                     Task { await quote() }
@@ -1214,7 +1233,11 @@ struct MessageRow: View {
         if !message.isLocal {
             if message.kind == .gu {
                 Button {
-                    Task { await store.regenerate(message) }
+                    // 等长按菜单收起来再问，不然弹窗会被吞掉。
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(350))
+                        confirmRegenerate = true
+                    }
                 } label: {
                     Label("重新生成", systemImage: "arrow.clockwise")
                 }

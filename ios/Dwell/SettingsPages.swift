@@ -544,9 +544,12 @@ struct SystemLogPage: View {
         let statusCode: Int?
         let detail: String
         let made: Date
+        /// 出错时另存的现场（模型原样回了什么、坏在哪、调用栈）。
+        let reportID: String
 
         init(json: [String: Any]) {
             id = json["id"] as? String ?? UUID().uuidString
+            reportID = json["report_id"] as? String ?? ""
             category = json["category"] as? String ?? ""
             action = json["action"] as? String ?? ""
             status = json["status"] as? String ?? ""
@@ -577,7 +580,7 @@ struct SystemLogPage: View {
                     ForEach(Self.statuses, id: \.0) { Text($0.1).tag($0.0) }
                 }
             } footer: {
-                Text("只记时间、耗时和结果，不存聊天内容；保留 7 天。")
+                Text("只记时间、耗时和结果；保留 7 天。出错时另存一份现场（会有聊天原文），留最近 30 次、14 天，点「看现场」复制给 Claude。")
             }
             Section {
                 if items.isEmpty && loaded {
@@ -604,6 +607,15 @@ struct SystemLogPage: View {
                         }
                         if !item.detail.isEmpty {
                             Text(item.detail).font(.system(size: 12.5)).foregroundStyle(Theme.text).textSelection(.enabled)
+                        }
+                        if !item.reportID.isEmpty {
+                            NavigationLink {
+                                FailureReportPage(reportID: item.reportID)
+                            } label: {
+                                Text("看现场")
+                                    .font(.system(size: 12.5, weight: .medium))
+                                    .foregroundStyle(Theme.accent)
+                            }
                         }
                     }
                     .foregroundStyle(Theme.text)
@@ -638,6 +650,51 @@ struct SystemLogPage: View {
             items = (json["items"] as? [[String: Any]] ?? []).map(Entry.init(json:))
         }
         loaded = true
+    }
+}
+
+/// 一次失败的现场：整段纯文字，复制下来直接发给 Claude 查。
+struct FailureReportPage: View {
+    let reportID: String
+    @State private var text = ""
+    @State private var failed = ""
+    @State private var copied = false
+
+    var body: some View {
+        ScrollView {
+            if !failed.isEmpty {
+                Text(failed).foregroundStyle(Theme.dim).padding()
+            } else if text.isEmpty {
+                ProgressView().padding(.top, 40)
+            } else {
+                Text(text)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(Theme.text)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            }
+        }
+        .background(PaperBackground())
+        .navigationTitle("失败现场")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(copied ? "已复制" : "复制") {
+                    UIPasteboard.general.string = text
+                    copied = true
+                }
+                .disabled(text.isEmpty)
+            }
+        }
+        .task {
+            do {
+                let json = try await API.shared.request("GET", "api/failure-reports/\(reportID)")
+                text = json["text"] as? String ?? ""
+            } catch {
+                failed = error.localizedDescription
+            }
+        }
     }
 }
 
