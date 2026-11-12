@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from . import auth, db, file_make, file_text, focus_log, home_mcp, memory_mcp, provider_secrets, push_service, reply_marks, shop, sigillo, study, subscription_usage
 from app.pet_assets import ensure_pet_assets
 from app.agent_sdk_client import MEMORY_CARD_KEY, PROMPT_TAIL_KEY, clear_state as clear_agent_session
+from app import agent_sdk_client
 from app.llm_client import prompt_cache_enabled, reply_language_ok, stream_chat
 from app.mcp_client import McpConnectionError, call_tool as mcp_call_tool, list_tools as mcp_list_tools
 from app.web_tools import WebToolError, web_fetch, web_search
@@ -5941,6 +5942,25 @@ async def memory_badge_seen(request: Request):
         raise HTTPException(404, "chat 不存在")
     db.setting_set(MEMORY_DRAFTS_SEEN_PREFIX + chat_id, str(int(time.time())))
     return {"ok": True, "chat_id": chat_id, "unseen": 0}
+
+
+@app.get("/api/chats/{chat_id}/memory-in-context", dependencies=authed)
+async def memory_in_context(chat_id: str):
+    """他此刻上下文里还有哪几张卡（挑卡时打个记号，免得重复让他读）。
+
+    只有走 Claude Code 的聊天才「记着」：那边整段会话都在，递过的卡一直在里面；
+    换了模型、卡池一动就重开会话，那就什么都不在了。别的通道每轮只带那一次的卡，过了这一轮就不在了。
+    """
+    if not db.chat_get(chat_id):
+        raise HTTPException(404, "chat 不存在")
+    selection = db.chat_model_get(chat_id)
+    provider = db.provider_get(selection.get("provider_id") or "") or {}
+    if provider.get("provider_type") != "claude_agent_sdk":
+        return {"ok": True, "tracked": False, "ids": []}
+    state = agent_sdk_client.load_state(f"dwell-chat:{chat_id}") or {}
+    fresh = (state.get("sid") and state.get("model") == selection.get("model_id")
+             and state.get("cards", "") == agent_sdk_client.memory_pool_version())
+    return {"ok": True, "tracked": True, "ids": list(state.get("seen_cards") or []) if fresh else []}
 
 
 @app.get("/api/chats/{chat_id}/memory-cards", dependencies=authed)

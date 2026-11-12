@@ -8,6 +8,9 @@ struct MemoryPickSheet: View {
     @StateObject private var memory: MemoryStore
     @State private var searchTask: Task<Void, Never>?
     @State private var full = false
+    /// 他此刻上下文里还有的卡（走 Claude Code 的聊天才有）：左上角一枚书签，免得重复让他读。
+    @State private var inContext: Set<String> = []
+    @State private var expanded: Set<String> = []
 
     init(chatID: String) {
         _memory = StateObject(wrappedValue: MemoryStore(chatID: chatID))
@@ -29,14 +32,28 @@ struct MemoryPickSheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     filters
-                    if memory.cards.isEmpty && !memory.loadingCards {
+                    // 已经挑上的一直钉在最上面：再搜一次也看得到，搜出来的接在下面。
+                    if !chat.pickedCards.isEmpty {
+                        Text("已经挑的")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.dim)
+                            .padding(.top, 4)
+                        ForEach(chat.pickedCards) { card in row(card) }
+                        if !results.isEmpty {
+                            Text(memory.query.isEmpty ? "其他记忆" : "搜到的")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.dim)
+                                .padding(.top, 8)
+                        }
+                    }
+                    if results.isEmpty && chat.pickedCards.isEmpty && !memory.loadingCards {
                         Text(memory.query.isEmpty ? "还没有记忆卡" : "没有找到")
                             .font(.system(size: 14))
                             .foregroundStyle(Theme.dim)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 40)
                     }
-                    ForEach(memory.cards) { card in
+                    ForEach(results) { card in
                         row(card)
                             .onAppear {
                                 if card.id == memory.cards.last?.id, memory.hasMoreCards {
@@ -81,7 +98,9 @@ struct MemoryPickSheet: View {
         .task {
             // 只挑还在用的卡：归档的不列。
             memory.filter = "all"
+            async let seen: Void = loadInContext()
             await memory.loadCards(reset: true)
+            await seen
         }
         .onChange(of: memory.query) { _, _ in
             searchTask?.cancel()
@@ -133,6 +152,17 @@ struct MemoryPickSheet: View {
         .padding(.top, 6)
     }
 
+    /// 搜出来的，去掉已经钉在上面的那几张。
+    private var results: [MemoryCard] {
+        let picked = Set(chat.pickedCards.map(\.id))
+        return memory.cards.filter { !picked.contains($0.id) }
+    }
+
+    private func loadInContext() async {
+        guard let json = try? await API.shared.request("GET", "api/chats/\(memory.chatID)/memory-in-context") else { return }
+        inContext = Set(json["ids"] as? [String] ?? [])
+    }
+
     private func pickThread(_ name: String) {
         memory.thread = name
         Task { await memory.loadCards(reset: true) }
@@ -140,25 +170,22 @@ struct MemoryPickSheet: View {
 
     private func row(_ card: MemoryCard) -> some View {
         let on = chat.isPicked(card)
-        return Button {
-            withAnimation(.easeOut(duration: 0.18)) {
-                let ok = chat.togglePick(card)
-                full = !ok
-            }
-        } label: {
+        let open = expanded.contains(card.id)
+        let seen = inContext.contains(card.id)
+        return VStack(alignment: .trailing, spacing: 2) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     // 书签：上面概括，下面原话；卡片照旧是正文。
                     Text(card.isBookmark ? BookmarkCardView.title(card) : card.content)
                         .font(.system(size: 14.5))
                         .foregroundStyle(Theme.text)
-                        .lineLimit(3)
+                        .lineLimit(open ? nil : 3)
                         .multilineTextAlignment(.leading)
                     if card.isBookmark {
-                        Text(card.lines.map(\.content).joined(separator: " / "))
+                        Text(card.lines.map(\.content).joined(separator: open ? "\n" : " / "))
                             .font(.system(size: 12.5))
                             .foregroundStyle(Theme.dim)
-                            .lineLimit(2)
+                            .lineLimit(open ? nil : 2)
                         Text("书签")
                             .font(.system(size: 11.5))
                             .foregroundStyle(Theme.accent)
@@ -173,16 +200,49 @@ struct MemoryPickSheet: View {
                     .font(.system(size: 20))
                     .foregroundStyle(on ? Theme.send : Theme.dim.opacity(0.5))
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(on ? Theme.accent.opacity(0.16) : MemoryStyle.card))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(on ? Theme.accent.opacity(0.5) : MemoryStyle.border, lineWidth: 1))
-            .contentShape(Rectangle())
+            // 右下角：点开看全文，再点收起。
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    if open { expanded.remove(card.id) } else { expanded.insert(card.id) }
+                }
+            } label: {
+                Image(systemName: open ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.dim)
+                    .frame(width: 32, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(open ? "收起" : "展开全文")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(on ? "不带这张" : "带上这张")
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(on ? Theme.accent.opacity(0.16) : MemoryStyle.card))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .stroke(on ? Theme.accent.opacity(0.5) : MemoryStyle.border, lineWidth: 1))
+        // 他上下文里还有这张：左上角一枚书签。
+        .overlay(alignment: .topLeading) {
+            if seen {
+                Image(systemName: "bookmark.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.accent)
+                    .offset(x: 10, y: -4)
+                    .accessibilityLabel("他还记得这张")
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeOut(duration: 0.18)) {
+                let ok = chat.togglePick(card)
+                full = !ok
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(on ? "点一下不带这张" : "点一下带上这张")
     }
 }
 
