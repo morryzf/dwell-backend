@@ -135,7 +135,7 @@ class MemoryChatIntegrationTest(unittest.TestCase):
         self.assertIn('"memory_task", "summary_refresh"', self.source)
         self.assertIn('"memory_task", "memory_card_generation"', self.source)
         self.assertIn("系统日志", self.ui_source)
-        self.assertIn("不保存聊天正文、图片、密钥或请求头", self.ui_source)
+        self.assertIn("出错时另存一份现场（会有聊天原文和模型的原样回复，不存密钥）", self.ui_source)
 
     def test_generation_prompts_require_cloudys_first_person(self):
         self.assertIn("你在整理的是你自己的记忆", self.source)

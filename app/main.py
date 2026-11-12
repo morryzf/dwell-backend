@@ -15,6 +15,7 @@ import re
 import shutil
 import tempfile
 import time
+import traceback
 import uuid
 from collections import Counter
 from datetime import datetime, timedelta
@@ -1088,14 +1089,37 @@ def _memory_card_json(text: str) -> dict:
     return data
 
 
+class MemoryFormatError(ValueError):
+    """模型两次都没交回读得懂的 JSON。带着两次的原文和读到哪里坏了，失败现场要用。"""
+
+    def __init__(self, message: str, **facts):
+        super().__init__(message)
+        self.facts = facts
+
+
+def _json_error_facts(text: str, exc: Exception) -> dict:
+    """读 JSON 时坏在哪：第几行第几个字、缺了什么，连同那附近的原文。"""
+    facts = {"error": f"{type(exc).__name__}: {exc}"}
+    if isinstance(exc, json.JSONDecodeError):
+        # 位置是对去掉代码块、截到第一个 { 之后那一段算的，对回原文。
+        start = text.find("{")
+        offset = (start if start >= 0 else 0) + exc.pos
+        facts.update(line=exc.lineno, column=exc.colno, position=offset,
+                     near=text[max(0, offset - 120):offset] + "⟦这里⟧" + text[offset:offset + 120])
+    return facts
+
+
 async def _memory_json_completion(
     provider: dict, model_id: str, system: str, user: str
 ) -> dict:
     """读取模型 JSON；格式偶尔损坏时只修复格式并重试解析一次。"""
+    started = time.perf_counter()
     result = await _memory_completion(provider, model_id, system, user)
+    first_seconds = round(time.perf_counter() - started, 1)
     try:
         return _memory_card_json(result)
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError) as first_exc:
+        first_error = _json_error_facts(result, first_exc)
         repaired = await _memory_completion(
             provider,
             model_id,
@@ -1107,7 +1131,15 @@ async def _memory_json_completion(
         try:
             return _memory_card_json(repaired)
         except (ValueError, json.JSONDecodeError) as exc:
-            raise ValueError("记忆整理模型连续两次返回了无法读取的格式") from exc
+            raise MemoryFormatError(
+                "记忆整理模型连续两次返回了无法读取的格式",
+                provider=provider.get("name") or provider.get("id") or "", model=model_id,
+                sent_tokens=study.estimate_tokens(system) + study.estimate_tokens(user),
+                sent_chars=len(system) + len(user), first_seconds=first_seconds,
+                total_seconds=round(time.perf_counter() - started, 1),
+                first_reply=result, first_error=first_error,
+                repaired_reply=repaired, repaired_error=_json_error_facts(repaired, exc),
+            ) from exc
 
 
 def _memory_drop_note(drops: dict[str, list[str]], unit: str = "张卡") -> str:
@@ -1381,6 +1413,8 @@ async def _stage_memory_card_suggestions(
         )
     except Exception as exc:
         db.memory_card_state_set(chat_id, "error", str(exc), generated=True, note="")
+        _log_failure("memory_card_generation", exc, chat_id=chat_id, provider=provider, model_id=model_id,
+                     segment=f"{segment.get('start_rowid')}–{segment.get('end_rowid')}")
 
 
 # 整理模型交出什么：bookmarks（圈原话、推荐成书签，默认）或 cards（写卡，原来那套）。
@@ -1496,6 +1530,8 @@ async def _stage_bookmark_suggestions(
         )
     except Exception as exc:
         db.memory_card_state_set(chat_id, "error", str(exc), generated=True, note="")
+        _log_failure("bookmark_suggestion", exc, chat_id=chat_id, provider=provider, model_id=model_id,
+                     segment=f"{segment.get('start_rowid')}–{segment.get('end_rowid')}")
 
 
 async def _memory_related_cards(chat_id: str, transcript: str) -> list[dict]:
@@ -3106,6 +3142,7 @@ async def _diary_wake_once(force: bool = False) -> dict:
         except Exception as exc:
             db.setting_set("diary_wake_last_status", "error")
             db.setting_set("diary_wake_last_error", str(exc)[:500])
+            _log_failure("diary_wake", exc, chat_id=chat_id, model_id=db.chat_model_get(chat_id).get("model_id") or "")
             return {"ok": False, "status": "error", "detail": str(exc)[:500]}
 
 
@@ -3187,8 +3224,89 @@ def _finish_system_log(
             status_code=status_code,
             detail=_safe_log_detail(detail),
         )
+        # 出错时把现场另存一份：一句话的 detail 不够找问题。
+        if status == "error" and isinstance(detail, BaseException):
+            db.system_log_attach_report(log_id, _failure_report("", detail))
     except Exception:
         pass
+
+
+# 失败现场里一大段原文只留头尾：中间往往是长长的正文，坏的地方多在开头（多了解释）或结尾（截断）。
+FAILURE_TEXT_HEAD = 6000
+FAILURE_TEXT_TAIL = 3000
+
+
+def _failure_clip(text: object) -> str:
+    text = str(text or "")
+    if len(text) <= FAILURE_TEXT_HEAD + FAILURE_TEXT_TAIL:
+        return text
+    return (text[:FAILURE_TEXT_HEAD] + f"\n……（中间省略 {len(text) - FAILURE_TEXT_HEAD - FAILURE_TEXT_TAIL} 字）……\n"
+            + text[-FAILURE_TEXT_TAIL:])
+
+
+def _scrub_secrets(text: str) -> str:
+    return re.sub(r"(?i)(authorization|bearer|api[_ -]?key|token)(\s*[:=]?\s*)[A-Za-z0-9._\-]{12,}",
+                  r"\1\2[已隐藏]", str(text or ""))
+
+
+def _failure_report(task: str, exc: BaseException, **context) -> str:
+    """把一次失败的现场存下来：哪个任务、什么情况下、报的什么错、完整的调用栈；
+    模型格式坏了的，再带上两次的原文和坏在哪里。返回现场的 id；存不下就是空串。"""
+    try:
+        facts = dict(getattr(exc, "facts", {}) or {})
+        for key in ("first_reply", "repaired_reply"):
+            if key in facts:
+                facts[key] = _failure_clip(facts[key])
+        report = {
+            "task": task,
+            "error": f"{type(exc).__name__}: {exc}",
+            "context": {k: v for k, v in context.items() if v not in (None, "")},
+            "facts": facts,
+            "traceback": _scrub_secrets("".join(traceback.format_exception(exc))[-12000:]),
+        }
+        return db.failure_report_add(report)
+    except Exception:
+        return ""
+
+
+def _log_failure(task: str, exc: BaseException, *, chat_id: str = "", provider: dict | None = None,
+                 model_id: str = "", **context) -> None:
+    """任务里面某一步失败、外层却照样算完成的（比如出卡时某一段没读懂）：单独记一条出错日志，挂上现场。"""
+    try:
+        provider_name = str((provider or {}).get("name") or (provider or {}).get("id") or "")
+        report_id = _failure_report(task, exc, chat_id=chat_id, provider=provider_name,
+                                    model=model_id, **context)
+        db.system_log_record("memory_task", task, "error", chat_id=chat_id, provider=provider_name,
+                             model_id=model_id, detail=_safe_log_detail(exc), report_id=report_id)
+    except Exception:
+        pass
+
+
+def _failure_text(report: dict) -> str:
+    """现场排成一段纯文字，复制下来就能发过来。"""
+    lines = [f"失败现场 {report.get('id', '')}",
+             "时间：" + datetime.fromtimestamp(int(report.get("made") or 0), db.CN_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+             f"任务：{report.get('task') or '（见日志）'}",
+             f"报错：{report.get('error', '')}"]
+    for key, value in (report.get("context") or {}).items():
+        lines.append(f"{key}：{value}")
+    facts = report.get("facts") or {}
+    for key in ("provider", "model", "sent_tokens", "sent_chars", "first_seconds", "total_seconds"):
+        if key in facts:
+            lines.append(f"{key}：{facts[key]}")
+    for title, error_key, reply_key in (("第一次", "first_error", "first_reply"),
+                                        ("修复那一次", "repaired_error", "repaired_reply")):
+        if error_key in facts or reply_key in facts:
+            lines.append(f"\n—— {title} ——")
+            error = facts.get(error_key) or {}
+            for key in ("error", "line", "column", "position"):
+                if key in error:
+                    lines.append(f"{key}：{error[key]}")
+            if error.get("near"):
+                lines.append("坏的地方附近：\n" + error["near"])
+            lines.append("模型原样返回：\n" + str(facts.get(reply_key) or ""))
+    lines.append("\n—— 调用栈 ——\n" + str(report.get("traceback") or ""))
+    return "\n".join(lines)
 
 
 PUBLIC_URL_SETTING_KEY = "public_base_url"
@@ -3555,6 +3673,14 @@ async def system_logs_get(category: str = "", status: str = "", limit: int = 300
         "maximum_items": 1000,
         "stores_content": False,
     }
+
+
+@app.get("/api/failure-reports/{report_id}", dependencies=authed)
+async def failure_report_get(report_id: str):
+    report = db.failure_report_get(report_id)
+    if not report:
+        raise HTTPException(404, "这次的现场已经过期删掉了（只留最近 30 次、14 天）")
+    return {"ok": True, "report": report, "text": _failure_text(report)}
 
 
 @app.delete("/api/system-logs", dependencies=authed)
@@ -6627,8 +6753,9 @@ async def _bookmark_label(chat_id: str, bookmark_id: str) -> None:
         )
         label = str(data.get("label") or "").strip()
         db.bookmark_set_label(bookmark_id, label, "ready" if label else "error")
-    except Exception:
+    except Exception as exc:
         db.bookmark_set_label(bookmark_id, "", "error")
+        _log_failure("bookmark_label", exc, chat_id=chat_id, bookmark=bookmark_id)
     await _bookmark_embed(chat_id, bookmark_id)
 
 
@@ -6649,8 +6776,9 @@ async def _bookmark_draft_label(chat_id: str, draft_id: str) -> None:
                              db.assistant_name(db.chat_assistant(chat_id)))[:MEMORY_CARD_SOURCE_CHARS],
         )
         label = str(data.get("label") or "").strip()
-    except Exception:
+    except Exception as exc:
         label = ""
+        _log_failure("bookmark_label", exc, chat_id=chat_id, draft=draft_id)
     db.bookmark_draft_write_label(chat_id, draft_id, label)
 
 
