@@ -17068,34 +17068,44 @@ precision highp float;
 uniform vec2 u_res; uniform float u_dpr, u_time, u_level, u_dark; uniform sampler2D u_tex;
 vec2 hash22(vec2 p){ vec3 q = fract(vec3(p.xyx) * vec3(443.897, 441.423, 437.195));
   q += dot(q, q.yzx + 19.19); return fract((q.xx + q.yz) * q.zy); }
-// 一颗珠对这个像素的影响：x=mask，yz=指回珠心（半径为单位），w=半径
-vec4 dropAt(vec2 p, vec2 center, float radius, float stretch){
-  vec2 d = (p - center) / vec2(radius, radius * stretch);
-  float m = 1.0 - smoothstep(0.80, 0.99, length(d));
-  return vec4(m, -d, radius); }
-void takeBest(inout vec4 best, vec4 c){ if (c.x > best.x) best = c; }
-// 停着的小珠：一格最多一颗，位置大小寿命都从哈希来
-vec4 stillLayer(vec2 p, float cell, float density, float time, float salt){
-  vec4 best = vec4(0.0, 0.0, 0.0, 1.0);
+// 把一颗珠加进「水场」：所有珠叠完再取等值面，挨着的就黏成一团，轮廓才不是圆。
+// topThin<1 让上缘收窄（真水珠顶上薄）；wob 给轮廓一点波浪。
+// acc: x=场强，yz=Σ权重*指回质心，w=Σ权重*半径
+void addDrop(inout vec4 acc, vec2 p, vec2 center, float radius, float topThin,
+             float wob, float phase, float weight){
+  vec2 d = (p - center) / radius;
+  if (abs(d.x) > 2.0 || abs(d.y) > 2.0) return;
+  d.y /= (d.y < 0.0 ? topThin : 1.12);
+  float ang = atan(d.y, d.x);
+  float edge = 1.0 + wob * sin(ang * 3.0 + phase) + wob * 0.6 * sin(ang * 5.0 + phase * 1.7);
+  float len = length(d) / edge;
+  float k = max(0.0, 1.0 - len * len);
+  k = k * k * weight;
+  acc.x += k;
+  acc.yz += -d * k;
+  acc.w += radius * k;
+}
+void stillLayer(inout vec4 acc, vec2 p, float cell, float density, float time, float salt,
+                float rMin, float rMax, float weight){
   vec2 base = floor(p / cell);
   for (int ix = -1; ix <= 1; ix++) for (int iy = -1; iy <= 1; iy++) {
     vec2 id = base + vec2(float(ix), float(iy));
     vec2 h = hash22(id * 1.37 + salt);
-    if (h.x > density) continue;
+    // 一片密一片疏：真玻璃上的水从来不是均匀撒的。
+    vec2 pr = hash22(floor(id * cell / 230.0) + salt * 0.37);
+    if (h.x > density * (0.35 + 1.5 * pr.x)) continue;
     float period = 14.0 + 20.0 * h.y;
     float cycles = floor(time / period + h.x * 7.0);
     float phase = fract(time / period + h.x * 7.0);
     vec2 jitter = hash22(id + cycles * 0.731 + salt);
     vec2 center = (id + 0.15 + jitter * 0.7) * cell;
-    float radius = cell * (0.10 + 0.26 * jitter.y * jitter.y);
+    float radius = cell * mix(rMin, rMax, jitter.y * jitter.y);
     float alive = smoothstep(0.0, 0.08, phase) * (1.0 - smoothstep(0.75, 1.0, phase));
-    vec4 hit = dropAt(p, center, radius, 1.12 + 0.3 * jitter.x);
-    hit.x *= alive; takeBest(best, hit);
+    addDrop(acc, p, center, radius, 0.72 + 0.2 * jitter.x, 0.10, jitter.x * 40.0, weight * alive);
   }
-  return best; }
-// 会滑落的大珠：走走停停往下出溜，身后留一串越来越小的痕
-vec4 slidingLayer(vec2 p, vec2 size, float density, float time){
-  vec4 best = vec4(0.0, 0.0, 0.0, 1.0);
+}
+// 会滑落的大珠：头和身后的痕都丢进同一个水场，黏成一条不规则的湿痕。
+void slidingLayer(inout vec4 acc, vec2 p, vec2 size, float density, float time){
   float colW = 96.0;
   float col = floor(p.x / colW);
   for (int ic = -1; ic <= 1; ic++) {
@@ -17113,7 +17123,7 @@ vec4 slidingLayer(vec2 p, vec2 size, float density, float time){
     float sway = colW * 0.16;
     float headX = pathX0 + sway * sin(headY * 0.021 + g.x * 6.28);
     float headR = 6.5 + 3.5 * g.y;
-    takeBest(best, dropAt(p, vec2(headX, headY), headR, 1.25 + 0.9 * travel));
+    addDrop(acc, p, vec2(headX, headY), headR, 0.55 - 0.2 * travel, 0.08, g.x * 40.0, 1.0);
     if (p.y < headY && progress > 0.15) {
       float cellY = floor(p.y / 22.0);
       vec2 th = hash22(vec2(column, cellY) + rnd);
@@ -17122,37 +17132,37 @@ vec4 slidingLayer(vec2 p, vec2 size, float density, float time){
       if (behind > 0.0 && behind < 1.0) {
         float x = pathX0 + sway * sin(y * 0.021 + g.x * 6.28) + (th.x - 0.5) * 5.0;
         float radius = max(1.6, headR * 0.55 * (1.0 - behind) * (0.5 + th.y));
-        vec4 trail = dropAt(p, vec2(x, y), radius, 1.2);
-        trail.x *= 1.0 - behind * 0.7; takeBest(best, trail);
+        addDrop(acc, p, vec2(x, y), radius, 0.8, 0.1, th.x * 40.0, 1.0 - behind * 0.7);
       }
     }
   }
-  return best; }
+}
 vec2 uvOf(vec2 q, vec2 size){ return vec2(q.x / size.x, 1.0 - q.y / size.y); }
 void main(){
   vec2 size = u_res / u_dpr;
   vec2 p = vec2(gl_FragCoord.x, u_res.y - gl_FragCoord.y) / u_dpr;
-  vec4 best = slidingLayer(p, size, 0.40 + 0.25 * u_level, u_time);
-  takeBest(best, stillLayer(p, 56.0, 0.20 + 0.12 * u_level, u_time, 3.1));
-  takeBest(best, stillLayer(p, 27.0, 0.24 + 0.14 * u_level, u_time * 0.8, 8.7));
-  // 大珠之间那层细密的水雾：很小、很淡，but 给玻璃「潮」的质感。
-  vec4 mist = stillLayer(p, 13.0, 0.30 + 0.15 * u_level, u_time * 0.6, 15.3);
-  mist.x *= 0.55;
-  takeBest(best, mist);
-  float mask = best.x;
+  vec4 acc = vec4(0.0);
+  slidingLayer(acc, p, size, 0.40 + 0.25 * u_level, u_time);
+  stillLayer(acc, p, 56.0, 0.24 + 0.12 * u_level, u_time, 3.1, 0.12, 0.42, 1.0);
+  stillLayer(acc, p, 27.0, 0.30 + 0.14 * u_level, u_time * 0.8, 8.7, 0.14, 0.44, 1.0);
+  stillLayer(acc, p, 11.0, 0.62 + 0.20 * u_level, u_time * 0.6, 15.3, 0.12, 0.34, 0.85);
+  float field = acc.x;
+  float mask = smoothstep(0.15, 0.27, field);
   vec3 flat0 = texture2D(u_tex, uvOf(p, size)).rgb;
   if (mask <= 0.003) { gl_FragColor = vec4(flat0, 1.0); return; }
-  vec2 offset = best.yz * best.w * 1.6;
-  vec3 through = texture2D(u_tex, uvOf(p + offset * mask, size)).rgb;
+  vec2 grad = acc.yz / max(field, 1e-4);
+  float radius = acc.w / max(field, 1e-4);
+  vec2 offset = grad * radius * 1.7;
+  vec3 through = texture2D(u_tex, uvOf(p + offset, size)).rgb;
   vec3 color = mix(flat0, through, mask);
   color *= 1.0 + (u_dark > 0.5 ? 0.08 : 0.05) * mask;
-  // 一圈薄薄的暗沿勾出轮廓，上缘更深（光从上面来，珠子顶上背光）。
-  float ring = smoothstep(0.5, 0.95, length(best.yz));
-  float topness = smoothstep(0.1, 0.9, best.z);
-  color *= 1.0 - ring * mask * (0.07 + 0.13 * topness);
-  // 左上一粒小而亮的高光：那里的 toCenter 指向右下，是 (+,+)。
-  float shine = 1.0 - smoothstep(0.0, 0.2, length(best.yz - vec2(0.42, 0.45)));
-  color += shine * mask * (u_dark > 0.5 ? 0.22 : 0.3);
+  // 等值面附近就是水边：压一道暗沿，上缘更深。
+  float ring = (1.0 - smoothstep(0.27, 0.62, field)) * mask;
+  vec2 dir = grad / max(length(grad), 1e-4);
+  float topness = smoothstep(0.1, 0.9, dir.y);
+  color *= 1.0 - ring * (0.11 + 0.17 * topness);
+  float shine = (1.0 - smoothstep(0.1, 0.5, length(grad - vec2(0.38, 0.42)))) * mask;
+  color += shine * (u_dark > 0.5 ? 0.22 : 0.3);
   gl_FragColor = vec4(color, 1.0);
 }`;
 
@@ -17216,7 +17226,13 @@ void main(){
     const bg = v('--bg') || '#fcf9fa';
     c.fillStyle = bg; c.fillRect(0, 0, w, h);
     const upload = () => {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, off);
+      // 隔着湿玻璃看出去：背景糊一档，水珠里的折射才显眼。
+      const soft = document.createElement('canvas');
+      soft.width = w; soft.height = h;
+      const sc = soft.getContext('2d');
+      sc.filter = 'blur(' + (3 * dpr) + 'px)';
+      sc.drawImage(off, 0, 0);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, soft);
       bgReady = true; kickRain();
     };
     const url = (v('--chat-bg-image').match(/url\(["']?(.*?)["']?\)/) || [])[1];
