@@ -52,6 +52,7 @@ struct ChatView: View {
     @FocusState private var inputFocused: Bool
     /// 「聊天背景」里选的天气预览；空的就跟着真实天气。
     @AppStorage("weatherPreview") private var weatherPreview = ""
+    @AppStorage("rainBlur") private var rainBlur = 3.0
 
     private let bottomID = "bottom"
     /// 后端一次最多收两张图。
@@ -72,7 +73,7 @@ struct ChatView: View {
             ZStack {
                 // 下雨时背景糊一档再过折射 shader：隔着淋湿的玻璃看出去，水珠里的壁纸才显眼。
                 ChatBackground(assistant: store.assistant?.id ?? "cloudy", paused: paused)
-                    .blur(radius: raining ? 3 : 0)
+                    .blur(radius: raining ? rainBlur : 0)
                     .animation(.easeInOut(duration: 1.8), value: raining)
                     .modifier(RainGlass(weather: weather, paused: paused))
                 // 雪还是叠在上面画的一层。

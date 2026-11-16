@@ -94,6 +94,7 @@ struct BackgroundSettings: View {
                 Text("大雪").tag("snow:heavy")
                 Text("雷雨").tag("storm:heavy")
             }
+            NavigationLink("雨的手感（调节）") { RainTuneView() }
         } header: {
             Text("外面的天气")
         } footer: {

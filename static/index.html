@@ -17066,18 +17066,22 @@ window.promptLogin = async function() {
   const RAIN_FRAG = `
 precision highp float;
 uniform vec2 u_res; uniform float u_dpr, u_time, u_level, u_dark; uniform sampler2D u_tex;
+uniform vec4 u_tune;   // x 密度 y 珠子大小 z 折射 w 高光，默认都是 1
 vec2 hash22(vec2 p){ vec3 q = fract(vec3(p.xyx) * vec3(443.897, 441.423, 437.195));
   q += dot(q, q.yzx + 19.19); return fract((q.xx + q.yz) * q.zy); }
 // 把一颗珠加进「水场」：所有珠叠完再取等值面，挨着的就黏成一团，轮廓才不是圆。
-// topThin<1 让上缘收窄（真水珠顶上薄）；wob 给轮廓一点波浪。
+// 每颗珠的波浪频率、幅度、相位都从自己的 seed 来，不会两颗长得一样。
 // acc: x=场强，yz=Σ权重*指回质心，w=Σ权重*半径
 void addDrop(inout vec4 acc, vec2 p, vec2 center, float radius, float topThin,
-             float wob, float phase, float weight){
+             float seed, float weight){
   vec2 d = (p - center) / radius;
   if (abs(d.x) > 2.0 || abs(d.y) > 2.0) return;
   d.y /= (d.y < 0.0 ? topThin : 1.12);
+  vec2 w = hash22(vec2(seed, seed * 1.71 + 3.3));
   float ang = atan(d.y, d.x);
-  float edge = 1.0 + wob * sin(ang * 3.0 + phase) + wob * 0.6 * sin(ang * 5.0 + phase * 1.7);
+  float wob = 0.05 + 0.13 * w.y;
+  float edge = 1.0 + wob * sin(ang * (2.0 + floor(w.x * 3.0)) + seed * 13.7)
+                   + wob * 0.7 * sin(ang * (5.0 + floor(w.y * 3.0)) + seed * 7.3);
   float len = length(d) / edge;
   float k = max(0.0, 1.0 - len * len);
   k = k * k * weight;
@@ -17099,9 +17103,18 @@ void stillLayer(inout vec4 acc, vec2 p, float cell, float density, float time, f
     float phase = fract(time / period + h.x * 7.0);
     vec2 jitter = hash22(id + cycles * 0.731 + salt);
     vec2 center = (id + 0.15 + jitter * 0.7) * cell;
-    float radius = cell * mix(rMin, rMax, jitter.y * jitter.y);
+    // 平方分布拉出连续的大小谱：小的多，大的少，各层的段落互相搭着。
+    float radius = cell * mix(rMin, rMax, jitter.y * jitter.y) * u_tune.y;
     float alive = smoothstep(0.0, 0.08, phase) * (1.0 - smoothstep(0.75, 1.0, phase));
-    addDrop(acc, p, center, radius, 0.72 + 0.2 * jitter.x, 0.10, jitter.x * 40.0, weight * alive);
+    float seed = dot(id, vec2(127.1, 311.7)) + salt + cycles;
+    addDrop(acc, p, center, radius, 0.72 + 0.2 * jitter.x, seed, weight * alive);
+    // 伴珠：挨着主珠再长一颗小的，黏成复合的形状——真水珠常是几颗并作一摊。
+    vec2 c = hash22(id * 3.91 + salt + cycles);
+    if (c.x < 0.45) {
+      vec2 away = vec2(cos(c.y * 6.28), sin(c.y * 6.28)) * radius * (0.7 + 0.5 * c.x);
+      addDrop(acc, p, center + away, radius * (0.35 + 0.45 * c.y), 0.8,
+              seed + 5.1, weight * alive);
+    }
   }
 }
 // 会滑落的大珠：头和身后的痕都丢进同一个水场，黏成一条不规则的湿痕。
@@ -17122,8 +17135,8 @@ void slidingLayer(inout vec4 acc, vec2 p, vec2 size, float density, float time){
     float pathX0 = (column + 0.25 + 0.5 * g.y) * colW;
     float sway = colW * 0.16;
     float headX = pathX0 + sway * sin(headY * 0.021 + g.x * 6.28);
-    float headR = 9.0 + 6.0 * g.y;
-    addDrop(acc, p, vec2(headX, headY), headR, 0.55 - 0.2 * travel, 0.08, g.x * 40.0, 1.0);
+    float headR = (8.0 + 5.0 * g.y) * u_tune.y;
+    addDrop(acc, p, vec2(headX, headY), headR, 0.55 - 0.2 * travel, column * 17.9 + rnd, 1.0);
     if (p.y < headY && progress > 0.15) {
       float cellY = floor(p.y / 22.0);
       vec2 th = hash22(vec2(column, cellY) + rnd);
@@ -17132,37 +17145,42 @@ void slidingLayer(inout vec4 acc, vec2 p, vec2 size, float density, float time){
       if (behind > 0.0 && behind < 1.0) {
         float x = pathX0 + sway * sin(y * 0.021 + g.x * 6.28) + (th.x - 0.5) * 5.0;
         float radius = max(1.8, headR * 0.62 * (1.0 - behind) * (0.5 + th.y));
-        addDrop(acc, p, vec2(x, y), radius, 0.45, 0.1, th.x * 40.0, 1.0 - behind * 0.7);
+        addDrop(acc, p, vec2(x, y), radius, 0.45, column * 7.7 + cellY, 1.0 - behind * 0.7);
       }
     }
   }
 }
-vec2 uvOf(vec2 q, vec2 size){ return vec2(q.x / size.x, 1.0 - q.y / size.y); }
+// 纹理从 2d canvas 传进来，第 0 行就是最上面：uv 不翻。
+vec2 uvOf(vec2 q, vec2 size){ return q / size; }
 void main(){
   vec2 size = u_res / u_dpr;
   vec2 p = vec2(gl_FragCoord.x, u_res.y - gl_FragCoord.y) / u_dpr;
   vec4 acc = vec4(0.0);
-  slidingLayer(acc, p, size, 0.36 + 0.25 * u_level, u_time);
-  stillLayer(acc, p, 64.0, 0.24 + 0.12 * u_level, u_time, 3.1, 0.13, 0.48, 1.0);
-  stillLayer(acc, p, 27.0, 0.30 + 0.14 * u_level, u_time * 0.8, 8.7, 0.14, 0.44, 1.0);
-  stillLayer(acc, p, 11.0, 0.62 + 0.20 * u_level, u_time * 0.6, 15.3, 0.12, 0.34, 0.85);
+  float dens = u_tune.x;
+  slidingLayer(acc, p, size, (0.36 + 0.25 * u_level) * dens, u_time);
+  stillLayer(acc, p, 64.0, (0.22 + 0.10 * u_level) * dens, u_time, 3.1, 0.10, 0.50, 1.0);
+  stillLayer(acc, p, 30.0, (0.30 + 0.14 * u_level) * dens, u_time * 0.8, 8.7, 0.12, 0.50, 1.0);
+  stillLayer(acc, p, 13.0, (0.55 + 0.20 * u_level) * dens, u_time * 0.6, 15.3, 0.12, 0.40, 0.85);
   float field = acc.x;
   float mask = smoothstep(0.15, 0.27, field);
   vec3 flat0 = texture2D(u_tex, uvOf(p, size)).rgb;
   if (mask <= 0.003) { gl_FragColor = vec4(flat0, 1.0); return; }
   vec2 grad = acc.yz / max(field, 1e-4);
   float radius = acc.w / max(field, 1e-4);
-  vec2 offset = grad * radius * 1.7;
+  // 折射使劲一点：透过大珠看到的是更远处的画面（原版偏移有好几百像素）。
+  vec2 offset = grad * radius * 2.6 * u_tune.z;
+  offset *= min(1.0, 110.0 / max(length(offset), 1e-3));
   vec3 through = texture2D(u_tex, uvOf(p + offset, size)).rgb;
   vec3 color = mix(flat0, through, mask);
-  color *= 1.0 + (u_dark > 0.5 ? 0.08 : 0.05) * mask;
+  color *= 1.0 + (u_dark > 0.5 ? 0.10 : 0.07) * mask;
   // 等值面附近就是水边：压一道暗沿，上缘更深。
   float ring = (1.0 - smoothstep(0.27, 0.62, field)) * mask;
   vec2 dir = grad / max(length(grad), 1e-4);
   float topness = smoothstep(0.1, 0.9, dir.y);
   color *= 1.0 - ring * (0.11 + 0.17 * topness);
-  float shine = (1.0 - smoothstep(0.1, 0.5, length(grad - vec2(0.38, 0.42)))) * mask;
-  color += shine * (u_dark > 0.5 ? 0.22 : 0.3);
+  // 高光收小调淡：亮主要该来自折射采到的天光，不是画上去的白点。
+  float shine = (1.0 - smoothstep(0.05, 0.3, length(grad - vec2(0.38, 0.42)))) * mask;
+  color += shine * (u_dark > 0.5 ? 0.10 : 0.14) * u_tune.w;
   gl_FragColor = vec4(color, 1.0);
 }`;
 
@@ -17191,7 +17209,7 @@ void main(){
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     glU = {};
-    for (const n of ['u_res', 'u_dpr', 'u_time', 'u_level', 'u_dark', 'u_tex'])
+    for (const n of ['u_res', 'u_dpr', 'u_time', 'u_level', 'u_dark', 'u_tex', 'u_tune'])
       glU[n] = gl.getUniformLocation(glProg, n);
     const tex = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0);
@@ -17287,6 +17305,16 @@ void main(){
 
   function rainActive() { return now.kind === 'rain' || now.kind === 'storm'; }
 
+  // 雨的手感（密度、珠子大小、折射、高光，默认 1,1,1,1）。
+  // 网址上 ?raintune=1,1.2,1.5,0.8 这样试，顺手调。
+  const rainTune = (() => {
+    const raw = (new URLSearchParams(location.search).get('raintune') || '').split(',');
+    return [0, 1, 2, 3].map(i => {
+      const v = parseFloat(raw[i]);
+      return isFinite(v) ? Math.max(0, Math.min(3, v)) : 1;
+    });
+  })();
+
   function rainFrame() {
     glRaf = 0;
     if (!rainActive() || document.hidden || !glOk) return;
@@ -17297,6 +17325,7 @@ void main(){
     gl.uniform1f(glU.u_time, t);
     gl.uniform1f(glU.u_level, now.kind === 'storm' ? 2 : now.level);
     gl.uniform1f(glU.u_dark, dark() ? 1 : 0);
+    gl.uniform4f(glU.u_tune, rainTune[0], rainTune[1], rainTune[2], rainTune[3]);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     if (!reduced.matches) glRaf = requestAnimationFrame(rainFrame);
   }

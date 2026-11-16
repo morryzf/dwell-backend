@@ -70,6 +70,12 @@ struct RainGlass: ViewModifier {
     /// 雨开始 / 停止的时刻：淡入淡出按它算，不靠 SwiftUI 的 transition（shader 不吃那个）。
     @State private var turned = Date.distantPast
 
+    // 「雨的手感」四个滑杆（设置 → 聊天背景），默认 1。
+    @AppStorage("rainDensity") private var tuneDensity = 1.0
+    @AppStorage("rainSize") private var tuneSize = 1.0
+    @AppStorage("rainRefract") private var tuneRefract = 1.0
+    @AppStorage("rainShine") private var tuneShine = 1.0
+
     private var raining: Bool { weather.kind == .rain || weather.kind == .storm }
     private var level: Double { raining ? (weather.kind == .storm ? 2 : Double(weather.level)) : 0 }
 
@@ -88,9 +94,10 @@ struct RainGlass: ViewModifier {
                     .float(Float(t)),
                     .float(Float(level)),
                     .float(scheme == .dark ? 1 : 0),
-                    .float(Float(fade))
+                    .float(Float(fade)),
+                    .float4(tuneDensity, tuneSize, tuneRefract, tuneShine)
                 ),
-                maxSampleOffset: CGSize(width: 30, height: 30),
+                maxSampleOffset: CGSize(width: 120, height: 120),
                 isEnabled: fade > 0.001
             )
         }
@@ -106,6 +113,67 @@ private func unitRandom(_ seed: Int, _ salt: Int) -> Double {
     v &*= 0xC2B2_AE3D_27D4_EB4F
     v ^= v >> 29
     return Double(v & 0xFF_FFFF) / Double(0x100_0000)
+}
+
+// MARK: - 雨的手感
+
+/// 「雨的手感」：四个滑杆直接喂给 shader，一格糊化给背景。只存在这台手机上。
+/// 开着「大雨」预览调，回聊天页就能看出差别。
+struct RainTuneView: View {
+    @AppStorage("weatherPreview") private var weatherPreview = ""
+    @AppStorage("rainDensity") private var density = 1.0
+    @AppStorage("rainSize") private var size = 1.0
+    @AppStorage("rainRefract") private var refract = 1.0
+    @AppStorage("rainShine") private var shine = 1.0
+    @AppStorage("rainBlur") private var blur = 3.0
+
+    var body: some View {
+        List {
+            if weatherPreview.isEmpty {
+                Section {
+                    Button("先把预览开成「大雨」") { weatherPreview = "rain:heavy" }
+                } footer: {
+                    Text("不开预览的话，只有真下雨时才看得到调的结果。")
+                }
+            }
+            Section("水珠") {
+                row("密度", $density, 0.3...2.0, "多少颗")
+                row("大小", $size, 0.5...1.8, "每颗有多大")
+            }
+            Section("光") {
+                row("折射", $refract, 0.2...2.5, "透过水珠看到的背景扭多远")
+                row("高光", $shine, 0.0...2.5, "珠子左上那一点亮")
+                row("背景糊化", $blur, 0.0...8.0, "下雨时背景糊几档")
+            }
+            Section {
+                Button("恢复默认") {
+                    density = 1; size = 1; refract = 1; shine = 1; blur = 3
+                }
+            } footer: {
+                Text("调完记得把预览换回「跟着真实天气」。这些只存在这台手机上。")
+            }
+        }
+        .modifier(SheetListStyle())
+        .navigationTitle("雨的手感")
+        .navigationBarTitleDisplayMode(.inline)
+        .tint(Theme.send)
+    }
+
+    private func row(_ name: String, _ value: Binding<Double>,
+                     _ range: ClosedRange<Double>, _ hint: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(name)
+                Spacer()
+                Text(String(format: "%.2f", value.wrappedValue))
+                    .font(.system(size: 13).monospacedDigit())
+                    .foregroundStyle(Theme.dim)
+            }
+            Slider(value: value, in: range)
+            Text(hint).font(.system(size: 11.5)).foregroundStyle(Theme.dim)
+        }
+        .padding(.vertical, 2)
+    }
 }
 
 // MARK: - 落雪
