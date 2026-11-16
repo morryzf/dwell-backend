@@ -17080,8 +17080,20 @@ window.promptLogin = async function() {
   document.addEventListener('visibilitychange', kick);
   if (reduced.addEventListener) reduced.addEventListener('change', kick);
 
+  // 网址上带 ?weather=rain:heavy（rain/snow/storm × light/moderate/heavy）就只画这个，
+  // 不问后端——不等真的下雨也能先看看效果。
+  const forced = new URLSearchParams(location.search).get('weather') || '';
   async function check() {
     try {
+      if (forced) {
+        const bits = forced.split(':');
+        if (['rain', 'snow', 'storm'].indexOf(bits[0]) >= 0) {
+          now = { kind: bits[0], level: bits[1] === 'heavy' ? 2 : bits[1] === 'moderate' ? 1 : 0 };
+          fadeIn = 0;
+          kick();
+        }
+        return;
+      }
       const r = await fetch('api/weather', { cache: 'no-store' });
       if (!r.ok) return;
       const d = await r.json();

@@ -50,6 +50,8 @@ struct ChatView: View {
     @State private var settle: Task<Void, Never>?
     @State private var deleting: Message?
     @FocusState private var inputFocused: Bool
+    /// 「聊天背景」里选的天气预览；空的就跟着真实天气。
+    @AppStorage("weatherPreview") private var weatherPreview = ""
 
     private let bottomID = "bottom"
     /// 后端一次最多收两张图。
@@ -68,7 +70,7 @@ struct ChatView: View {
             ZStack {
                 ChatBackground(assistant: store.assistant?.id ?? "cloudy", paused: paused)
                 // 外面的天气：雨点打在玻璃上、雪花飘下来，铺在背景和气泡之间。
-                WeatherLayer(weather: store.weather, paused: paused)
+                WeatherLayer(weather: WeatherNow.preview(weatherPreview) ?? store.weather, paused: paused)
             }
         }
         .environment(\.assistantID, store.assistant?.id ?? "cloudy")

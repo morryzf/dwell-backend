@@ -14,6 +14,7 @@ struct BackgroundSettings: View {
     @State private var picked: PhotosPickerItem?
     @State private var message = ""
     @State private var picking: [String: (color: Color, hex: String)] = [:]
+    @AppStorage("weatherPreview") private var weatherPreview = ""
 
     private var whoName: String {
         store.assistant?.all.first { $0.id == who }?.name ?? (who == "chatgpt" ? "ChatGPT" : "Cloudy")
@@ -48,6 +49,8 @@ struct BackgroundSettings: View {
             default:
                 Section {} footer: { Text("默认的粉灰格纹，跟网页一样。") }
             }
+
+            weatherSection
         }
         .modifier(SheetListStyle())
         .safeAreaInset(edge: .top, spacing: 0) { preview }
@@ -77,6 +80,24 @@ struct BackgroundSettings: View {
                 }
                 picked = nil
             }
+        }
+    }
+
+    /// 外面的天气会叠在背景上：下雨是玻璃水珠，下雪是雪花。这里可以不等天气、先看看效果。
+    private var weatherSection: some View {
+        Section {
+            Picker("天气效果", selection: $weatherPreview) {
+                Text("跟着真实天气").tag("")
+                Text("小雨").tag("rain:light")
+                Text("大雨").tag("rain:heavy")
+                Text("小雪").tag("snow:light")
+                Text("大雪").tag("snow:heavy")
+                Text("雷雨").tag("storm:heavy")
+            }
+        } header: {
+            Text("外面的天气")
+        } footer: {
+            Text("真的下雨下雪时，聊天背景会自动有雨点打在玻璃上、雪花飘下来。想先看看就选一个，看完记得换回「跟着真实天气」；这个预览只改画面，他不会以为外面真在下。")
         }
     }
 

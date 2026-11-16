@@ -19,6 +19,16 @@ struct WeatherNow: Equatable {
 
     /// 0 小、1 中、2 大。
     var level: Int { intensity == "heavy" ? 2 : intensity == "moderate" ? 1 : 0 }
+
+    /// 设置里的「预览」选项（"rain:heavy" 这样的字符串）：想先看看效果，不用等真的下雨。
+    static func preview(_ raw: String) -> WeatherNow? {
+        guard !raw.isEmpty else { return nil }
+        let parts = raw.split(separator: ":")
+        var now = WeatherNow()
+        now.kind = Kind(rawValue: String(parts.first ?? "")) ?? .unknown
+        now.intensity = parts.count > 1 ? String(parts[1]) : ""
+        return now.kind == .unknown ? nil : now
+    }
 }
 
 /// 天气叠层：铺在聊天背景上、蕾丝和气泡下面。下雨是雨点打在玻璃上，下雪是雪花飘。
