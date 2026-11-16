@@ -1004,16 +1004,17 @@ struct ChatView: View {
     }
 
     /// 补的那两下。同一时间只留一份：字一个一个往外冒时每次都会来，不攒成一串各滚各的。
-    /// falling：键盘正在收回去，聊天记录要跟着往下落——早一点开始、带着动画落，不是等停稳了再跳一下。
+    /// falling：键盘收回去了，聊天记录落回底。必须等键盘的动画走完再滚：
+    /// 半路就去贴底，位置是按折了一半的布局算的，会滚过头，整屏气泡全跑到看不见的地方。
     private func settleAtBottom(_ proxy: ScrollViewProxy, falling: Bool = false) {
         settle?.cancel()
-        let waits: [UInt64] = falling ? [30_000_000, 220_000_000, 350_000_000] : [250_000_000, 350_000_000]
+        let waits: [UInt64] = falling ? [380_000_000, 550_000_000] : [250_000_000, 350_000_000]
         settle = Task { @MainActor in
-            for wait in waits {
+            for (index, wait) in waits.enumerated() {
                 try? await Task.sleep(nanoseconds: wait)
                 if Task.isCancelled { return }
-                if falling {
-                    withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+                if falling && index == 0 {
+                    withAnimation(.easeOut(duration: 0.22)) { proxy.scrollTo(bottomID, anchor: .bottom) }
                 } else {
                     proxy.scrollTo(bottomID, anchor: .bottom)
                 }
