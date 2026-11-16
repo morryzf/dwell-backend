@@ -63,8 +63,14 @@ struct ChatView: View {
                 .onAppear { drawerWidth = Self.drawerWidth(geo.size.width) }
                 .onChange(of: geo.size.width) { _, width in drawerWidth = Self.drawerWidth(width) }
         }
-        .background(ChatBackground(assistant: store.assistant?.id ?? "cloudy",
-                                   paused: showSettings || page != nil || showCamera))
+        .background {
+            let paused = showSettings || page != nil || showCamera
+            ZStack {
+                ChatBackground(assistant: store.assistant?.id ?? "cloudy", paused: paused)
+                // 外面的天气：雨点打在玻璃上、雪花飘下来，铺在背景和气泡之间。
+                WeatherLayer(weather: store.weather, paused: paused)
+            }
+        }
         .environment(\.assistantID, store.assistant?.id ?? "cloudy")
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) {
