@@ -43,6 +43,11 @@ struct ChatView: View {
     @State private var confirmBulkDelete = false
     /// 最底下那条看得见吗。看不见（往上翻了）就在输入框上面放一颗回到底部的箭头。
     @State private var atBottom = true
+    /// 她自己用手指往上翻走了。翻走之后新来的字、新冒的气泡都不再把画面拽回底下，
+    /// 直到她翻回最底、点了回到底部的箭头，或者自己发了一条。
+    @State private var pulledAway = false
+    /// 贴底之后补的那两下。新的一次贴底、或者她手指一拖，就把上一次没补完的取消掉。
+    @State private var settle: Task<Void, Never>?
     @State private var deleting: Message?
     @FocusState private var inputFocused: Bool
 
@@ -310,12 +315,15 @@ struct ChatView: View {
                         }
                     }
                     .animation(.spring(duration: 0.4, bounce: 0), value: store.isReplying || store.revealing)
+                    // 这一格必须是内容的最后一样东西，下面不能再有留白：
+                    // 系统自己贴底（键盘升起、内容变高）贴的是内容的真底，滚到这一格贴的是这一格的底，
+                    // 两个「底」差多少，气泡就会先被顶高多少、再掉回来多少。
                     Color.clear.frame(height: 1).id(bottomID)
-                        .onAppear { atBottom = true }
+                        .onAppear { atBottom = true; pulledAway = false }
                         .onDisappear { atBottom = false }
                 }
                 .padding(.horizontal, 18)
-                .padding(.vertical, 14)
+                .padding(.top, 14)
             }
             .defaultScrollAnchor(.bottom)
             // 正在往右拉侧栏：聊天记录别跟着上下动。
@@ -326,24 +334,28 @@ struct ChatView: View {
             .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
             // 在聊天记录上任何地方往右拉，侧边栏就跟着手指出来（不用非得从屏幕最边上划）。
             .simultaneousGesture(openDrawerGesture(minimumDistance: 10))
+            // 手指往下拖（往上翻旧消息）：还没补完的贴底别再跟她抢，之后也先不自动贴底。
+            .simultaneousGesture(pullAwayGesture)
             // 只在最底下多了新消息时才滚到底；往上翻出更早的消息时不能把人拽回去。
             .onChange(of: store.messages.last?.id) { _, _ in
                 // 看旧消息时换的那一段：别拽到底。
                 if store.holdScroll { store.holdScroll = false; return }
-                scrollToBottom(proxy)
+                if following { scrollToBottom(proxy) }
             }
             // 整页换过（先摆的是存着的那页、换了聊天）：最后一条没变也要重新贴底，
             // 不然懒加载按旧高度算的位置会停在一片空白里。
             .onChange(of: store.pageSwapTick) { _, _ in scrollToBottom(proxy, animated: false) }
-            .onChange(of: store.streamingText) { _, _ in scrollToBottom(proxy, animated: false) }
-            .onChange(of: store.revealTick) { _, _ in scrollToBottom(proxy) }
-            // 点输入框：原来就在最底下的，等键盘升上来再贴底；正往上翻着看的，就别动她的位置。
+            .onChange(of: store.streamingText) { _, _ in
+                if following { scrollToBottom(proxy, animated: false) }
+            }
+            .onChange(of: store.revealTick) { _, _ in
+                if following { scrollToBottom(proxy) }
+            }
+            // 点输入框：原来就在最底下的，键盘升起时系统会自己带着贴底；这里只在键盘停稳后补两下兜底
+            // （已经在底就原地不动）。正往上翻着看的，就别动她的位置。
             .onChange(of: inputFocused) { _, focused in
                 guard focused, atBottom else { return }
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 350_000_000)
-                    scrollToBottom(proxy, animated: false)
-                }
+                settleAtBottom(proxy)
             }
             // 搜索里点开的那句、点引用跳回去的那句：滚到正中，闪一下就好。
             .onChange(of: store.jumpTarget) { _, target in
@@ -359,43 +371,47 @@ struct ChatView: View {
             }
             // 往上翻了：输入框上面一颗小箭头，点一下回到最新。
             .overlay(alignment: .bottom) {
-                if store.browsing {
-                    // 在看一段旧消息：一直留着这颗，点了回到平常的聊天。
-                    Button {
-                        Task { await store.backToLatest() }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "chevron.down")
-                            Text("回到最新")
-                        }
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.text)
-                        .padding(.horizontal, 16)
-                        .frame(height: 38)
-                        .buttonGlass(Capsule())
-                        .frostedOnly { $0.shadow(color: Theme.composerShadow, radius: 9, y: 6) }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.bottom, 10)
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
-                } else if !atBottom {
-                    Button {
-                        scrollToBottom(proxy)
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 15, weight: .semibold))
+                // 动画只管这颗箭头的出现和消失，不要连聊天记录的位置变化也一起带上。
+                ZStack {
+                    if store.browsing {
+                        // 在看一段旧消息：一直留着这颗，点了回到平常的聊天。
+                        Button {
+                            Task { await store.backToLatest() }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "chevron.down")
+                                Text("回到最新")
+                            }
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Theme.text)
-                            .frame(width: 38, height: 38)
-                            .buttonGlass(Circle())
+                            .padding(.horizontal, 16)
+                            .frame(height: 38)
+                            .buttonGlass(Capsule())
                             .frostedOnly { $0.shadow(color: Theme.composerShadow, radius: 9, y: 6) }
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.bottom, 10)
+                        .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    } else if !atBottom {
+                        Button {
+                            pulledAway = false
+                            scrollToBottom(proxy)
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Theme.text)
+                                .frame(width: 38, height: 38)
+                                .buttonGlass(Circle())
+                                .frostedOnly { $0.shadow(color: Theme.composerShadow, radius: 9, y: 6) }
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.bottom, 10)
+                        .transition(.scale(scale: 0.8).combined(with: .opacity))
+                        .accessibilityLabel("回到最新的消息")
                     }
-                    .buttonStyle(.plain)
-                    .padding(.bottom, 10)
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
-                    .accessibilityLabel("回到最新的消息")
                 }
+                .animation(.easeOut(duration: 0.2), value: atBottom)
             }
-            .animation(.easeOut(duration: 0.2), value: atBottom)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if selection != nil { selectionBar } else { inputBar }
             }
@@ -646,6 +662,8 @@ struct ChatView: View {
                 pendingImages = []
                 pendingFiles = []
                 sentCount += 1
+                // 自己发的这条一定要看得见：就算刚才翻上去了，也回到底下。
+                pulledAway = false
                 Task { await store.send(text, images: images, files: files) }
             } label: {
                 sendCircle(systemName: "arrow.up", size: 17)
@@ -961,6 +979,18 @@ struct ChatView: View {
         }
     }
 
+    private var pullAwayGesture: some Gesture {
+        DragGesture(minimumDistance: 10).onChanged { value in
+            guard value.translation.height > 10,
+                  value.translation.height > abs(value.translation.width) else { return }
+            settle?.cancel()
+            if !pulledAway { pulledAway = true }
+        }
+    }
+
+    /// 新来的东西要不要带着画面贴底：还在底下，或者不是她自己翻走的（内容一下长高把底挤出去了）。
+    private var following: Bool { atBottom || !pulledAway }
+
     /// 聊天记录是懒加载的，滚过去的路上上面的气泡才量出真高度，第一下常常差一截；
     /// 所以落地后再补两下（不带动画），保证真的到最底。
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
@@ -969,11 +999,18 @@ struct ChatView: View {
         } else {
             proxy.scrollTo(bottomID, anchor: .bottom)
         }
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            proxy.scrollTo(bottomID, anchor: .bottom)
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            proxy.scrollTo(bottomID, anchor: .bottom)
+        settleAtBottom(proxy)
+    }
+
+    /// 补的那两下。同一时间只留一份：字一个一个往外冒时每次都会来，不攒成一串各滚各的。
+    private func settleAtBottom(_ proxy: ScrollViewProxy) {
+        settle?.cancel()
+        settle = Task { @MainActor in
+            for wait: UInt64 in [250_000_000, 350_000_000] {
+                try? await Task.sleep(nanoseconds: wait)
+                if Task.isCancelled { return }
+                proxy.scrollTo(bottomID, anchor: .bottom)
+            }
         }
     }
 }
