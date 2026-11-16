@@ -77,7 +77,7 @@ static void slidingLayer(thread float4 &acc, float2 p, float2 size, float densit
         float pathX0 = (column + 0.25 + 0.5 * g.y) * colW;
         float sway = colW * 0.16;
         float headX = pathX0 + sway * sin(headY * 0.021 + g.x * 6.28);
-        float headR = 6.5 + 3.5 * g.y;
+        float headR = 9.0 + 6.0 * g.y;
         addDrop(acc, p, float2(headX, headY), headR, 0.55 - 0.2 * travel, 0.08,
                 g.x * 40.0, 1.0);
         if (p.y < headY && progress > 0.15) {
@@ -87,8 +87,8 @@ static void slidingLayer(thread float4 &acc, float2 p, float2 size, float densit
             float behind = (headY - y) / 320.0;
             if (behind > 0.0 && behind < 1.0) {
                 float x = pathX0 + sway * sin(y * 0.021 + g.x * 6.28) + (th.x - 0.5) * 5.0;
-                float radius = max(1.6, headR * 0.55 * (1.0 - behind) * (0.5 + th.y));
-                addDrop(acc, p, float2(x, y), radius, 0.8, 0.1, th.x * 40.0,
+                float radius = max(1.8, headR * 0.62 * (1.0 - behind) * (0.5 + th.y));
+                addDrop(acc, p, float2(x, y), radius, 0.45, 0.1, th.x * 40.0,
                         1.0 - behind * 0.7);
             }
         }
@@ -102,8 +102,8 @@ static void slidingLayer(thread float4 &acc, float2 p, float2 size, float densit
     float2 size = bounds.zw;
 
     float4 acc = float4(0.0);
-    slidingLayer(acc, position, size, 0.40 + 0.25 * level, time);
-    stillLayer(acc, position, 56.0, 0.24 + 0.12 * level, time, 3.1, 0.12, 0.42, 1.0);
+    slidingLayer(acc, position, size, 0.36 + 0.25 * level, time);
+    stillLayer(acc, position, 64.0, 0.24 + 0.12 * level, time, 3.1, 0.13, 0.48, 1.0);
     stillLayer(acc, position, 27.0, 0.30 + 0.14 * level, time * 0.8, 8.7, 0.14, 0.44, 1.0);
     // 细密的水雾斑：很小，大多各自成点，挨上了就黏成一小撮。
     stillLayer(acc, position, 11.0, 0.62 + 0.20 * level, time * 0.6, 15.3, 0.12, 0.34, 0.85);
