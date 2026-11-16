@@ -29,7 +29,7 @@ static DropHit dropAt(float2 p, float2 center, float radius, float stretch) {
     DropHit hit;
     float2 d = (p - center) / float2(radius, radius * stretch);
     float len = length(d);
-    hit.mask = 1.0 - smoothstep(0.72, 1.0, len);
+    hit.mask = 1.0 - smoothstep(0.80, 0.99, len);
     hit.toCenter = -d;        // 从像素指回珠心
     hit.radius = radius;
     return hit;
@@ -120,32 +120,32 @@ static DropHit slidingLayer(float2 p, float2 bounds, float density, float time) 
     float2 size = bounds.zw;
 
     // 雨量：停珠的密度、滑珠的密度一起涨。
-    float still1 = 0.32 + 0.18 * level;     // 大格，珠子也大些
-    float still2 = 0.38 + 0.20 * level;     // 小格的细密水雾
-    float slide = 0.45 + 0.25 * level;
-
-    DropHit best = slidingLayer(position, size, slide, time);
-    takeBest(best, stillLayer(position, 54.0, still1, time, 3.1));
-    takeBest(best, stillLayer(position, 26.0, still2, time * 0.8, 8.7));
+    DropHit best = slidingLayer(position, size, 0.40 + 0.25 * level, time);
+    takeBest(best, stillLayer(position, 56.0, 0.20 + 0.12 * level, time, 3.1));
+    takeBest(best, stillLayer(position, 27.0, 0.24 + 0.14 * level, time * 0.8, 8.7));
+    // 大珠之间那层细密的水雾：很小、很淡，给玻璃「潮」的质感。
+    DropHit mist = stillLayer(position, 13.0, 0.30 + 0.15 * level, time * 0.6, 15.3);
+    mist.mask *= 0.55;
+    takeBest(best, mist);
 
     float mask = best.mask * fade;
     if (mask <= 0.003) { return layer.sample(position); }
 
     // 折射：往珠心的反方向采样，画面在珠里是倒着缩小的；珠越大偏得越远。
-    float refract = best.radius * (1.1 + 0.9 * level * 0.3);
-    float2 offset = best.toCenter * refract * 1.6;
+    float2 offset = best.toCenter * best.radius * 1.6;
     half4 through = layer.sample(position + offset * mask);
-    half4 flat = layer.sample(position);
-    half4 color = mix(flat, through, half(mask));
+    half4 plain = layer.sample(position);
+    half4 color = mix(plain, through, half(mask));
 
-    // 玻璃感的三笔：珠里略亮、顶边一道暗沿（厚度）、偏左上一粒高光。
-    float brighten = dark > 0.5 ? 0.10 : 0.07;
-    color.rgb *= half(1.0 + brighten * mask);
-    float topRim = smoothstep(0.2, 0.95, -best.toCenter.y) * smoothstep(1.0, 0.72, length(best.toCenter));
-    color.rgb *= half(1.0 - 0.16 * topRim * mask);
-    float2 shineAt = best.toCenter - float2(-0.42, -0.45);
-    float shine = 1.0 - smoothstep(0.0, 0.34, length(shineAt));
-    color.rgb += half(shine * mask * (dark > 0.5 ? 0.38 : 0.5));
+    // 玻璃感的三笔：珠里略亮；一圈薄薄的暗沿勾出轮廓，上缘更深
+    //（光从上面来，珠子顶上背光；上缘的 toCenter 指向下方的珠心，y 是正的）；
+    // 左上一粒小而亮的高光（那里的 toCenter 指向右下，是 (+,+)）。
+    color.rgb *= half(1.0 + (dark > 0.5 ? 0.08 : 0.05) * mask);
+    float ring = smoothstep(0.5, 0.95, length(best.toCenter));
+    float topness = smoothstep(0.1, 0.9, best.toCenter.y);
+    color.rgb *= half(1.0 - ring * mask * (0.07 + 0.13 * topness));
+    float shine = 1.0 - smoothstep(0.0, 0.2, length(best.toCenter - float2(0.42, 0.45)));
+    color.rgb += half(shine * mask * (dark > 0.5 ? 0.22 : 0.3));
 
     return color;
 }
