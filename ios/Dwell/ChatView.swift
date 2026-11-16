@@ -67,10 +67,13 @@ struct ChatView: View {
         }
         .background {
             let paused = showSettings || page != nil || showCamera
+            let weather = WeatherNow.preview(weatherPreview) ?? store.weather
             ZStack {
+                // 下雨时整个背景过一道折射 shader：每颗水珠里是扭过的壁纸。
                 ChatBackground(assistant: store.assistant?.id ?? "cloudy", paused: paused)
-                // 外面的天气：雨点打在玻璃上、雪花飘下来，铺在背景和气泡之间。
-                WeatherLayer(weather: WeatherNow.preview(weatherPreview) ?? store.weather, paused: paused)
+                    .modifier(RainGlass(weather: weather, paused: paused))
+                // 雪还是叠在上面画的一层。
+                WeatherLayer(weather: weather, paused: paused)
             }
         }
         .environment(\.assistantID, store.assistant?.id ?? "cloudy")

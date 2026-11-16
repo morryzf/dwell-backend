@@ -31,7 +31,8 @@ struct WeatherNow: Equatable {
     }
 }
 
-/// 天气叠层：铺在聊天背景上、蕾丝和气泡下面。下雨是雨点打在玻璃上，下雪是雪花飘。
+/// 天气叠层：铺在聊天背景上、蕾丝和气泡下面。雪在这里画；
+/// 雨不在这层——它是对背景做折射的 Metal shader（RainGlass），得贴在背景自己身上。
 /// 晴、多云、雾什么都不画。天气换了，新旧两层慢慢交叉淡过去，不硬切。
 struct WeatherLayer: View {
     let weather: WeatherNow
@@ -43,10 +44,6 @@ struct WeatherLayer: View {
     var body: some View {
         let frozen = paused || reduceMotion || scenePhase != .active
         ZStack {
-            if weather.kind == .rain || weather.kind == .storm {
-                RainOnGlass(level: weather.kind == .storm ? 2 : weather.level, frozen: frozen)
-                    .transition(.opacity)
-            }
             if weather.kind == .snow {
                 SnowFall(level: weather.level, frozen: frozen)
                     .transition(.opacity)
@@ -58,6 +55,49 @@ struct WeatherLayer: View {
     }
 }
 
+// MARK: - 雨打在玻璃上（Metal 折射）
+
+/// 挂在聊天背景上的雨：每颗水珠里是被折射的壁纸——缩小、倒置、更亮，
+/// 不是画上去的圈。思路来自 codrops/RainEffect，珠子全在 shader 里现场算。
+/// 下雨下雷雨时才开 shader；天气换了用自己记的时间戳慢慢淡进淡出。
+struct RainGlass: ViewModifier {
+    let weather: WeatherNow
+    var paused = false
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var scheme
+
+    /// 雨开始 / 停止的时刻：淡入淡出按它算，不靠 SwiftUI 的 transition（shader 不吃那个）。
+    @State private var turned = Date.distantPast
+
+    private var raining: Bool { weather.kind == .rain || weather.kind == .storm }
+    private var level: Double { raining ? (weather.kind == .storm ? 2 : Double(weather.level)) : 0 }
+
+    func body(content: Content) -> some View {
+        let frozen = paused || reduceMotion || scenePhase != .active
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: frozen || !raining)) { timeline in
+            let now = timeline.date
+            let t = frozen ? 1234.5 : now.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: 36_000)
+            // 1.8 秒淡进来；停了淡出去。减弱动态效果时直接到位。
+            let ramp = reduceMotion ? 1.0 : min(1, max(0, now.timeIntervalSince(turned) / 1.8))
+            let fade = raining ? ramp : 1 - ramp
+            content.layerEffect(
+                ShaderLibrary.rainOnGlass(
+                    .boundingRect,
+                    .float(Float(t)),
+                    .float(Float(level)),
+                    .float(scheme == .dark ? 1 : 0),
+                    .float(Float(fade))
+                ),
+                maxSampleOffset: CGSize(width: 30, height: 30),
+                isEnabled: fade > 0.001
+            )
+        }
+        .onChange(of: raining) { _, _ in turned = Date() }
+    }
+}
+
 /// 两个特效共用的小随机数：同一组 (seed, salt) 永远给同一个 0..<1，
 /// 所以每一帧都能从「现在几点」直接算出每颗雨点、每片雪花在哪，不用存任何状态。
 private func unitRandom(_ seed: Int, _ salt: Int) -> Double {
@@ -66,110 +106,6 @@ private func unitRandom(_ seed: Int, _ salt: Int) -> Double {
     v &*= 0xC2B2_AE3D_27D4_EB4F
     v ^= v >> 29
     return Double(v & 0xFF_FFFF) / Double(0x100_0000)
-}
-
-// MARK: - 雨点打在玻璃上
-
-/// 不是满屏斜线的雨——是玻璃窗这一侧的水：小水珠停在玻璃上慢慢聚大、淡去，
-/// 时不时一颗聚重了，顺着玻璃往下滑出一道由小水珠组成的痕。
-private struct RainOnGlass: View {
-    /// 0 小雨、1 中雨、2 大雨：珠子更密、滑得更勤。
-    let level: Int
-    let frozen: Bool
-    @Environment(\.colorScheme) private var scheme
-
-    private var dropCount: Int { [30, 46, 64][level] }
-    private var runnerGap: Double { [7.0, 4.2, 2.4][level] }
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: frozen)) { timeline in
-            // 静止（减弱动态效果）时画在固定的一刻：有雨意，但一动不动。
-            let t = frozen ? 1234.5 : timeline.date.timeIntervalSinceReferenceDate
-                .truncatingRemainder(dividingBy: 360_000)
-            Canvas { context, size in
-                draw(&context, size: size, t: t, dark: scheme == .dark)
-            }
-        }
-        .drawingGroup()
-    }
-
-    private func draw(_ context: inout GraphicsContext, size: CGSize, t: Double, dark: Bool) {
-        // 停在玻璃上的珠子：各有各的节拍，长出来、鼓一点、再淡掉，换个地方重来。
-        for index in 0..<dropCount {
-            let period = 16 + 18 * unitRandom(index, 1)
-            let shifted = t + 1000 * unitRandom(index, 2)
-            let cycle = Int(shifted / period)
-            let phase = (shifted - Double(cycle) * period) / period
-            let x = unitRandom(index &+ cycle &* 977, 3) * size.width
-            let y = unitRandom(index &+ cycle &* 977, 4) * size.height
-            let base = 2.2 + 3.4 * unitRandom(index &+ cycle &* 977, 5)
-            let grown = base * (1 + 0.7 * min(1, phase * 2.5))
-            // 前 8% 淡入，后 25% 淡出。
-            let alpha = min(1, phase / 0.08) * min(1, (1 - phase) / 0.25)
-            guard alpha > 0.02 else { continue }
-            drawDrop(&context, x: x, y: y, radius: grown, alpha: alpha, dark: dark)
-        }
-
-        // 往下滑的那几道：一次只活一两道，滑过的路上留下一串小珠，慢慢干掉。
-        let duration = 3.4
-        let current = Int(t / runnerGap)
-        for k in (current - 2)...current {
-            let begin = Double(k) * runnerGap + runnerGap * 0.6 * unitRandom(k, 11)
-            let progress = (t - begin) / duration
-            guard progress > 0, progress < 1.6 else { continue }
-            let x0 = (0.06 + 0.88 * unitRandom(k, 12)) * size.width
-            let wobble = 5 + 4 * unitRandom(k, 13)
-            func point(_ p: Double) -> CGPoint {
-                CGPoint(x: x0 + wobble * sin(p * 9 + Double(k)),
-                        // 越滑越快，像真的水。
-                        y: (pow(p, 1.5) * 1.1 - 0.05) * size.height)
-            }
-            // 身后的痕：按滑过的时间淡。
-            var trail = 0.0
-            while trail < min(progress, 1) {
-                let age = (progress - trail) * duration
-                let alpha = max(0, 0.9 - age * 0.38)
-                if alpha > 0.03 {
-                    let spot = point(trail)
-                    let radius = 1.1 + 1.3 * unitRandom(k &+ Int(trail * 97), 14)
-                    drawDrop(&context, x: spot.x, y: spot.y, radius: radius, alpha: alpha, dark: dark)
-                }
-                trail += 0.055
-            }
-            // 滑着的珠子本体：比停着的大，微微拉长。
-            if progress < 1 {
-                let head = point(progress)
-                var drop = context
-                drop.translateBy(x: head.x, y: head.y)
-                drop.scaleBy(x: 1, y: 1.35)
-                drawDrop(&drop, x: 0, y: 0, radius: 3.2, alpha: 1, dark: dark)
-            }
-        }
-    }
-
-    /// 一颗水珠：边缘深、中心几乎透明（光从水珠边上折过去），左上一点高光。
-    /// 画成实心圆就成灰尘了。
-    private func drawDrop(_ context: inout GraphicsContext, x: Double, y: Double,
-                          radius: Double, alpha: Double, dark: Bool) {
-        let edge = dark ? Color.white : Color(red: 0.35, green: 0.39, blue: 0.49)
-        let stops: [Gradient.Stop] = [
-            .init(color: edge.opacity(0), location: 0),
-            .init(color: edge.opacity(dark ? 0.13 : 0.2), location: 0.8),
-            .init(color: edge.opacity(dark ? 0.34 : 0.52), location: 1),
-        ]
-        let bounds = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
-        context.opacity = alpha
-        context.fill(Path(ellipseIn: bounds),
-                     with: .radialGradient(Gradient(stops: stops),
-                                           center: CGPoint(x: x, y: y),
-                                           startRadius: radius * 0.45, endRadius: radius))
-        let shine = radius * 0.26
-        context.fill(Path(ellipseIn: CGRect(x: x - radius * 0.38 - shine,
-                                            y: y - radius * 0.38 - shine,
-                                            width: shine * 2, height: shine * 2)),
-                     with: .color(.white.opacity(dark ? 0.5 : 0.85)))
-        context.opacity = 1
-    }
 }
 
 // MARK: - 落雪
