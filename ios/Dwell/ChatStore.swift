@@ -258,13 +258,22 @@ final class ChatStore: ObservableObject {
             while let store = self, store.revealing, !Task.isCancelled {
                 let wait = store.lastReveal.addingTimeInterval(Self.revealGap).timeIntervalSinceNow
                 if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
-                self?.revealOne()
+                guard let store = self, !Task.isCancelled else { break }
+                if !store.revealOne() {
+                    // 排着队的那条已经不在列表里了（被删掉、被整页换掉）：还挂在 shown 里，
+                    // revealing 就一直是真的，这里一下都不睡地空转——整个 app 卡死在那一帧。
+                    // 清掉它；清完还是冒不出东西，就停下。
+                    if !store.dropStaleShown() { break }
+                }
             }
             self?.revealTask = nil
         }
     }
 
-    private func revealOne() {
+    /// 冒一个气泡；没有可冒的返回 false。
+    @discardableResult
+    private func revealOne() -> Bool {
+        var moved = false
         // 不带回弹：带了的话气泡会先冲过头再往下落。
         withAnimation(.spring(duration: 0.4, bounce: 0)) {
             // 先把已经存好的消息冒完，再轮到正在打的这段。
@@ -275,9 +284,20 @@ final class ChatStore: ObservableObject {
             } else {
                 return
             }
+            moved = true
             lastReveal = Date()
             revealTick += 1
         }
+        return moved
+    }
+
+    /// 把已经不在列表里的那些从排队里拿掉。拿掉了东西返回 true。
+    private func dropStaleShown() -> Bool {
+        let ids = Set(messages.map(\.id))
+        let kept = shown.filter { ids.contains($0.key) }
+        guard kept.count != shown.count else { return false }
+        shown = kept
+        return true
     }
 
     /// 报错、提示这种一行字：过一会儿自己消失，不用等下一条消息才把它冲掉。
