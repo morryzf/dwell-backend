@@ -33,11 +33,41 @@ final class HangWatch: @unchecked Sendable {
         return formatter
     }()
 
+    // 空转：同一件事一秒来上百次、连着好几秒（比如布局来回算、滚动来回触发）。
+    // 这时主线程其实还在转，「多久没报平安」抓不到，要靠数次数。
+    private var windowStart = Date()
+    private var windowCounts: [String: Int] = [:]
+    private var hotSeconds = 0
+    private var stormReported = false
+    private static let stormPerSecond = 120
+
     /// 记一件刚做的事。同一件事连着来就只记次数，不刷满。
     func note(_ text: String) {
+        var storm: String?
+        lock.lock()
+        let clock = Date()
+        if clock.timeIntervalSince(windowStart) >= 1 {
+            let top = windowCounts.max { $0.value < $1.value }
+            if let top, top.value >= Self.stormPerSecond {
+                hotSeconds += 1
+                if hotSeconds >= 3 && !stormReported {
+                    stormReported = true
+                    storm = "\(top.key) \(top.value) 次/秒，连着 \(hotSeconds) 秒"
+                }
+            } else {
+                hotSeconds = 0
+                if (top?.value ?? 0) < 20 { stormReported = false }
+            }
+            windowStart = clock
+            windowCounts = [:]
+        }
+        windowCounts[text, default: 0] += 1
+        lock.unlock()
+        if let storm { save(extra: ["storm": storm]) }
+
         lock.lock()
         defer { lock.unlock() }
-        let now = stamp.string(from: Date())
+        let now = stamp.string(from: clock)
         if let last = crumbs.indices.last, crumbs[last].text == text {
             crumbs[last].count += 1
             crumbs[last].time = now
@@ -102,7 +132,14 @@ final class HangWatch: @unchecked Sendable {
         let late = Date().timeIntervalSince(lastBeat)
         guard active, stuckSince == nil, late > Self.threshold else { lock.unlock(); return }
         stuckSince = Date()
-        let report: [String: Any] = [
+        lock.unlock()
+        save(extra: [:])
+    }
+
+    /// 把此刻的现场存进手机（卡住、空转都走这里）。
+    private func save(extra: [String: Any]) {
+        lock.lock()
+        var report: [String: Any] = [
             "at": Int(Date().timeIntervalSince1970),
             "state": lastState,
             "crumbs": crumbs.map { "\($0.time) \($0.text)" + ($0.count > 1 ? " ×\($0.count)" : "") },
@@ -112,6 +149,7 @@ final class HangWatch: @unchecked Sendable {
             "build": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "",
             "ios": iosVersion,
         ]
+        report.merge(extra) { _, new in new }
         lock.unlock()
         var pending = UserDefaults.standard.array(forKey: Self.pendingKey) as? [[String: Any]] ?? []
         pending.append(report)

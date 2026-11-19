@@ -334,8 +334,8 @@ struct ChatView: View {
                     // 系统自己贴底（键盘升起、内容变高）贴的是内容的真底，滚到这一格贴的是这一格的底，
                     // 两个「底」差多少，气泡就会先被顶高多少、再掉回来多少。
                     Color.clear.frame(height: 1).id(bottomID)
-                        .onAppear { atBottom = true; pulledAway = false }
-                        .onDisappear { atBottom = false }
+                        .onAppear { HangWatch.shared.note("bottom appear"); atBottom = true; pulledAway = false }
+                        .onDisappear { HangWatch.shared.note("bottom disappear"); atBottom = false }
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 14)

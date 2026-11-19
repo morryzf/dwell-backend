@@ -3682,8 +3682,13 @@ async def client_report(payload: dict = Body(...)):
     kind = str(payload.get("kind") or "")[:40] or "client"
     report = payload.get("report") if isinstance(payload.get("report"), dict) else {}
     seconds = int(report.get("seconds") or 0)
-    summary = (f"app 卡住了约 {seconds} 秒，后来缓过来了" if report.get("recovered")
-               else "app 卡住了，没缓过来（多半是被杀掉重开的）") if kind == "hang" else kind
+    if report.get("storm"):
+        summary = f"app 在空转：{str(report['storm'])[:120]}"
+    elif kind == "hang":
+        summary = (f"app 卡住了约 {seconds} 秒，后来缓过来了" if report.get("recovered")
+                   else "app 卡住了，没缓过来（多半是被杀掉重开的）")
+    else:
+        summary = kind
     crumbs = [str(line)[:300] for line in (report.get("crumbs") or [])][-80:]
     report_id = db.failure_report_add({
         "task": f"ios_{kind}",
