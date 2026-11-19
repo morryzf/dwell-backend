@@ -49,6 +49,8 @@ struct ChatView: View {
     /// 贴底之后补的那两下。新的一次贴底、或者她手指一拖，就把上一次没补完的取消掉。
     @State private var settle: Task<Void, Never>?
     @State private var deleting: Message?
+    /// 流式贴底的节流：记上一次贴底的时刻（不是 @State 的值，改它不会触发重画）。
+    @State private var streamScroll = Throttle(interval: 0.15)
     @FocusState private var inputFocused: Bool
     /// 「聊天背景」里选的天气预览；空的就跟着真实天气。
     @AppStorage("weatherPreview") private var weatherPreview = ""
@@ -242,11 +244,15 @@ struct ChatView: View {
                     }
                     ForEach(Array(store.messages.enumerated()), id: \.element.id) { index, message in
                         let newDay = index == 0 || !Calendar.current.isDate(message.at, inSameDayAs: store.messages[index - 1].at)
+                        // 同一个人连着说：气泡之间 6；换人说话：空 22，一眼分得出谁是谁。
+                        let sameSpeaker = index > 0 && store.messages[index - 1].kind == message.kind
+                        // 每条消息一定只交出一个视图（外面这层 VStack）。里面直接写 if 的话，一条可能是 0 个、
+                        // 1 个或 2 个视图，懒加载列表就数不清有多少行，每次排版都得把所有消息挨个展开一遍；
+                        // 他回复时每冒一个字都要排一次版，消息一多主线程就被拖死（app 卡住、被系统杀掉）。
+                        VStack(alignment: .leading, spacing: 0) {
                         if newDay {
                             DaySeparator(date: message.at).padding(.vertical, 8)
                         }
-                        // 同一个人连着说：气泡之间 6；换人说话：空 22，一眼分得出谁是谁。
-                        let sameSpeaker = index > 0 && store.messages[index - 1].kind == message.kind
                         // 他的消息排着队、一个气泡都还没露的，先不占位置。
                         if store.shown[message.id] != 0 {
                             HStack(alignment: .center, spacing: 10) {
@@ -290,6 +296,8 @@ struct ChatView: View {
                             }
                             .transition(BubbleEntrance.insertion(isMe: message.kind == .me))
                         }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if store.hasNewer {
                         Button {
@@ -334,8 +342,8 @@ struct ChatView: View {
                     // 系统自己贴底（键盘升起、内容变高）贴的是内容的真底，滚到这一格贴的是这一格的底，
                     // 两个「底」差多少，气泡就会先被顶高多少、再掉回来多少。
                     Color.clear.frame(height: 1).id(bottomID)
-                        .onAppear { atBottom = true; pulledAway = false }
-                        .onDisappear { atBottom = false }
+                        .onAppear { HangWatch.shared.note("bottom appear"); atBottom = true; pulledAway = false }
+                        .onDisappear { HangWatch.shared.note("bottom disappear"); atBottom = false }
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 14)
@@ -361,7 +369,10 @@ struct ChatView: View {
             // 不然懒加载按旧高度算的位置会停在一片空白里。
             .onChange(of: store.pageSwapTick) { _, _ in scrollToBottom(proxy, animated: false) }
             .onChange(of: store.streamingText) { _, _ in
-                if following { scrollToBottom(proxy, animated: false) }
+                // 字是一小段一小段流进来的，一秒几十次；每次都去贴底，就是每次都要整页排一遍版。
+                // 隔 0.15 秒最多贴一次，最后那一下由收尾的贴底补上。
+                guard following, streamScroll.ready() else { return }
+                scrollToBottom(proxy, animated: false)
             }
             .onChange(of: store.revealTick) { _, _ in
                 if following { scrollToBottom(proxy) }
@@ -1010,6 +1021,7 @@ struct ChatView: View {
     /// 聊天记录是懒加载的，滚过去的路上上面的气泡才量出真高度，第一下常常差一截；
     /// 所以落地后再补两下（不带动画），保证真的到最底。
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        HangWatch.shared.note(animated ? "scrollToBottom" : "scrollToBottom(still)")
         if animated {
             withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
         } else {
@@ -1971,5 +1983,20 @@ struct BubbleEntrance: ViewModifier {
                         .combined(with: .offset(y: 12))
                         .combined(with: .scale(scale: 0.94, anchor: isMe ? .bottomTrailing : .bottomLeading)),
                     removal: .identity)
+    }
+}
+
+/// 隔一段时间最多放行一次。引用类型：改它不会让视图重画。
+final class Throttle {
+    private let interval: TimeInterval
+    private var last = Date.distantPast
+
+    init(interval: TimeInterval) { self.interval = interval }
+
+    func ready() -> Bool {
+        let now = Date()
+        guard now.timeIntervalSince(last) >= interval else { return false }
+        last = now
+        return true
     }
 }

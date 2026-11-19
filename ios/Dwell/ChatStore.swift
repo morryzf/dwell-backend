@@ -89,6 +89,8 @@ final class ChatStore: ObservableObject {
     // MARK: - 进门
 
     func start() async {
+        HangWatch.shared.stateProvider = { [weak self] in self?.hangState ?? "" }
+        HangWatch.shared.start()
         guard api.baseURL != nil else { phase = .needsLogin; return }
         // 先把上次存下的摆出来：一打开就有内容，再去服务器问新的。
         if loadedChatID.isEmpty, let json = api.remembered("api/assistant") {
@@ -145,7 +147,17 @@ final class ChatStore: ObservableObject {
 
     /// 回到前台、切换聊天之后都走这里：问一次后端现在是哪间，再整页重拉。
     /// 网页那边可能在这期间切过聊天，所以不能只信自己记着的 chatID。
+    /// 卡住时留给现场的那一行：此刻聊天页大概在干什么。
+    var hangState: String {
+        "messages=\(messages.count) replying=\(isReplying) revealing=\(revealing) queued=\(shown.count) "
+            + "streamChars=\(streamingText.count) streamShown=\(streamShown)/\(streamParagraphs.count) "
+            + "thinkingChars=\(streamingThinking.count) browsing=\(browsing) hasMore=\(hasMore) "
+            + "weather=\(weather.kind.rawValue):\(weather.intensity)"
+    }
+
     func refresh() async {
+        HangWatch.shared.note("refresh")
+        Task { await HangWatch.shared.upload() }
         do {
             assistant = try await api.assistant()
             showRemembered()
@@ -204,6 +216,7 @@ final class ChatStore: ObservableObject {
 
     /// 重拉最近一页。之前往上翻出来的更早消息留着，不然一轮回复结束，翻好的历史就没了。
     func reloadMessages() async throws {
+        HangWatch.shared.note("reloadMessages")
         // 在看一段旧消息：先不动她眼前的，回到最新时再拉。
         guard !chatID.isEmpty, !browsing else { return }
         let chat = chatID
@@ -282,6 +295,7 @@ final class ChatStore: ObservableObject {
     /// 冒一个气泡；没有可冒的返回 false。
     @discardableResult
     private func revealOne() -> Bool {
+        HangWatch.shared.note("revealOne")
         var moved = false
         // 不带回弹：带了的话气泡会先冲过头再往下落。
         withAnimation(.spring(duration: 0.4, bounce: 0)) {
@@ -338,6 +352,7 @@ final class ChatStore: ObservableObject {
     }
 
     func loadOlder() async {
+        HangWatch.shared.note("loadOlder")
         guard hasMore, !loadingOlder, !chatID.isEmpty,
               let oldest = messages.first(where: { $0.seq > 0 })?.seq else { return }
         loadingOlder = true
@@ -703,6 +718,7 @@ final class ChatStore: ObservableObject {
     }
 
     private func apply(_ event: [String: Any]) async {
+        HangWatch.shared.note("event " + (event["type"] as? String ?? "?"))
         // 在看一段旧消息：新来的不往这一段下面插，回到最新时会一起拉回来。
         if browsing, ["echo", "stream_event", "assistant_split", "assistant"].contains(event["type"] as? String ?? "") {
             return

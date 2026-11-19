@@ -567,7 +567,7 @@ struct SystemLogPage: View {
     @State private var confirmClear = false
     @State private var loaded = false
 
-    private static let categories = [("", "全部"), ("api_request", "接口"), ("model_request", "模型"), ("memory_task", "记忆")]
+    private static let categories = [("", "全部"), ("api_request", "接口"), ("model_request", "模型"), ("memory_task", "记忆"), ("client", "app")]
     private static let statuses = [("", "全部"), ("success", "成功"), ("error", "出错"), ("running", "进行中"), ("cancelled", "取消")]
 
     var body: some View {
