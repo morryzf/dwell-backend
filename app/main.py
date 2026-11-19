@@ -38,6 +38,7 @@ from app.kelivo_import import KelivoImportError, import_conversation as kelivo_i
 from app.memory_retrieval import passes_rank_gate, rank_memory_cards, select_memory_cards
 from app.embedding_client import get_embedding, get_embeddings_batch, last_error as embedding_last_error
 from app.openrouter_usage import build_utc_cost_series, fetch_openrouter_snapshot, parse_usd_cny_rate
+from app import weather
 
 app = FastAPI(title="dwell", docs_url=None, redoc_url=None)
 
@@ -7869,6 +7870,11 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
                            "\"now\", \"today\" and other time references.\n" + "; ".join(bits),
             }]
     day_brief_message = _day_brief_message(db.cn_now(), db.chat_assistant(chat_id))
+    # 外面的天气：只读缓存里的一行，缓存冷了就不带，从不在回复链路上现场去拉。
+    weather_message = []
+    weather_line = weather.prompt_line()
+    if weather_line:
+        weather_message = [{"role": "system", "content": weather_line}]
     focus_message = []
     if focus_context:
         mode_label = "break" if focus_context["mode"] == "break" else "focus"
@@ -7908,7 +7914,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     stable_messages = instructions + format_preference + memory_message
     transient_messages = (
         private_message + memory_card_message + sigillo_message + device_message + focus_message
-        + day_brief_message + reaction_message + diary_want_message
+        + day_brief_message + weather_message + reaction_message + diary_want_message
     )
     messages = None
     if cache_friendly:
@@ -7925,7 +7931,7 @@ async def _run_ai_reply(chat_id: str, msg_id: str, watch_context: dict | None = 
     if messages is None:
         cache_friendly = False
         messages = (
-            device_message + focus_message + day_brief_message + instructions
+            device_message + focus_message + day_brief_message + weather_message + instructions
             + format_preference + private_message
             + memory_message + memory_card_message + sigillo_message
             + history_messages + reaction_message
@@ -8609,6 +8615,36 @@ async def stop():
         task.cancel()
         return {"ok": True, "stopped": True}
     return {"ok": True, "stopped": False}
+
+
+@app.get("/api/weather", dependencies=authed)
+async def weather_now():
+    """外面的天气（固定城市，默认上海）。客户端拿它决定聊天背景下不下雨、飘不飘雪。"""
+    return await weather.current()
+
+
+@app.get("/api/weather/location", dependencies=authed)
+async def weather_location_get():
+    lat, lon, name = weather.location()
+    return {"ok": True, "lat": lat, "lon": lon, "name": name}
+
+
+@app.get("/api/weather/places", dependencies=authed)
+async def weather_places(q: str = ""):
+    """搜城市，给设置里选天气跟哪个城市。"""
+    try:
+        return {"ok": True, "items": await weather.search_places(q)}
+    except Exception as exc:
+        raise HTTPException(502, f"城市没搜到：{exc}") from exc
+
+
+@app.put("/api/weather/location", dependencies=authed)
+async def weather_location_put(payload: dict = Body(...)):
+    try:
+        place = weather.set_location(payload.get("lat"), payload.get("lon"), payload.get("name"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "城市的经纬度不对") from exc
+    return {"ok": True, **place, "weather": await weather.current()}
 
 
 @app.get("/api/poll", dependencies=authed)

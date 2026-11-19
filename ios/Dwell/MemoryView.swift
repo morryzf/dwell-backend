@@ -12,15 +12,15 @@ struct MemoryView: View {
     let chatTitle: String
 
     @State private var searchOpen = false
-    @State private var historyOf: MemoryCard?
+    /// 点卡片上的「事件：…」进搜索页时，先选中的那件事。
+    @State private var searchThread = ""
     @State private var timelineOf: MemoryCard?
+    /// 添加、先修改再采用：都是推进去的一整页。卡留着不清，页面退出去的那半秒里才不会空掉。
     @State private var adding: MemoryCard?
-    @State private var editing: MemoryCard?
+    @State private var addOpen = false
     @State private var editingDraft: MemoryCard?
+    @State private var draftOpen = false
     @State private var sourceOf: (card: MemoryCard, isDraft: Bool)?
-    @State private var confirmDelete: MemoryCard?
-    @State private var editingBookmark: MemoryCard?
-    @State private var deletingBookmark: MemoryCard?
     @State private var confirmDiscardAll = false
 
     init(chatID: String, chatTitle: String) {
@@ -45,31 +45,35 @@ struct MemoryView: View {
                 .padding(.bottom, 30)
             }
             .scrollDismissesKeyboard(.interactively)
-            .sheet(item: $historyOf) { card in
-                MemoryHistorySheet(card: card, store: store)
-            }
             .sheet(item: $timelineOf) { card in
                 MemoryTimelineSheet(card: card, store: store)
             }
             .environment(\.memoryTimelineTap, { card in timelineOf = card })
-            .confirmationDialog("这件事已经有主卡了", isPresented: Binding(get: { store.demoteAsk != nil },
-                                                                     set: { if !$0 { store.demoteAsk = nil } }),
-                                titleVisibility: .visible, presenting: store.demoteAsk) { ask in
-                Button("把原来那张改成副卡，这张当主卡") {
-                    Task {
-                        let ok = ask.isNew ? await store.add(ask.card, demote: true) : await store.save(ask.card, demote: true)
-                        if ok { if ask.isNew { adding = nil } else { editing = nil } }
+            // 卡片上点「事件：…」：进搜索页，只看这件事的卡。
+            .environment(\.memoryThreadTap, { name in openSearch(thread: name) })
+            .navigationDestination(isPresented: $searchOpen) {
+                MemorySearchPage(chatID: store.chatID, thread: searchThread)
+            }
+            .navigationDestination(isPresented: $addOpen) {
+                if let adding {
+                    MemoryCardEditor(card: adding, title: "添加记忆卡", saveLabel: "添加",
+                                     events: eventChoices, store: store) { card, demote in
+                        await store.add(card, demote: demote)
                     }
                 }
-                Button("取消", role: .cancel) {}
-            } message: { ask in
-                Text(ask.message)
             }
-            // 卡片上点「事件：…」：打开筛选那一栏，只看这件事的卡。
-            .environment(\.memoryThreadTap, { name in
-                withAnimation { searchOpen = true }
-                Task { await store.showThread(name) }
-            })
+            .navigationDestination(isPresented: $draftOpen) {
+                if let draft = editingDraft {
+                    MemoryCardEditor(card: draft, title: "先修改再采用", saveLabel: "采用",
+                                     events: eventChoices, store: store) { edited, _ in
+                        await store.accept(draft, edited: edited)
+                    }
+                }
+            }
+            // 搜索页用的是它自己那份列表：在那边改过、归档过的，回来这边重拉一遍才对得上。
+            .onChange(of: searchOpen) { _, open in
+                if !open { Task { await store.loadCards(reset: true) } }
+            }
             .background(PaperBackground())
             .navigationTitle("记忆")
             .navigationBarTitleDisplayMode(.inline)
@@ -79,49 +83,25 @@ struct MemoryView: View {
                         .accessibilityLabel("关闭")
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        withAnimation { searchOpen.toggle() }
-                        store.tab = .cards
-                    } label: {
+                    Button { openSearch(thread: "") } label: {
                         Image(systemName: "magnifyingglass")
-                            .foregroundStyle(searchOpen ? Theme.accent : Theme.text)
                     }
                     .accessibilityLabel("搜索记忆")
                     Button {
-                        store.tab = .cards
                         adding = MemoryCard.blank(chatID: store.chatID)
+                        addOpen = true
                     } label: { Image(systemName: "plus") }
                     .accessibilityLabel("添加记忆卡")
                 }
             }
             .tint(Theme.text)
-            .overlay(alignment: .bottom) { toastView }
+            .overlay(alignment: .bottom) { MemoryToast(store: store) }
             .task { await store.loadAll() }
             .onDisappear { store.stopPolling() }
             .sheet(isPresented: Binding(get: { sourceOf != nil }, set: { if !$0 { sourceOf = nil } })) {
                 if let sourceOf {
                     MemorySourceSheet(store: store, card: sourceOf.card, isDraft: sourceOf.isDraft)
                 }
-            }
-            .confirmationDialog("删掉这个书签？", isPresented: Binding(
-                get: { deletingBookmark != nil }, set: { if !$0 { deletingBookmark = nil } }
-            ), titleVisibility: .visible) {
-                Button("删除", role: .destructive) {
-                    if let card = deletingBookmark { Task { await store.deleteBookmark(card) } }
-                    deletingBookmark = nil
-                }
-            } message: {
-                Text("聊天里的原话不受影响，只是不再当作记忆。")
-            }
-            .confirmationDialog("永久删除这张记忆卡？", isPresented: Binding(
-                get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }
-            ), titleVisibility: .visible) {
-                Button("永久删除", role: .destructive) {
-                    if let card = confirmDelete { Task { await store.deleteForever(card) } }
-                    confirmDelete = nil
-                }
-            } message: {
-                Text("删除后无法恢复，与它关联的带入记录也会一起清除。")
             }
             .confirmationDialog("全部忽略？", isPresented: $confirmDiscardAll, titleVisibility: .visible) {
                 Button("全部忽略（\(store.drafts.count)）", role: .destructive) {
@@ -226,245 +206,22 @@ struct MemoryView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        kindFilter
-        if searchOpen { searchPanel }
-        if let draft = adding {
-            MemoryCardEditor(card: draft, title: "添加记忆卡", saveLabel: "添加", events: eventChoices) { card in
-                if await store.add(card) { adding = nil }
-            } onCancel: { adding = nil }
-        }
-        if store.cards.isEmpty && !store.loadingCards {
-            MemoryEmpty(
-                title: isSearching ? "没有符合条件的记忆" : "还没有正式记忆卡",
-                text: isSearching ? "换个关键词或筛选条件看看。" : "先到「待确认」生成候选，并逐条采用；也可以点右上角 ＋ 自己写一张。"
-            )
-        }
-        LazyVStack(spacing: 11) {
-            ForEach(store.cards) { card in
-                if card.isBookmark {
-                    bookmarkRow(card)
-                } else if editing?.id == card.id, let editing {
-                    MemoryCardEditor(card: editing, title: "编辑", saveLabel: "保存", events: eventChoices) { edited in
-                        if await store.save(edited) { self.editing = nil }
-                    } onCancel: { self.editing = nil }
-                } else {
-                    MemoryCardView(card: card, labels: store.labels, kind: .card, currentChatID: store.chatID) {
-                        cardActions(card)
-                    } onSource: {
-                        sourceOf = (card, false)
-                    }
-                }
-            }
-        }
-        if store.hasMoreCards {
-            Button {
-                Task { await store.loadCards(reset: false) }
-            } label: {
-                HStack {
-                    if store.loadingCards { ProgressView().controlSize(.small) }
-                    Text("再显示 \(min(30, store.total - store.cards.count)) 条 · 还有 \(store.total - store.cards.count) 条")
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(MemoryButtonStyle(kind: .normal))
-        }
+        MemoryKindFilter(store: store)
+        MemoryCardList(store: store,
+                       emptyTitle: store.kind == "all" ? "还没有正式记忆卡" : "这里还没有东西",
+                       emptyText: store.kind == "all"
+                           ? "先到「待确认」生成候选，并逐条采用；也可以点右上角 ＋ 自己写一张。"
+                           : "换到「全部」看看。",
+                       onThread: { name in openSearch(thread: name) })
     }
 
     private var eventChoices: [(name: String, hasMain: Bool)] {
         store.threads.map { ($0.name, $0.hasMain) }
     }
 
-    private var isSearching: Bool {
-        !store.query.isEmpty || store.filter != "all" || !store.topic.isEmpty || !store.thread.isEmpty
-    }
-
-    private var searchPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Menu {
-                    Picker("筛选", selection: $store.filter) {
-                        ForEach(MemoryTaxonomy.filters) { choice in
-                            Text(choice.key == "archived" && store.archivedCount > 0
-                                 ? "\(choice.label) \(store.archivedCount)" : choice.label)
-                                .tag(choice.key)
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(MemoryTaxonomy.filters.first { $0.key == store.filter }?.label ?? "全部")
-                        Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
-                    }
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.text)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Capsule().fill(MemoryStyle.tag))
-                }
-                TextField("搜索记忆内容", text: $store.query)
-                    .font(.system(size: 14))
-                    .submitLabel(.search)
-                    .onSubmit { Task { await store.loadCards(reset: true) } }
-                Button {
-                    Task { await store.loadCards(reset: true) }
-                } label: {
-                    Image(systemName: "magnifyingglass").foregroundStyle(Theme.dim)
-                }
-            }
-            .padding(6)
-            .padding(.trailing, 8)
-            .background(Capsule().fill(Theme.composer))
-            .overlay(Capsule().stroke(MemoryStyle.border, lineWidth: 1))
-            .onChange(of: store.filter) { _, _ in Task { await store.loadCards(reset: true) } }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    topicChip("", "全部类别")
-                    ForEach(MemoryTaxonomy.topics) { choice in
-                        topicChip(choice.key, store.labels.topic(choice.key))
-                    }
-                }
-            }
-            // 按事件看：一件事的主卡和细节卡排在一起。
-            if !store.threads.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(store.threads, id: \.name) { item in
-                            let on = store.thread == item.name
-                            Button {
-                                Task { await store.showThread(item.name) }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "point.3.connected.trianglepath.dotted")
-                                        .font(.system(size: 10.5))
-                                    Text("\(item.name) \(item.count)")
-                                    if on { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)) }
-                                }
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(on ? .white : Theme.text)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(Capsule().fill(on ? Theme.send : MemoryStyle.tag))
-                                .overlay(Capsule().stroke(on ? .clear : MemoryStyle.border, lineWidth: 1))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// 全部 / 卡片 / 书签：一排小字，不占地方。
-    private var kindFilter: some View {
-        HStack(spacing: 4) {
-            ForEach([("all", "全部"), ("cards", "卡片"), ("bookmarks", "书签")], id: \.0) { key, title in
-                let on = store.kind == key
-                Button {
-                    guard !on else { return }
-                    store.kind = key
-                    Task { await store.loadCards(reset: true) }
-                } label: {
-                    Text(key == "bookmarks" && store.bookmarkCount > 0 ? "\(title) \(store.bookmarkCount)" : title)
-                        .font(.system(size: 12.5, weight: on ? .semibold : .regular))
-                        .foregroundStyle(on ? Theme.text : Theme.dim)
-                        .padding(.horizontal, 11)
-                        .frame(height: 28)
-                        .background(Capsule().fill(on ? MemoryStyle.tabSelected : .clear))
-                }
-                .buttonStyle(.plain)
-            }
-            Spacer()
-        }
-    }
-
-    @ViewBuilder
-    private func bookmarkRow(_ card: MemoryCard) -> some View {
-        let name = chat.assistant?.name ?? "Cloudy"
-        if editingBookmark?.id == card.id {
-            BookmarkEditor(card: card, assistantName: name) { label, why in
-                if await store.updateBookmark(card, label: label == card.label ? nil : label,
-                                              why: why == card.why ? nil : why) {
-                    editingBookmark = nil
-                }
-            } onRemoveLine: { line in
-                if await store.updateBookmark(card, removing: line.id) {
-                    editingBookmark = store.cards.first { $0.id == card.id }
-                }
-            } onCancel: {
-                editingBookmark = nil
-            }
-        } else {
-            BookmarkCardView(card: card, assistantName: name) {
-                editingBookmark = card
-            } onSource: {
-                sourceOf = (card, false)
-            } onDelete: {
-                deletingBookmark = card
-            }
-        }
-    }
-
-    private func topicChip(_ key: String, _ label: String) -> some View {
-        let on = store.topic == key
-        return Button {
-            store.topic = key
-            Task { await store.loadCards(reset: true) }
-        } label: {
-            Text(label)
-                .font(.system(size: 12.5))
-                .foregroundStyle(on ? .white : Theme.text)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(on ? Theme.send : MemoryStyle.tag))
-                .overlay(Capsule().stroke(on ? .clear : MemoryStyle.border, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private func cardActions(_ card: MemoryCard) -> some View {
-        if card.isArchived {
-            Button("恢复") { Task { await store.setStatus(card, "active") } }
-                .buttonStyle(MemoryButtonStyle(kind: .normal))
-            Button("永久删除") { confirmDelete = card }
-                .buttonStyle(MemoryButtonStyle(kind: .danger))
-        } else {
-            Button("编辑") { editing = card }
-                .buttonStyle(MemoryButtonStyle(kind: .normal))
-            Button(chat.isPicked(card) ? "已带上" : "带进下一条") {
-                if chat.isPicked(card) {
-                    chat.togglePick(card)
-                    store.toast = "下一条消息不带这张了"
-                } else if chat.togglePick(card) {
-                    store.toast = "下一条消息会带上这张"
-                } else {
-                    store.toast = "最多带 \(ChatStore.maxPicks) 张"
-                }
-            }
-            .buttonStyle(MemoryButtonStyle(kind: .quiet))
-            if card.isMain {
-                // 主卡在原卡上更新，之前的每一版都能翻。
-                Button("历史") { historyOf = card }
-                    .buttonStyle(MemoryButtonStyle(kind: .quiet))
-            }
-            // 单独读看不懂（只写了「那个女生」）的卡：让模型补上名字和事件，补好进待确认。
-            // 主卡是时间线，直接在时间线里改，不用补全。
-            if !card.isMain {
-                Button("补全") { Task { await store.completeCard(card) } }
-                    .buttonStyle(MemoryButtonStyle(kind: .quiet))
-                    .disabled(store.cardState.isBusy)
-            }
-            if card.sharedFrom == nil && card.sharedCount == 0 {
-                Button("共享") { Task { await store.share(card) } }
-                    .buttonStyle(MemoryButtonStyle(kind: .quiet))
-            }
-            Button(card.isHidden ? "重新启用" : "暂时隐藏") {
-                Task { await store.setStatus(card, card.isHidden ? "active" : "hidden") }
-            }
-            .buttonStyle(MemoryButtonStyle(kind: .quiet))
-            Button("归档") { Task { await store.archive(card) } }
-                .buttonStyle(MemoryButtonStyle(kind: .danger))
-        }
+    private func openSearch(thread: String) {
+        searchThread = thread
+        searchOpen = true
     }
 
     // MARK: - 待确认
@@ -516,10 +273,6 @@ struct MemoryView: View {
                     }
                     .transition(.asymmetric(insertion: .opacity,
                                             removal: .move(edge: leaving[draft.id] ?? .trailing).combined(with: .opacity)))
-                } else if editingDraft?.id == draft.id, let editingDraft {
-                    MemoryCardEditor(card: editingDraft, title: "先修改再采用", saveLabel: "采用", events: eventChoices) { edited in
-                        if await store.accept(draft, edited: edited) { self.editingDraft = nil }
-                    } onCancel: { self.editingDraft = nil }
                 } else {
                     MemoryCardView(card: draft, labels: store.labels, kind: .draft, currentChatID: store.chatID,
                                    target: draft.targetCardID.flatMap { store.draftTargets[$0] }) {
@@ -528,7 +281,10 @@ struct MemoryView: View {
                             Task { _ = await store.accept(draft) }
                         }
                             .buttonStyle(MemoryButtonStyle(kind: .primary))
-                        Button("先修改") { editingDraft = draft }
+                        Button("先修改") {
+                            editingDraft = draft
+                            draftOpen = true
+                        }
                             .buttonStyle(MemoryButtonStyle(kind: .normal))
                         if draft.action != "update" && draft.action != "revise" && draft.action != "append" {
                             Button("拆开") { Task { await store.splitDraft(draft) } }
@@ -550,10 +306,13 @@ struct MemoryView: View {
         }
     }
 
-    // MARK: - 提示
+}
 
-    @ViewBuilder
-    private var toastView: some View {
+/// 操作完底下冒出来的那句话，过两秒半自己收掉。每一页各放一个，推进去的页面里也看得见。
+struct MemoryToast: View {
+    @ObservedObject var store: MemoryStore
+
+    var body: some View {
         if !store.toast.isEmpty {
             Text(store.toast)
                 .font(.system(size: 14))
@@ -856,26 +615,46 @@ struct MemoryCardEditor: View {
     @State private var card: MemoryCard
     let title: String
     let saveLabel: String
-    let onSave: (MemoryCard) async -> Void
-    let onCancel: () -> Void
     /// 已有的事件，以及各自有没有主卡。
     let events: [(name: String, hasMain: Bool)]
+    @ObservedObject var store: MemoryStore
+    /// 不是推进来、而是自己一张弹出来的时候（召回演练里），左上角要给个「取消」。
+    var showsCancel = false
+    /// demote：她已经同意把这件事原来的主卡改成副卡。存上了回 true，这一页自己退出去。
+    let onSave: (MemoryCard, _ demote: Bool) async -> Bool
+    @Environment(\.dismiss) private var dismiss
     @State private var saving = false
     /// 选的是「新事件…」时，新名字写在这里。
     @State private var newEvent = ""
     @State private var choosingNew = false
 
     init(card: MemoryCard, title: String, saveLabel: String, events: [(name: String, hasMain: Bool)] = [],
-         onSave: @escaping (MemoryCard) async -> Void, onCancel: @escaping () -> Void) {
+         store: MemoryStore, showsCancel: Bool = false,
+         onSave: @escaping (MemoryCard, _ demote: Bool) async -> Bool) {
         _card = State(initialValue: card)
         self.title = title
         self.saveLabel = saveLabel
         self.events = events
+        self.store = store
+        self.showsCancel = showsCancel
         self.onSave = onSave
-        self.onCancel = onCancel
         let known = events.contains { $0.name == card.thread }
         _choosingNew = State(initialValue: !card.thread.isEmpty && !known)
         _newEvent = State(initialValue: known ? "" : card.thread)
+    }
+
+    private var canSave: Bool {
+        !saving && !card.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func save(demote: Bool) {
+        guard !saving else { return }
+        saving = true
+        Task {
+            let ok = await onSave(card, demote)
+            saving = false
+            if ok { dismiss() }
+        }
     }
 
     /// 选了某件事：身份默认沿用原来的；原来没有的，那件事还没主卡就当主卡，有了就当副卡。
@@ -919,7 +698,43 @@ struct MemoryCardEditor: View {
         }
     }
 
+    /// 一整页：左上角返回就是不改了，右上角和最底下都能存。
     var body: some View {
+        ScrollView {
+            form
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 30)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .background(PaperBackground())
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if showsCancel {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(saveLabel) { save(demote: false) }
+                    .fontWeight(.semibold)
+                    .disabled(!canSave)
+            }
+        }
+        .tint(Theme.text)
+        .overlay(alignment: .bottom) { MemoryToast(store: store) }
+        .confirmationDialog("这件事已经有主卡了", isPresented: Binding(get: { store.demoteAsk != nil },
+                                                                 set: { if !$0 { store.demoteAsk = nil } }),
+                            titleVisibility: .visible, presenting: store.demoteAsk) { _ in
+            Button("把原来那张改成副卡，这张当主卡") { save(demote: true) }
+            Button("取消", role: .cancel) {}
+        } message: { ask in
+            Text(ask.message)
+        }
+    }
+
+    private var form: some View {
         VStack(alignment: .leading, spacing: 12) {
             label("记忆内容")
             if card.isMain && !card.timeline.isEmpty {
@@ -1002,29 +817,17 @@ struct MemoryCardEditor: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                Button {
-                    saving = true
-                    Task {
-                        await onSave(card)
-                        saving = false
-                    }
-                } label: {
-                    HStack {
-                        if saving { ProgressView().tint(.white).controlSize(.small) }
-                        Text(saveLabel)
-                    }
+            Button { save(demote: false) } label: {
+                HStack {
+                    if saving { ProgressView().tint(.white).controlSize(.small) }
+                    Text(saveLabel)
                 }
-                .buttonStyle(MemoryButtonStyle(kind: .primary))
-                .disabled(saving || card.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button("取消", action: onCancel)
-                    .buttonStyle(MemoryButtonStyle(kind: .quiet))
+                .frame(maxWidth: .infinity)
             }
-            .padding(.top, 4)
+            .buttonStyle(MemoryButtonStyle(kind: .primary, large: true))
+            .disabled(!canSave)
+            .padding(.top, 8)
         }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(MemoryStyle.card))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.accent.opacity(0.6), lineWidth: 1))
     }
 
     private func label(_ text: String) -> some View {

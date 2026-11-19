@@ -232,6 +232,21 @@ html[data-theme="dark"] .glass,
 
   /* ============ 消息流 ============ */
   
+  /* 外面的天气：雨点打在玻璃上、雪花飘。铺在方格纸/背景图上面、内容下面。
+     html 自己不涂色：这样 body 的方格纸会被提到整个页面的最底层去画，
+     负 z-index 的天气层才能垫在格纸上面、所有内容下面。 */
+  html { background: transparent; }
+  #weatherFx, #rainFx {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: -1;
+    pointer-events: none;
+  }
+  /* 雨是 WebGL 画的「背景 + 折射水珠」，整张盖在真背景上；用透明度慢慢下起来、慢慢停。 */
+  #rainFx { opacity: 0; transition: opacity 1.8s ease-in-out; }
+
   #log {
     flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
     /* Header is deliberately translucent, but the first message must never begin beneath it. */
@@ -4799,6 +4814,9 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
 </style>
 </head>
 <body>
+
+<canvas id="rainFx" aria-hidden="true"></canvas>
+<canvas id="weatherFx" aria-hidden="true"></canvas>
 
 <header>
   <button class="iconbtn glass" id="menuBtn" title="打开侧边栏"><span class="ic" data-i="chevL"></span></button>
@@ -16909,6 +16927,489 @@ window.promptLogin = async function() {
     window.__logging_in = false;
   }
 };
+
+// ---------------------------------------------------------------- 外面的天气
+// 后端 /api/weather（固定城市）说下雨就画雨点打在玻璃上，说下雪就飘雪。
+// 天气换了新旧两层交叉淡过去；标签页藏起来就停笔；减弱动态效果时只画静止的一帧。
+(function weatherFx() {
+  const canvas = document.getElementById('weatherFx');
+  if (!canvas || !canvas.getContext) return;
+  const ctx = canvas.getContext('2d');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  let now = { kind: '', level: 0 };            // 正在画的
+  let fade = { kind: '', level: 0, alpha: 0 }; // 正在淡出去的上一种
+  let fadeIn = 1;
+  let raf = 0;
+
+  function dark() {
+    const theme = document.documentElement.dataset.theme;
+    if (theme === 'dark') return true;
+    if (theme === 'light') return false;
+    return matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+
+  function size() {
+    const scale = Math.min(devicePixelRatio || 1, 2);
+    canvas.width = innerWidth * scale;
+    canvas.height = innerHeight * scale;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  }
+  addEventListener('resize', () => { size(); kick(); });
+  size();
+
+  // 一组 (seed, salt) 永远同一个 0..1：每帧从时间直接算出每颗雨点在哪，不存状态。
+  function rnd(seed, salt) {
+    let v = Math.imul(seed, 31) + salt;
+    v = Math.imul(v ^ (v >>> 15), 0x85ebca6b);
+    v = Math.imul(v ^ (v >>> 13), 0xc2b2ae35);
+    return ((v ^ (v >>> 16)) >>> 8) / 0x1000000;
+  }
+
+  // 一颗水珠：边缘深、中心几乎透明（光从水珠边上折过去），左上一点高光。
+  // 画成实心圆就成灰尘了。
+  function drop(x, y, r, alpha, d) {
+    ctx.globalAlpha *= alpha;
+    const rim = ctx.createRadialGradient(x, y, r * 0.45, x, y, r);
+    if (d) {
+      rim.addColorStop(0, 'rgba(255,255,255,0)');
+      rim.addColorStop(0.8, 'rgba(255,255,255,.13)');
+      rim.addColorStop(1, 'rgba(255,255,255,.34)');
+    } else {
+      rim.addColorStop(0, 'rgba(90,100,125,0)');
+      rim.addColorStop(0.8, 'rgba(90,100,125,.2)');
+      rim.addColorStop(1, 'rgba(90,100,125,.52)');
+    }
+    ctx.fillStyle = rim;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+    ctx.fillStyle = d ? 'rgba(255,255,255,.5)' : 'rgba(255,255,255,.85)';
+    ctx.beginPath(); ctx.arc(x - r * 0.38, y - r * 0.38, r * 0.26, 0, 7); ctx.fill();
+    ctx.globalAlpha /= alpha;
+  }
+
+  // 不是满屏斜线的雨：小水珠停在玻璃上慢慢聚大、淡去，时不时一颗顺着玻璃滑出一道痕。
+  function drawRain(t, level, w, h) {
+    const d = dark();
+    const drops = [30, 46, 64][level], gap = [7.0, 4.2, 2.4][level];
+    for (let i = 0; i < drops; i++) {
+      const period = 16 + 18 * rnd(i, 1);
+      const shifted = t + 1000 * rnd(i, 2);
+      const cycle = Math.floor(shifted / period);
+      const phase = (shifted - cycle * period) / period;
+      const x = rnd(i + cycle * 977, 3) * w, y = rnd(i + cycle * 977, 4) * h;
+      const r = (2.2 + 3.4 * rnd(i + cycle * 977, 5)) * (1 + 0.7 * Math.min(1, phase * 2.5));
+      const alpha = Math.min(1, phase / 0.08) * Math.min(1, (1 - phase) / 0.25);
+      if (alpha > 0.02) drop(x, y, r, alpha, d);
+    }
+    const duration = 3.4, current = Math.floor(t / gap);
+    for (let k = current - 2; k <= current; k++) {
+      const begin = k * gap + gap * 0.6 * rnd(k, 11);
+      const progress = (t - begin) / duration;
+      if (progress <= 0 || progress >= 1.6) continue;
+      const x0 = (0.06 + 0.88 * rnd(k, 12)) * w, wobble = 5 + 4 * rnd(k, 13);
+      const at = p => [x0 + wobble * Math.sin(p * 9 + k), (Math.pow(p, 1.5) * 1.1 - 0.05) * h];
+      for (let trail = 0; trail < Math.min(progress, 1); trail += 0.055) {
+        const alpha = Math.max(0, 0.9 - (progress - trail) * duration * 0.38);
+        if (alpha > 0.03) {
+          const spot = at(trail);
+          drop(spot[0], spot[1], 1.1 + 1.3 * rnd(k + Math.floor(trail * 97), 14), alpha, d);
+        }
+      }
+      if (progress < 1) {
+        const head = at(progress);
+        ctx.save(); ctx.translate(head[0], head[1]); ctx.scale(1, 1.35);
+        drop(0, 0, 3.2, 1, d); ctx.restore();
+      }
+    }
+  }
+
+  function flakes(t, count, salt, r0, r1, v0, v1, alpha, blur, w, h) {
+    const d = dark();
+    ctx.filter = blur ? 'blur(1.4px)' : 'none';
+    if (!d) {   // 底色是浅粉白的，纯白雪花看不见：垫一圈冷灰的柔影。
+      ctx.shadowColor = 'rgba(118,135,168,1)'; ctx.shadowBlur = 2.5;
+    }
+    for (let i = 0; i < count; i++) {
+      const seed = i + salt;
+      const r = r0 + (r1 - r0) * rnd(seed, 21);
+      const v = v0 + (v1 - v0) * rnd(seed, 22);
+      const sway = 10 + 18 * rnd(seed, 23);
+      const x = rnd(seed, 25) * w + sway * Math.sin(t * (0.35 + 0.3 * rnd(seed, 26)) + rnd(seed, 24) * 6.28);
+      const y = (rnd(seed, 27) * (h + 24) + t * v) % (h + 24) - 12;
+      ctx.globalAlpha *= alpha;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+      ctx.globalAlpha /= alpha;
+    }
+    ctx.filter = 'none';
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+  }
+
+  // 两层雪：远的小、糊、慢；近的大、清楚、快一点。
+  function drawSnow(t, level, w, h) {
+    const d = dark();
+    flakes(t, [20, 30, 44][level], 100, 1.6, 2.6, 11, 19, d ? 0.5 : 0.7, true, w, h);
+    flakes(t, [12, 18, 28][level], 200, 2.8, 4.6, 24, 40, d ? 0.9 : 1.0, false, w, h);
+  }
+
+  function drawOne(kind, level, t, w, h) {
+    // 雨平时是 WebGL 那张画（syncRain），这里只在 WebGL 不行时兜底。
+    if ((kind === 'rain' || kind === 'storm') && glOk === false) drawRain(t, kind === 'storm' ? 2 : level, w, h);
+    else if (kind === 'snow') drawSnow(t, level, w, h);
+  }
+
+  // ---------------- WebGL 的雨：和 iOS 的 Rain.metal 同一套数学 ----------------
+  // 每颗水珠里按它的法线反向去采背景纹理——透过珠子看到的是缩小倒置的壁纸，
+  // 不是画上去的圈。背景纹理照页面真实的背景做：方格纸现画一份，壁纸图装进来。
+  const rainCanvas = document.getElementById('rainFx');
+  let gl = null, glProg = null, glU = null, glOk = null, glRaf = 0, bgReady = false;
+
+  const RAIN_FRAG = `
+precision highp float;
+uniform vec2 u_res; uniform float u_dpr, u_time, u_level, u_dark; uniform sampler2D u_tex;
+uniform vec4 u_tune;   // x 密度 y 珠子大小 z 折射 w 高光，默认都是 1
+vec2 hash22(vec2 p){ vec3 q = fract(vec3(p.xyx) * vec3(443.897, 441.423, 437.195));
+  q += dot(q, q.yzx + 19.19); return fract((q.xx + q.yz) * q.zy); }
+// 把一颗珠加进「水场」：所有珠叠完再取等值面，挨着的就黏成一团，轮廓才不是圆。
+// 每颗珠的波浪频率、幅度、相位都从自己的 seed 来，不会两颗长得一样。
+// acc: x=场强，yz=Σ权重*指回质心，w=Σ权重*半径
+void addDrop(inout vec4 acc, vec2 p, vec2 center, float radius, float topThin,
+             float seed, float weight){
+  vec2 d = (p - center) / radius;
+  if (abs(d.x) > 2.0 || abs(d.y) > 2.0) return;
+  d.y /= (d.y < 0.0 ? topThin : 1.12);
+  vec2 w = hash22(vec2(seed, seed * 1.71 + 3.3));
+  float ang = atan(d.y, d.x);
+  float wob = 0.05 + 0.13 * w.y;
+  float edge = 1.0 + wob * sin(ang * (2.0 + floor(w.x * 3.0)) + seed * 13.7)
+                   + wob * 0.7 * sin(ang * (5.0 + floor(w.y * 3.0)) + seed * 7.3);
+  float len = length(d) / edge;
+  float k = max(0.0, 1.0 - len * len);
+  k = k * k * weight;
+  acc.x += k;
+  acc.yz += -d * k;
+  acc.w += radius * k;
+}
+void stillLayer(inout vec4 acc, vec2 p, float cell, float density, float time, float salt,
+                float rMin, float rMax, float weight){
+  vec2 base = floor(p / cell);
+  for (int ix = -1; ix <= 1; ix++) for (int iy = -1; iy <= 1; iy++) {
+    vec2 id = base + vec2(float(ix), float(iy));
+    vec2 h = hash22(id * 1.37 + salt);
+    // 一片密一片疏：真玻璃上的水从来不是均匀撒的。
+    vec2 pr = hash22(floor(id * cell / 230.0) + salt * 0.37);
+    if (h.x > density * (0.35 + 1.5 * pr.x)) continue;
+    float period = 14.0 + 20.0 * h.y;
+    float cycles = floor(time / period + h.x * 7.0);
+    float phase = fract(time / period + h.x * 7.0);
+    vec2 jitter = hash22(id + cycles * 0.731 + salt);
+    vec2 center = (id + 0.15 + jitter * 0.7) * cell;
+    // 平方分布拉出连续的大小谱：小的多，大的少，各层的段落互相搭着。
+    float radius = cell * mix(rMin, rMax, jitter.y * jitter.y) * u_tune.y;
+    float alive = smoothstep(0.0, 0.08, phase) * (1.0 - smoothstep(0.75, 1.0, phase));
+    float seed = dot(id, vec2(127.1, 311.7)) + salt + cycles;
+    addDrop(acc, p, center, radius, 0.72 + 0.2 * jitter.x, seed, weight * alive);
+    // 伴珠：挨着主珠再长一颗小的，黏成复合的形状——真水珠常是几颗并作一摊。
+    vec2 c = hash22(id * 3.91 + salt + cycles);
+    if (c.x < 0.45) {
+      vec2 away = vec2(cos(c.y * 6.28), sin(c.y * 6.28)) * radius * (0.7 + 0.5 * c.x);
+      addDrop(acc, p, center + away, radius * (0.35 + 0.45 * c.y), 0.8,
+              seed + 5.1, weight * alive);
+    }
+  }
+}
+// 会滑落的大珠：头和身后的痕都丢进同一个水场，黏成一条不规则的湿痕。
+void slidingLayer(inout vec4 acc, vec2 p, vec2 size, float density, float time){
+  float colW = 96.0;
+  float col = floor(p.x / colW);
+  for (int ic = -1; ic <= 1; ic++) {
+    float column = col + float(ic);
+    vec2 h = hash22(vec2(column, 4.7));
+    if (h.y > density) continue;
+    float period = 7.0 + 9.0 * h.x;
+    float rnd = floor(time / period + h.y);
+    float progress = fract(time / period + h.y);
+    vec2 g = hash22(vec2(column, rnd * 0.613));
+    float travel = smoothstep(0.15, 1.0, progress); travel *= travel;
+    float lurch = 0.012 * sin(time * 9.0 + g.x * 40.0);
+    float headY = (travel + lurch) * (size.y + 120.0) - 60.0;
+    float pathX0 = (column + 0.25 + 0.5 * g.y) * colW;
+    float sway = colW * 0.16;
+    float headX = pathX0 + sway * sin(headY * 0.021 + g.x * 6.28);
+    float headR = (8.0 + 5.0 * g.y) * u_tune.y;
+    addDrop(acc, p, vec2(headX, headY), headR, 0.55 - 0.2 * travel, column * 17.9 + rnd, 1.0);
+    if (p.y < headY && progress > 0.15) {
+      float cellY = floor(p.y / 22.0);
+      vec2 th = hash22(vec2(column, cellY) + rnd);
+      float y = (cellY + 0.3 + 0.4 * th.y) * 22.0;
+      float behind = (headY - y) / 320.0;
+      if (behind > 0.0 && behind < 1.0) {
+        float x = pathX0 + sway * sin(y * 0.021 + g.x * 6.28) + (th.x - 0.5) * 5.0;
+        float radius = max(1.8, headR * 0.62 * (1.0 - behind) * (0.5 + th.y));
+        addDrop(acc, p, vec2(x, y), radius, 0.45, column * 7.7 + cellY, 1.0 - behind * 0.7);
+      }
+    }
+  }
+}
+// 纹理从 2d canvas 传进来，第 0 行就是最上面：uv 不翻。
+vec2 uvOf(vec2 q, vec2 size){ return q / size; }
+void main(){
+  vec2 size = u_res / u_dpr;
+  vec2 p = vec2(gl_FragCoord.x, u_res.y - gl_FragCoord.y) / u_dpr;
+  vec4 acc = vec4(0.0);
+  float dens = u_tune.x;
+  slidingLayer(acc, p, size, (0.36 + 0.25 * u_level) * dens, u_time);
+  stillLayer(acc, p, 64.0, (0.22 + 0.10 * u_level) * dens, u_time, 3.1, 0.10, 0.50, 1.0);
+  stillLayer(acc, p, 30.0, (0.30 + 0.14 * u_level) * dens, u_time * 0.8, 8.7, 0.12, 0.50, 1.0);
+  stillLayer(acc, p, 13.0, (0.55 + 0.20 * u_level) * dens, u_time * 0.6, 15.3, 0.12, 0.40, 0.85);
+  float field = acc.x;
+  float mask = smoothstep(0.15, 0.27, field);
+  vec3 flat0 = texture2D(u_tex, uvOf(p, size)).rgb;
+  if (mask <= 0.003) { gl_FragColor = vec4(flat0, 1.0); return; }
+  vec2 grad = acc.yz / max(field, 1e-4);
+  float radius = acc.w / max(field, 1e-4);
+  // 折射使劲一点：透过大珠看到的是更远处的画面（原版偏移有好几百像素）。
+  vec2 offset = grad * radius * 2.6 * u_tune.z;
+  offset *= min(1.0, 110.0 / max(length(offset), 1e-3));
+  vec3 through = texture2D(u_tex, uvOf(p + offset, size)).rgb;
+  vec3 color = mix(flat0, through, mask);
+  color *= 1.0 + (u_dark > 0.5 ? 0.10 : 0.07) * mask;
+  // 等值面附近就是水边：压一道暗沿，上缘更深。
+  float ring = (1.0 - smoothstep(0.27, 0.62, field)) * mask;
+  vec2 dir = grad / max(length(grad), 1e-4);
+  float topness = smoothstep(0.1, 0.9, dir.y);
+  color *= 1.0 - ring * (0.11 + 0.17 * topness);
+  // 高光收小调淡：亮主要该来自折射采到的天光，不是画上去的白点。
+  float shine = (1.0 - smoothstep(0.05, 0.3, length(grad - vec2(0.38, 0.42)))) * mask;
+  color += shine * (u_dark > 0.5 ? 0.10 : 0.14) * u_tune.w;
+  gl_FragColor = vec4(color, 1.0);
+}`;
+
+  function glInit() {
+    if (glOk !== null) return glOk;
+    gl = rainCanvas.getContext('webgl', { alpha: false, antialias: false });
+    if (!gl) { glOk = false; return false; }
+    function sh(type, src) {
+      const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
+      if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(o);
+      return o;
+    }
+    try {
+      glProg = gl.createProgram();
+      gl.attachShader(glProg, sh(gl.VERTEX_SHADER,
+        'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}'));
+      gl.attachShader(glProg, sh(gl.FRAGMENT_SHADER, RAIN_FRAG));
+      gl.linkProgram(glProg);
+      if (!gl.getProgramParameter(glProg, gl.LINK_STATUS)) throw gl.getProgramInfoLog(glProg);
+    } catch (e) { glOk = false; return false; }
+    gl.useProgram(glProg);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(glProg, 'a');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    glU = {};
+    for (const n of ['u_res', 'u_dpr', 'u_time', 'u_level', 'u_dark', 'u_tex', 'u_tune'])
+      glU[n] = gl.getUniformLocation(glProg, n);
+    const tex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    for (const [k, v] of [[gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE],
+                          [gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR]])
+      gl.texParameteri(gl.TEXTURE_2D, k, v);
+    gl.uniform1i(glU.u_tex, 0);
+    glOk = true;
+    return true;
+  }
+
+  function hexRgba(hex, alpha) {
+    const m = (hex || '').trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (!m) return 'rgba(0,0,0,' + alpha + ')';
+    let c = m[1];
+    if (c.length === 3) c = c.replace(/./g, x => x + x);
+    const n = parseInt(c, 16);
+    return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + alpha + ')';
+  }
+
+  // 把页面真实的背景画进纹理：有壁纸装壁纸（盖同一层渐变），没有就照 CSS 现画方格纸。
+  function buildBgTexture() {
+    const w = rainCanvas.width, h = rainCanvas.height;
+    if (!w || !h) return;
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    const c = off.getContext('2d');
+    const css = getComputedStyle(document.documentElement);
+    const v = n => css.getPropertyValue(n).trim();
+    const bg = v('--bg') || '#fcf9fa';
+    c.fillStyle = bg; c.fillRect(0, 0, w, h);
+    const upload = () => {
+      // 隔着湿玻璃看出去：背景糊一档，水珠里的折射才显眼。
+      const soft = document.createElement('canvas');
+      soft.width = w; soft.height = h;
+      const sc = soft.getContext('2d');
+      sc.filter = 'blur(' + (3 * dpr) + 'px)';
+      sc.drawImage(off, 0, 0);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, soft);
+      bgReady = true; kickRain();
+    };
+    const url = (v('--chat-bg-image').match(/url\(["']?(.*?)["']?\)/) || [])[1];
+    if (document.documentElement.classList.contains('has-chat-background') && url) {
+      const img = new Image();
+      img.onload = () => {
+        const s = Math.max(w / img.width, h / img.height);
+        c.drawImage(img, (w - img.width * s) / 2, (h - img.height * s) / 2, img.width * s, img.height * s);
+        const top = (parseFloat(v('--chat-bg-overlay-top')) || 44) / 100;
+        const bottom = (parseFloat(v('--chat-bg-overlay-bottom')) || 64) / 100;
+        const grad = c.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, hexRgba(bg, top));
+        grad.addColorStop(1, hexRgba(bg, bottom));
+        c.fillStyle = grad; c.fillRect(0, 0, w, h);
+        upload();
+      };
+      img.onerror = upload;
+      img.src = url;
+      return;
+    }
+    if (dark()) {
+      // 深色：安静的点点夜空（radial 19px 格），顶上一团淡淡的粉。
+      c.fillStyle = 'rgba(238,209,220,.18)';
+      for (let y = 0; y < h; y += 19 * dpr) for (let x = 0; x < w; x += 19 * dpr) {
+        c.beginPath(); c.arc(x + dpr, y + dpr, 1.1 * dpr, 0, 7); c.fill();
+      }
+      const glow = c.createRadialGradient(w / 2, -0.18 * h, 0, w / 2, -0.18 * h, h * 0.75);
+      glow.addColorStop(0, 'rgba(231,167,191,.09)'); glow.addColorStop(1, 'rgba(231,167,191,0)');
+      c.fillStyle = glow; c.fillRect(0, 0, w, h);
+    } else {
+      // 浅色：14px 的点 + 32px 的粉格线，和 body 的 CSS 一样。
+      const dim = hexRgba(v('--dim') || '#9b8f96', 0.2);
+      const accent = hexRgba(v('--accent') || '#e7a7bf', 0.1);
+      c.fillStyle = dim;
+      for (let y = 0; y < h; y += 14 * dpr) for (let x = 0; x < w; x += 14 * dpr) {
+        c.beginPath(); c.arc(x + dpr, y + dpr, 1.1 * dpr, 0, 7); c.fill();
+      }
+      c.fillStyle = accent;
+      for (let x = 0; x < w; x += 32 * dpr) c.fillRect(x, 0, dpr, h);
+      for (let y = 0; y < h; y += 32 * dpr) c.fillRect(0, y, w, dpr);
+    }
+    upload();
+  }
+
+  function sizeRain() {
+    const scale = Math.min(devicePixelRatio || 1, 2);
+    rainCanvas.width = innerWidth * scale;
+    rainCanvas.height = innerHeight * scale;
+    if (gl) { gl.viewport(0, 0, rainCanvas.width, rainCanvas.height); }
+    bgReady = false;
+  }
+
+  function rainActive() { return now.kind === 'rain' || now.kind === 'storm'; }
+
+  // 雨的手感（密度、珠子大小、折射、高光，默认 1,1,1,1）。
+  // 网址上 ?raintune=1,1.2,1.5,0.8 这样试，顺手调。
+  const rainTune = (() => {
+    const raw = (new URLSearchParams(location.search).get('raintune') || '').split(',');
+    return [0, 1, 2, 3].map(i => {
+      const v = parseFloat(raw[i]);
+      return isFinite(v) ? Math.max(0, Math.min(3, v)) : 1;
+    });
+  })();
+
+  function rainFrame() {
+    glRaf = 0;
+    if (!rainActive() || document.hidden || !glOk) return;
+    if (!bgReady) { buildBgTexture(); return; }   // 纹理好了会再叫一帧
+    const t = reduced.matches ? 1234.5 : (performance.now() / 1000) % 36000;
+    gl.uniform2f(glU.u_res, rainCanvas.width, rainCanvas.height);
+    gl.uniform1f(glU.u_dpr, Math.min(devicePixelRatio || 1, 2));
+    gl.uniform1f(glU.u_time, t);
+    gl.uniform1f(glU.u_level, now.kind === 'storm' ? 2 : now.level);
+    gl.uniform1f(glU.u_dark, dark() ? 1 : 0);
+    gl.uniform4f(glU.u_tune, rainTune[0], rainTune[1], rainTune[2], rainTune[3]);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    if (!reduced.matches) glRaf = requestAnimationFrame(rainFrame);
+  }
+
+  function kickRain() { if (!glRaf && !document.hidden && rainActive() && glOk) glRaf = requestAnimationFrame(rainFrame); }
+
+  // 下起来、停下来：都走 canvas 的透明度，1.8 秒。WebGL 不行就退回 2D 版的雨。
+  function syncRain() {
+    if (rainActive() && glInit()) {
+      sizeRain();
+      rainCanvas.style.opacity = '1';
+      kickRain();
+    } else {
+      rainCanvas.style.opacity = '0';
+    }
+  }
+  addEventListener('resize', () => { if (rainActive() && glOk) { sizeRain(); kickRain(); } });
+  document.addEventListener('visibilitychange', kickRain);
+  // 换主题、换壁纸：背景纹理重画一份。
+  new MutationObserver(() => { bgReady = false; kickRain(); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
+
+
+  function frame() {
+    raf = 0;
+    const w = innerWidth, h = innerHeight;
+    ctx.clearRect(0, 0, w, h);
+    const still = reduced.matches;
+    const t = still ? 1234.5 : performance.now() / 1000;
+    if (fade.kind && fade.alpha > 0.01) {
+      ctx.globalAlpha = fade.alpha;
+      drawOne(fade.kind, fade.level, t, w, h);
+      ctx.globalAlpha = 1;
+      fade.alpha -= 0.012;
+    } else fade.kind = '';
+    if (now.kind) {
+      fadeIn = Math.min(1, fadeIn + 0.012);
+      ctx.globalAlpha = fadeIn;
+      drawOne(now.kind, now.level, t, w, h);
+      ctx.globalAlpha = 1;
+    }
+    // 减弱动态效果：淡完这一帧就停在这里，画面在、但不动。
+    const settled = still && fadeIn >= 1 && !fade.kind;
+    if ((now.kind || fade.kind) && !document.hidden && !settled) raf = requestAnimationFrame(frame);
+  }
+
+  function kick() { if (!raf && !document.hidden) raf = requestAnimationFrame(frame); }
+  document.addEventListener('visibilitychange', kick);
+  if (reduced.addEventListener) reduced.addEventListener('change', kick);
+
+  // 网址上带 ?weather=rain:heavy（rain/snow/storm × light/moderate/heavy）就只画这个，
+  // 不问后端——不等真的下雨也能先看看效果。
+  const forced = new URLSearchParams(location.search).get('weather') || '';
+  async function check() {
+    try {
+      if (forced) {
+        const bits = forced.split(':');
+        if (['rain', 'snow', 'storm'].indexOf(bits[0]) >= 0) {
+          now = { kind: bits[0], level: bits[1] === 'heavy' ? 2 : bits[1] === 'moderate' ? 1 : 0 };
+          fadeIn = 0;
+          syncRain();
+          kick();
+        }
+        return;
+      }
+      const r = await fetch('api/weather', { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      const effect = ['rain', 'snow', 'storm'].indexOf(d.condition) >= 0 ? d.condition : '';
+      const level = d.intensity === 'heavy' ? 2 : d.intensity === 'moderate' ? 1 : 0;
+      if (effect !== now.kind || level !== now.level) {
+        if (now.kind && now.kind !== 'rain' && now.kind !== 'storm') {
+          fade = { kind: now.kind, level: now.level, alpha: 1 };
+        }
+        now = { kind: effect, level: level };
+        fadeIn = 0;
+        syncRain();
+        kick();
+      }
+    } catch (e) {}
+  }
+  check();
+  setInterval(check, 10 * 60 * 1000);
+})();
 
 // 页面加载时先问一下 /api/me，如果没登录就立刻弹框。
 // 不等 poll 那边慢慢触发。

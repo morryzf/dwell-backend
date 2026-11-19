@@ -173,17 +173,13 @@ struct RecallRehearsalView: View {
         }
         .sheet(item: $editing) { card in
             NavigationStack {
-                ScrollView {
-                    MemoryCardEditor(card: card, title: "编辑", saveLabel: "保存",
-                                     events: store.threads.map { ($0.name, $0.hasMain) }) { edited in
-                        if await store.save(edited) {
-                            editing = nil
-                            await run(text)
-                        }
-                    } onCancel: { editing = nil }
-                    .padding(20)
+                MemoryCardEditor(card: card, title: "编辑", saveLabel: "保存",
+                                 events: store.threads.map { ($0.name, $0.hasMain) },
+                                 store: store, showsCancel: true) { edited, demote in
+                    guard await store.save(edited, demote: demote) else { return false }
+                    await run(text)
+                    return true
                 }
-                .background(PaperBackground())
             }
             .presentationDetents([.large])
         }

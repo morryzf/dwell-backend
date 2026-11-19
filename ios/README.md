@@ -58,6 +58,7 @@
 | `Dwell/ChatControls.swift` | 输入框那一排的状态：语音、回复语言、指令、工具、模型；语音播放器 |
 | `Dwell/ComposerSheets.swift` | ＋（拍照 / 相册 / 文件 / 回复语言）、指令、工具、切换模型这几个面板 |
 | `Dwell/VoiceBar.swift` | 语音回复的语音条 |
+| `Dwell/WeatherLayer.swift` | 外面的天气叠在聊天背景上：雨点打在玻璃上、雪花飘（/api/weather） |
 | `Dwell/Images.swift` | 选图压缩（跟网页同样的尺寸）、记录里的图片显示和放大 |
 | `Dwell/MemoryView.swift` | 记忆面板：记忆卡（搜索、筛选、编辑、共享、隐藏、归档）、待确认（采用、先修改、拆开、忽略）、看原文 |
 | `Dwell/MemoryPanels.swift` | 记忆面板的「摘要」「设置」两页 |
