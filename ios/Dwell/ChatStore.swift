@@ -222,7 +222,12 @@ final class ChatStore: ObservableObject {
         rememberedChatID = ""
         if loadedChatID == chat && !fromRemembered {
             let known = Set(messages.map(\.id))
-            hold(fresh.filter { !known.contains($0.id) && $0.kind == .gu }, carried: streamShown)
+            // 只有比手上最新那条还新的才算「刚到的」。删掉一条之后，这一页的顶上会多露出
+            // 一条更早的旧消息——它不在手上，但不是新来的；当成新的去一个个冒，
+            // 冒的是屏幕外最上面那条，底下只剩三个点，画面跟着一弹一弹。
+            let newest = messages.map(\.seq).max() ?? 0
+            hold(fresh.filter { !known.contains($0.id) && $0.kind == .gu && $0.seq > newest },
+                 carried: streamShown)
         } else {
             shown = [:]
         }
