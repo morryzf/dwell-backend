@@ -250,11 +250,7 @@ struct InstructionManager: View {
     let onChange: () -> Void
 
     @State private var items: [Instruction] = []
-    @State private var editingID = ""
-    @State private var name = ""
-    @State private var content = ""
-    @State private var message = ""
-    @State private var confirmDelete = false
+    @State private var loaded = false
 
     var body: some View {
         List {
@@ -265,46 +261,102 @@ struct InstructionManager: View {
             .listRowInsets(EdgeInsets())
 
             Section("已保存的指令") {
-                if items.isEmpty {
+                if items.isEmpty && loaded {
                     Text("还没有指令。写第一条吧。").font(.system(size: 14)).foregroundStyle(Theme.dim)
                 }
+                // 点一条：推进去一整页改，不在这一页下面摊开。
                 ForEach(items) { item in
-                    Button {
-                        editingID = item.id
-                        name = item.name
-                        content = item.content
-                        message = ""
+                    NavigationLink {
+                        InstructionEditor(item: item) { await changed() }
                     } label: {
-                        HStack {
-                            Text(item.name).foregroundStyle(Theme.text)
-                            Spacer()
-                            Text(item.id == editingID ? "正在编辑" : "编辑 ›").foregroundStyle(Theme.dim)
-                        }
+                        Text(item.name).foregroundStyle(Theme.text).lineLimit(1)
                     }
                 }
             }
             Section {
-                TextField("名称，例如：OB", text: $name)
-                TextField("写给模型看的规则或背景…", text: $content, axis: .vertical)
-                    .lineLimit(6...16)
-                Button(editingID.isEmpty ? "添加指令" : "保存修改") { Task { await save() } }
-                    .font(.system(size: 16, weight: .semibold))
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty
-                              || content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                if !editingID.isEmpty {
-                    Button("删除", role: .destructive) { confirmDelete = true }
-                    Button("取消编辑") { reset() }.foregroundStyle(Theme.dim)
+                NavigationLink {
+                    InstructionEditor(item: nil) { await changed() }
+                } label: {
+                    Label("添加指令", systemImage: "plus")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(Theme.text)
                 }
-            } header: {
-                Text(editingID.isEmpty ? "添加指令" : "编辑指令")
-            } footer: {
-                if !message.isEmpty { Text(message) }
             }
         }
         .modifier(SheetListStyle())
         .navigationTitle("聊天指令")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+    }
+
+    private func load() async {
+        if let json = try? await API.shared.request("GET", "api/instructions") {
+            items = (json["items"] as? [[String: Any]] ?? []).map(Instruction.init(json:))
+        }
+        loaded = true
+    }
+
+    private func changed() async {
+        await load()
+        onChange()
+    }
+}
+
+/// 写一条指令、改一条指令：单独一页。item 是 nil 就是新写一条。
+/// 左上角返回是不改了，右上角存；存好、删掉之后自己退回上一页。
+struct InstructionEditor: View {
+    let item: Instruction?
+    let onChange: () async -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var content: String
+    @State private var message = ""
+    @State private var saving = false
+    @State private var confirmDelete = false
+
+    init(item: Instruction?, onChange: @escaping () async -> Void) {
+        self.item = item
+        self.onChange = onChange
+        _name = State(initialValue: item?.name ?? "")
+        _content = State(initialValue: item?.content ?? "")
+    }
+
+    private var canSave: Bool {
+        !saving && !name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        List {
+            Section("名称") {
+                TextField("例如：OB", text: $name)
+            }
+            Section {
+                TextField("写给模型看的规则或背景…", text: $content, axis: .vertical)
+                    .lineLimit(8...)
+            } header: {
+                Text("内容")
+            } footer: {
+                if !message.isEmpty { Text(message) }
+            }
+            if item != nil {
+                Section {
+                    Button("删除这条指令", role: .destructive) { confirmDelete = true }
+                }
+            }
+        }
+        .modifier(SheetListStyle())
+        .scrollDismissesKeyboard(.interactively)
+        .navigationTitle(item == nil ? "添加指令" : "编辑指令")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(item == nil ? "添加" : "保存") { Task { await save() } }
+                    .fontWeight(.semibold)
+                    .disabled(!canSave)
+            }
+        }
         .confirmationDialog("删除「\(name)」？", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("删除", role: .destructive) { Task { await delete() } }
         } message: {
@@ -312,40 +364,27 @@ struct InstructionManager: View {
         }
     }
 
-    private func load() async {
-        if let json = try? await API.shared.request("GET", "api/instructions") {
-            items = (json["items"] as? [[String: Any]] ?? []).map(Instruction.init(json:))
-        }
-    }
-
-    private func reset() {
-        editingID = ""
-        name = ""
-        content = ""
-    }
-
     private func save() async {
+        saving = true
+        defer { saving = false }
         do {
             _ = try await API.shared.request("POST", "api/instructions", body: [
-                "id": editingID, "name": name.trimmingCharacters(in: .whitespaces),
+                "id": item?.id ?? "", "name": name.trimmingCharacters(in: .whitespaces),
                 "content": content.trimmingCharacters(in: .whitespacesAndNewlines),
             ])
-            // 新建保存后回到空白的「添加指令」；只有点上面的已有项才进入编辑。
-            reset()
-            message = "保存好了"
-            await load()
-            onChange()
+            await onChange()
+            dismiss()
         } catch {
             message = "没存上：" + error.localizedDescription
         }
     }
 
     private func delete() async {
+        guard let item else { return }
         do {
-            _ = try await API.shared.request("DELETE", "api/instructions/\(editingID)")
-            reset()
-            await load()
-            onChange()
+            _ = try await API.shared.request("DELETE", "api/instructions/\(item.id)")
+            await onChange()
+            dismiss()
         } catch {
             message = "没删掉：" + error.localizedDescription
         }

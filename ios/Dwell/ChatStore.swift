@@ -75,6 +75,9 @@ final class ChatStore: ObservableObject {
 
     private let api = API.shared
     private var pollTask: Task<Void, Never>?
+    private var weatherTask: Task<Void, Never>?
+    /// 外面的天气：聊天背景照它下雨下雪。
+    @Published var weather = WeatherNow()
     private var polledChatID = ""
     /// messages 现在装的是哪间聊天的。
     private var loadedChatID = ""
@@ -149,6 +152,7 @@ final class ChatStore: ObservableObject {
             try await reloadMessages()
             offline = false
             startPolling()
+            startWeatherWatch()
             await syncReplying()
             chatName = (try? await api.chats())?.first { $0.id == chatID }?.name ?? ""
             await refreshMemoryBadge()
@@ -628,6 +632,20 @@ final class ChatStore: ObservableObject {
     }
 
     // MARK: - 长轮询
+
+    /// 每十分钟问一次外面的天气；天气真换了才动背景，换的时候慢慢淡过去。
+    func startWeatherWatch() {
+        guard weatherTask == nil else { return }
+        weatherTask = Task { [weak self] in
+            while !Task.isCancelled {
+                if let json = try? await API.shared.request("GET", "api/weather") {
+                    let now = WeatherNow(json: json)
+                    if let self, now != self.weather { self.weather = now }
+                }
+                try? await Task.sleep(for: .seconds(600))
+            }
+        }
+    }
 
     func startPolling() {
         guard !chatID.isEmpty else { return }
