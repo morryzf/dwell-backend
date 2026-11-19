@@ -3663,7 +3663,7 @@ authed = [Depends(auth.require_auth)]
 
 @app.get("/api/system-logs", dependencies=authed)
 async def system_logs_get(category: str = "", status: str = "", limit: int = 300):
-    allowed_categories = {"", "api_request", "model_request", "memory_task"}
+    allowed_categories = {"", "api_request", "model_request", "memory_task", "client"}
     allowed_statuses = {"", "running", "success", "error", "cancelled"}
     if category not in allowed_categories or status not in allowed_statuses:
         raise HTTPException(400, "日志筛选条件不正确")
@@ -3674,6 +3674,30 @@ async def system_logs_get(category: str = "", status: str = "", limit: int = 300
         "maximum_items": 1000,
         "stores_content": False,
     }
+
+
+@app.post("/api/client-reports", dependencies=authed)
+async def client_report(payload: dict = Body(...)):
+    """app 自己记下的现场（比如卡住了多久、卡之前在做什么），存成一条失败现场挂进系统日志。"""
+    kind = str(payload.get("kind") or "")[:40] or "client"
+    report = payload.get("report") if isinstance(payload.get("report"), dict) else {}
+    seconds = int(report.get("seconds") or 0)
+    summary = (f"app 卡住了约 {seconds} 秒，后来缓过来了" if report.get("recovered")
+               else "app 卡住了，没缓过来（多半是被杀掉重开的）") if kind == "hang" else kind
+    crumbs = [str(line)[:300] for line in (report.get("crumbs") or [])][-80:]
+    report_id = db.failure_report_add({
+        "task": f"ios_{kind}",
+        "error": summary,
+        "context": {
+            "发生在": datetime.fromtimestamp(int(report.get("at") or 0), db.CN_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+            "当时的状态": str(report.get("state") or "")[:1000],
+            "app": f"{report.get('app_version', '')} ({report.get('build', '')}) · iOS {report.get('ios', '')}",
+        },
+        "facts": {},
+        "traceback": "卡住之前做的事（从早到晚）：\n" + "\n".join(crumbs),
+    })
+    db.system_log_record("client", f"ios_{kind}", "error", detail=summary, report_id=report_id)
+    return {"ok": True, "id": report_id}
 
 
 @app.get("/api/failure-reports/{report_id}", dependencies=authed)

@@ -71,6 +71,21 @@ class FailureReportTest(unittest.TestCase):
         self.assertIn("RuntimeError", report["text"])
         self.assertNotIn("sk-abcdefghijklmnopqrstu", report["report"]["traceback"])
 
+    def test_the_app_reports_a_hang_with_what_led_up_to_it(self):
+        r = self.client.post("/api/client-reports", json={"kind": "hang", "report": {
+            "at": 1763500000, "recovered": True, "seconds": 7,
+            "state": "messages=212 replying=true revealing=true",
+            "crumbs": ["23:59:58.100 event stream_event ×40", "23:59:59.900 scrollToBottom(still) ×40"],
+            "app_version": "1.0", "build": "133", "ios": "18.1",
+        }})
+        self.assertEqual(r.status_code, 200)
+        log = next(item for item in self.client.get("/api/system-logs", params={"category": "client"}).json()["items"])
+        self.assertEqual(log["action"], "ios_hang")
+        text = self.client.get(f"/api/failure-reports/{log['report_id']}").json()["text"]
+        self.assertIn("卡住了约 7 秒", text)
+        self.assertIn("replying=true", text)
+        self.assertIn("scrollToBottom(still) ×40", text)
+
     def test_only_the_latest_thirty_are_kept(self):
         ids = [db.failure_report_add({"task": str(i)}) for i in range(35)]
         self.assertIsNone(db.failure_report_get(ids[0]))

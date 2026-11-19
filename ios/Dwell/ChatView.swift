@@ -1010,6 +1010,7 @@ struct ChatView: View {
     /// 聊天记录是懒加载的，滚过去的路上上面的气泡才量出真高度，第一下常常差一截；
     /// 所以落地后再补两下（不带动画），保证真的到最底。
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        HangWatch.shared.note(animated ? "scrollToBottom" : "scrollToBottom(still)")
         if animated {
             withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
         } else {
