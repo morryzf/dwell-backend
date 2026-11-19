@@ -8623,6 +8623,30 @@ async def weather_now():
     return await weather.current()
 
 
+@app.get("/api/weather/location", dependencies=authed)
+async def weather_location_get():
+    lat, lon, name = weather.location()
+    return {"ok": True, "lat": lat, "lon": lon, "name": name}
+
+
+@app.get("/api/weather/places", dependencies=authed)
+async def weather_places(q: str = ""):
+    """搜城市，给设置里选天气跟哪个城市。"""
+    try:
+        return {"ok": True, "items": await weather.search_places(q)}
+    except Exception as exc:
+        raise HTTPException(502, f"城市没搜到：{exc}") from exc
+
+
+@app.put("/api/weather/location", dependencies=authed)
+async def weather_location_put(payload: dict = Body(...)):
+    try:
+        place = weather.set_location(payload.get("lat"), payload.get("lon"), payload.get("name"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "城市的经纬度不对") from exc
+    return {"ok": True, **place, "weather": await weather.current()}
+
+
 @app.get("/api/poll", dependencies=authed)
 async def poll(since: str = "", timeout: int = 25, chat_id: str = ""):
     """长轮询：返回 {next, events}。只从 _event_log 里拿，不用 Queue。"""

@@ -229,3 +229,99 @@ private struct SnowFall: View {
         }
     }
 }
+
+// MARK: - 选城市
+
+/// 天气跟着哪个城市：搜一下，点一个就换。换了马上按新城市拉一次天气，背景跟着变。
+struct WeatherCityPage: View {
+    @EnvironmentObject private var store: ChatStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var places: [Place] = []
+    @State private var current = ""
+    @State private var searching = false
+    @State private var note = ""
+    @State private var searchTask: Task<Void, Never>?
+
+    struct Place: Identifiable {
+        let name: String
+        let detail: String
+        let lat: Double
+        let lon: Double
+        var id: String { "\(lat),\(lon)" }
+
+        init?(json: [String: Any]) {
+            guard let lat = json["lat"] as? Double, let lon = json["lon"] as? Double else { return nil }
+            name = json["name"] as? String ?? ""
+            detail = json["detail"] as? String ?? ""
+            self.lat = lat
+            self.lon = lon
+        }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                TextField("搜城市，中文英文都行", text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } footer: {
+                Text(current.isEmpty ? "" : "现在是：\(current)")
+            }
+            Section {
+                if searching { ProgressView() }
+                if !note.isEmpty { Text(note).foregroundStyle(Theme.dim) }
+                ForEach(places) { place in
+                    Button { Task { await choose(place) } } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(place.name).foregroundStyle(Theme.text)
+                            if !place.detail.isEmpty {
+                                Text(place.detail).font(.system(size: 12.5)).foregroundStyle(Theme.dim)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("天气的城市")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if let json = try? await API.shared.request("GET", "api/weather/location") {
+                current = json["name"] as? String ?? ""
+            }
+        }
+        .onChange(of: query) { _, text in
+            searchTask?.cancel()
+            searchTask = Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled else { return }
+                await search(text)
+            }
+        }
+    }
+
+    private func search(_ text: String) async {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { places = []; note = ""; return }
+        searching = true
+        defer { searching = false }
+        do {
+            let json = try await API.shared.request("GET", "api/weather/places", query: ["q": text])
+            places = (json["items"] as? [[String: Any]] ?? []).compactMap(Place.init(json:))
+            note = places.isEmpty ? "没找到这个地方" : ""
+        } catch {
+            note = error.localizedDescription
+        }
+    }
+
+    private func choose(_ place: Place) async {
+        do {
+            let json = try await API.shared.request("PUT", "api/weather/location",
+                                                    body: ["lat": place.lat, "lon": place.lon, "name": place.name])
+            if let now = json["weather"] as? [String: Any] { store.weather = WeatherNow(json: now) }
+            dismiss()
+        } catch {
+            note = "没换成：" + error.localizedDescription
+        }
+    }
+}

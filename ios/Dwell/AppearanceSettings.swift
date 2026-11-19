@@ -15,6 +15,8 @@ struct BackgroundSettings: View {
     @State private var message = ""
     @State private var picking: [String: (color: Color, hex: String)] = [:]
     @AppStorage("weatherPreview") private var weatherPreview = ""
+    /// 天气跟着哪个城市（存在后端）。
+    @State private var weatherCity = ""
 
     private var whoName: String {
         store.assistant?.all.first { $0.id == who }?.name ?? (who == "chatgpt" ? "ChatGPT" : "Cloudy")
@@ -83,6 +85,12 @@ struct BackgroundSettings: View {
         }
     }
 
+    private func loadCity() async {
+        if let json = try? await API.shared.request("GET", "api/weather/location") {
+            weatherCity = json["name"] as? String ?? ""
+        }
+    }
+
     /// 外面的天气会叠在背景上：下雨是玻璃水珠，下雪是雪花。这里可以不等天气、先看看效果。
     private var weatherSection: some View {
         Section {
@@ -94,6 +102,14 @@ struct BackgroundSettings: View {
                 Text("大雪").tag("snow:heavy")
                 Text("雷雨").tag("storm:heavy")
             }
+            NavigationLink { WeatherCityPage() } label: {
+                HStack {
+                    Text("城市")
+                    Spacer()
+                    Text(weatherCity).foregroundStyle(Theme.dim)
+                }
+            }
+            .task { await loadCity() }
             NavigationLink("雨的手感（调节）") { RainTuneView() }
         } header: {
             Text("外面的天气")

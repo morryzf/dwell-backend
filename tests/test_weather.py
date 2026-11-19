@@ -27,6 +27,21 @@ class WeatherTest(unittest.TestCase):
 
     # ---------------------------------------------------------------- 归类
 
+    def test_changing_city_drops_the_old_citys_weather(self):
+        weather._cached = {"city": "上海", "condition": "rain", "at": int(time.time())}
+        db.setting_set(weather.CACHE_KEY, '{"city": "上海"}')
+        place = weather.set_location(39.9042, 116.4074, "北京")
+        self.assertEqual(place["name"], "北京")
+        self.assertEqual(weather.location(), (39.9042, 116.4074, "北京"))
+        self.assertIsNone(weather._remembered())
+        with self.assertRaises(ValueError):
+            weather.set_location(120, 0, "不存在")
+
+    def test_place_rows_tell_same_named_cities_apart(self):
+        row = weather._place({"name": "苏州", "admin1": "江苏", "country": "中国",
+                              "latitude": 31.3, "longitude": 120.6})
+        self.assertEqual(row, {"name": "苏州", "detail": "江苏 · 中国", "lat": 31.3, "lon": 120.6})
+
     def test_codes_map_to_conditions(self):
         self.assertEqual(weather.classify(0), ("clear", ""))
         self.assertEqual(weather.classify(3), ("cloudy", ""))

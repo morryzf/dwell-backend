@@ -61,6 +61,44 @@ def location() -> tuple[float, float, str]:
         return float(lat), float(lon), name
 
 
+def set_location(lat: float, lon: float, name: str) -> dict:
+    """换城市：存下来，并扔掉旧城市的缓存，下次问就按新城市拉。"""
+    global _cached
+    lat, lon = float(lat), float(lon)
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise ValueError("经纬度不对")
+    name = str(name or "").replace(",", " ").strip()[:40] or f"{lat:.2f},{lon:.2f}"
+    db.setting_set(LOCATION_KEY, f"{lat:.4f},{lon:.4f},{name}")
+    db.setting_set(CACHE_KEY, "")
+    _cached = None
+    return {"lat": lat, "lon": lon, "name": name}
+
+
+def _place(item: dict) -> dict:
+    """搜城市的一条结果：名字，加上省/州和国家帮她分清同名的地方。"""
+    region = [str(item.get(k) or "") for k in ("admin1", "country")]
+    return {
+        "name": str(item.get("name") or ""),
+        "detail": " · ".join(part for part in region if part and part != item.get("name")),
+        "lat": item.get("latitude"), "lon": item.get("longitude"),
+    }
+
+
+async def search_places(query: str) -> list[dict]:
+    """Open-Meteo 的地名搜索（免 key），中文英文都认。"""
+    query = str(query or "").strip()
+    if not query:
+        return []
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": query, "count": 8, "language": "zh", "format": "json"},
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results") or []
+    return [_place(item) for item in results if item.get("latitude") is not None]
+
+
 def classify(code: int) -> tuple[str, str]:
     return _CODES.get(int(code), ("cloudy", ""))
 
