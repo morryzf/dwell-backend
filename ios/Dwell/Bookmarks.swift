@@ -23,7 +23,8 @@ struct BookmarkCardView: View {
                     .foregroundStyle(card.label.isEmpty ? Theme.dim : Theme.text)
             }
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(card.lines) { line in
+                // 收着的时候只露前几句、每句最多三行：书签再长，一屏也能看见两三个。
+                ForEach(expanded ? card.lines : Array(card.lines.prefix(Self.previewLines))) { line in
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(line.role == "user" ? "Morry" : assistantName) · \(line.made.formatted(date: .abbreviated, time: .shortened))")
                             .font(.system(size: 11))
@@ -31,7 +32,7 @@ struct BookmarkCardView: View {
                         Text(line.content)
                             .font(.system(size: 14))
                             .foregroundStyle(Theme.text)
-                            .lineLimit(expanded ? nil : 4)
+                            .lineLimit(expanded ? nil : 3)
                     }
                 }
             }
@@ -39,8 +40,9 @@ struct BookmarkCardView: View {
             .overlay(alignment: .leading) {
                 Capsule().fill(Theme.accent.opacity(0.45)).frame(width: 2.5)
             }
-            if card.lines.contains(where: { $0.content.count > 90 }) || card.lines.count > 3 {
-                Button(expanded ? "收起" : "展开") {
+            if card.lines.count > Self.previewLines || card.lines.contains(where: { $0.content.count > 70 }) {
+                Button(expanded ? "收起" : (card.lines.count > Self.previewLines
+                                           ? "展开 · 还有 \(card.lines.count - Self.previewLines) 句" : "展开")) {
                     withAnimation(.easeOut(duration: 0.2)) { expanded.toggle() }
                 }
                 .font(.system(size: 12.5))
@@ -90,6 +92,8 @@ struct BookmarkCardView: View {
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(MemoryStyle.card))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(MemoryStyle.border, lineWidth: 1))
     }
+
+    static let previewLines = 3
 
     /// 概括还在写、没写出来时说什么。
     static func title(_ card: MemoryCard) -> String {

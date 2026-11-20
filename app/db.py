@@ -3444,7 +3444,8 @@ def memory_card_set_embedding(card_id: str, embedding: list[float]) -> None:
 
 # ---------------------------------------------------------------- 书签
 
-BOOKMARK_LINES_MAX = 30
+# 一个书签最多收多少句。他的一轮回复常常拆成十几条，30 太少；超了就说出来，不悄悄截掉。
+BOOKMARK_LINES_MAX = 120
 BOOKMARK_WHY_MAX = 600
 BOOKMARK_LABEL_MAX = 80
 
@@ -3495,7 +3496,9 @@ def _bookmark_dict(row, assistant: str = "Cloudy") -> dict:
 
 def bookmark_create(chat_id: str, message_ids: list[str], why: str = "", label: str = "") -> dict:
     """把这间聊天里的几条消息圈成一个书签。消息按说的先后排，空的、不是对话的跳过。"""
-    ids = list(dict.fromkeys(str(i) for i in message_ids if i))[:BOOKMARK_LINES_MAX]
+    ids = list(dict.fromkeys(str(i) for i in message_ids if i))
+    if len(ids) > BOOKMARK_LINES_MAX:
+        raise ValueError(f"一个书签最多 {BOOKMARK_LINES_MAX} 句，这次选了 {len(ids)} 句；分成两个书签收吧")
     if not ids:
         raise ValueError("至少要选一句")
     with conn() as cx:
@@ -3686,7 +3689,9 @@ def bookmark_stage(chat_id: str, segment_id: str | None, proposals: list[dict]) 
 
 def bookmark_draft_create(chat_id: str, message_ids: list[str], why: str = "") -> dict:
     """她在聊天里自己圈的几句：先放进待确认，概括在后台写好，她看过再收下。"""
-    ids = list(dict.fromkeys(str(i) for i in message_ids if i))[:BOOKMARK_LINES_MAX]
+    ids = list(dict.fromkeys(str(i) for i in message_ids if i))
+    if len(ids) > BOOKMARK_LINES_MAX:
+        raise ValueError(f"一个书签最多 {BOOKMARK_LINES_MAX} 句，这次选了 {len(ids)} 句；分成两个书签收吧")
     if not ids:
         raise ValueError("至少要选一句")
     with conn() as cx:
