@@ -890,6 +890,16 @@ html[data-theme="dark"] .composer {
 
   .gnote { font-size: 13.5px; color: var(--dim); padding: 12px 6px 0; line-height: 1.6; }
 
+  /* Skills：整行点开编辑，右边的开关单独一个按钮，互不抢点 */
+  #skillsBody .skill-row { padding: 0 16px 0 0; gap: 0; }
+  #skillsBody .skill-open { flex: 1; min-width: 0; padding: 13px 12px 13px 18px; text-align: left; }
+  #skillsBody .skill-name { display: block; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #skillsBody .skill-when { display: block; margin-top: 2px; color: var(--dim); font-size: 13px; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #skillsBody .skill-row.off .skill-name { color: var(--dim); }
+  #skillsBody .ap-in { font-size: 16px; }
+  #skillsBody .ap-btns + .ap-btns { margin-top: 10px; }
+  #skillsBody .skill-hint { margin: 6px 2px 0; color: var(--dim); font-size: 12.5px; line-height: 1.55; }
+
   /* 模型供应商 / MCP：两个设置页共用的表单骨架 */
   .ap-section {
     margin: 14px 0 20px; padding: 16px;
@@ -5025,6 +5035,7 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
         <button class="grow" id="mcpRow"><span class="ic" data-i="tool"></span>MCP 工具<span class="chev">›</span></button>
         <button class="grow" id="instructionsRow"><span class="ic" data-i="layers"></span>聊天指令<span class="chev">›</span></button>
         <button class="grow" id="rewriteRulesRow"><span class="ic" data-i="refresh"></span>重写规则<span class="chev">›</span></button>
+        <button class="grow" id="skillsRow"><span class="ic" data-i="bookOpen"></span>Skills<span class="chev">›</span></button>
         <button class="grow" id="systemLogRow"><span class="ic" data-i="fileText"></span>系统日志<span class="chev">›</span></button>
         <button class="grow" id="kelivoImportRow"><span class="ic" data-i="plus"></span>导入 Kelivo 聊天记录<span class="chev">›</span></button>
       </div>
@@ -5201,6 +5212,13 @@ html[data-theme="dark"] .crow { border-color: rgba(255,255,255,.1); box-shadow: 
   <div class="sheet"><div class="grabber"></div><div class="head">
     <button class="hbtn" data-close="rewriteRules"><span class="ic" data-i="chevL"></span></button><div class="ht">重写规则</div><div class="hspace"></div>
   </div><div class="body" id="rewriteRulesBody"></div></div>
+</div>
+
+<div class="sheetWrap sub" id="skillsSheet">
+  <div class="shade" data-close="skills"></div>
+  <div class="sheet"><div class="grabber"></div><div class="head">
+    <button class="hbtn" data-close="skills"><span class="ic" data-i="chevL"></span></button><div class="ht">Skills</div><div class="hspace"></div>
+  </div><div class="body" id="skillsBody"></div></div>
 </div>
 
 <div class="sheetWrap sub" id="instructionsSheet">
@@ -9196,6 +9214,7 @@ const sheets = {
   focus: document.getElementById('focusSheet'),
   instructions: document.getElementById('instructionsSheet'),
   rewriteRules: document.getElementById('rewriteRulesSheet'),
+  skills: document.getElementById('skillsSheet'),
   chatInstructions: document.getElementById('chatInstructionsSheet'),
   longContext: document.getElementById('longContextSheet'),
   settings: document.getElementById('settingsSheet'),
@@ -13991,6 +14010,85 @@ function wireRewriteRules() {
   });
 }
 document.getElementById('rewriteRulesRow').onclick = () => { sheets.rewriteRules.classList.add('open'); loadRewriteRules(); };
+
+/* ---------- Skills：写给 Cloudy 的做法 ----------
+   每一轮他只看到开着的 skill 的名字和「什么时候用」；对得上的时候自己用工具打开正文。 */
+async function loadSkills(editId = null) {
+  const body = document.getElementById('skillsBody');
+  body.innerHTML = '<div class="gnote">正在读 skills…</div>';
+  let items;
+  try {
+    const d = await (await fetch('api/skills', {cache:'no-store'})).json();
+    items = d.items || [];
+  } catch { body.innerHTML = '<div class="gnote">skills 没拿到，等会儿再开一次。</div>'; return; }
+  if (editId !== null) return renderSkillEditor(items.find(item => item.id === editId) || null);
+  body.innerHTML = `<div class="sh-head"><h1>Skills</h1><div class="sub">写给 Cloudy 的做法：平时他只看到名字和「什么时候用」，对得上的时候自己打开读。</div></div>`
+    + (items.length ? `<div class="group">${items.map(item => `<div class="grow static skill-row${item.enabled ? '' : ' off'}" data-skill="${instructionEsc(item.id)}">`
+        + `<button class="skill-open" type="button"><span class="skill-name">${instructionEsc(item.name)}</span><span class="skill-when">${instructionEsc(item.when_text || '还没写什么时候用')}</span></button>`
+        + `<button class="sw${item.enabled ? ' on' : ''}" type="button" role="switch" aria-checked="${item.enabled ? 'true' : 'false'}" aria-label="启用 ${instructionEsc(item.name)}"></button></div>`).join('')}</div>`
+      : '<div class="gnote">还没有 skill。写第一条吧。</div>')
+    + `<div class="ap-btns single"><button class="ap-b" id="skillNew">＋ 新建</button></div><div class="ap-msg" id="skillListMsg"></div>`;
+  document.getElementById('skillNew').onclick = () => renderSkillEditor(null);
+  body.querySelectorAll('[data-skill]').forEach(row => {
+    const id = row.dataset.skill;
+    row.querySelector('.skill-open').onclick = () => loadSkills(id);
+    const sw = row.querySelector('.sw');
+    sw.onclick = async () => {
+      const enabled = !sw.classList.contains('on');
+      sw.classList.toggle('on', enabled); sw.setAttribute('aria-checked', String(enabled)); row.classList.toggle('off', !enabled);
+      try {
+        const r = await fetch('api/skills/' + encodeURIComponent(id), {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) throw new Error(d.detail || '没有保存');
+      } catch (e) {
+        sw.classList.toggle('on', !enabled); sw.setAttribute('aria-checked', String(!enabled)); row.classList.toggle('off', enabled);
+        const msg = document.getElementById('skillListMsg'); msg.textContent = '没存上：' + e.message; msg.className = 'ap-msg on bad';
+      }
+    };
+  });
+}
+
+function renderSkillEditor(skill) {
+  const body = document.getElementById('skillsBody');
+  body.innerHTML = `<div class="ap-section"><div class="ap-section-title">${skill ? '编辑 skill' : '新建 skill'}</div>`
+    + `<label class="ap-lb" for="skillName">名字</label><input class="ap-in" id="skillName" maxlength="80" placeholder="比如：陪她难过">`
+    + `<label class="ap-lb" for="skillWhen">什么时候用</label><textarea class="ap-in" id="skillWhen" rows="2" placeholder="比如：Morry 难过、哭了、说自己不好的时候"></textarea>`
+    + `<div class="skill-hint">写得越具体，他越容易在对的时候想起来</div>`
+    + `<label class="ap-lb" for="skillBody">正文</label><textarea class="ap-in" id="skillBody" rows="12" placeholder="具体怎么做……"></textarea>`
+    + `<div class="ap-btns single"><button class="ap-b go" id="skillSave">保存</button></div>`
+    + `<div class="ap-btns ${skill ? '' : 'single'}"><button class="ap-b" id="skillCancel">取消</button>${skill ? '<button class="ap-b danger" id="skillDelete">删除</button>' : ''}</div>`
+    + `<div class="ap-msg" id="skillMsg"></div></div>`;
+  document.getElementById('skillName').value = skill ? skill.name : '';
+  document.getElementById('skillWhen').value = skill ? (skill.when_text || '') : '';
+  document.getElementById('skillBody').value = skill ? (skill.body || '') : '';
+  body.scrollTop = 0;
+  const say = text => { const msg = document.getElementById('skillMsg'); msg.textContent = text; msg.className = 'ap-msg on bad'; };
+  document.getElementById('skillCancel').onclick = () => loadSkills();
+  document.getElementById('skillSave').onclick = async () => {
+    const payload = {
+      name: document.getElementById('skillName').value.trim(),
+      when_text: document.getElementById('skillWhen').value.trim(),
+      body: document.getElementById('skillBody').value,
+    };
+    if (!skill) payload.enabled = true;
+    try {
+      const r = await fetch(skill ? 'api/skills/' + encodeURIComponent(skill.id) : 'api/skills', {method: skill ? 'PATCH' : 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(typeof d.detail === 'string' ? d.detail : '没有保存');
+      loadSkills();
+    } catch (e) { say('没存上：' + e.message); }
+  };
+  if (skill) document.getElementById('skillDelete').onclick = async () => {
+    if (!confirm('删掉「' + skill.name + '」？Cloudy 以后就看不到这条了。')) return;
+    try {
+      const r = await fetch('api/skills/' + encodeURIComponent(skill.id), {method:'DELETE'});
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : '没有删除');
+      loadSkills();
+    } catch (e) { say('没删掉：' + e.message); }
+  };
+}
+document.getElementById('skillsRow').onclick = () => { sheets.skills.classList.add('open'); loadSkills(); };
 
 /* ---------- 长期上下文：原聊天不动，只为当前窗口保留可重建的压缩记录 ---------- */
 let longContextPoll = null;
