@@ -1113,7 +1113,7 @@ struct MessageRow: View {
                             ThinkingView(text: message.thinking, live: false)
                         }
                         if !message.tools.isEmpty {
-                            ToolChip(names: message.tools)
+                            ToolChip(uses: message.toolUses)
                         }
                     }
                 }
@@ -1783,15 +1783,113 @@ struct ReactionPicker: View {
 }
 
 struct ToolChip: View {
-    let names: [String]
+    let uses: [ToolUse]
+    @State private var open = false
 
     var body: some View {
-        Chip {
-            Image(systemName: "wrench")
-                .font(.system(size: 10.5))
-            Text(names.count == 1 ? names[0] : "\(names[0]) 等 \(names.count) 个")
-                .lineLimit(1)
+        Button { open = true } label: {
+            Chip {
+                Image(systemName: "wrench")
+                    .font(.system(size: 10.5))
+                Text(uses.count == 1 ? uses[0].shortName : "\(uses[0].shortName) 等 \(uses.count) 个")
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8.5, weight: .semibold))
+            }
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("看这次用了哪些工具")
+        .sheet(isPresented: $open) {
+            ToolCallsSheet(uses: uses)
+                .presentationDetents([.medium, .large])
+        }
+    }
+}
+
+/// 点开工具胶囊：每一次调用的参数和结果，一条一条列出来。
+struct ToolCallsSheet: View {
+    let uses: [ToolUse]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(uses) { use in ToolCallCard(use: use) }
+                }
+                .padding(16)
+            }
+            .background(PaperBackground())
+            .navigationTitle("用过的工具")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("好") { dismiss() } }
+            }
+        }
+    }
+}
+
+private struct ToolCallCard: View {
+    let use: ToolUse
+    @State private var expanded = false
+    private static let fold = 1200
+
+    var body: some View {
+        let result = Self.pretty(use.result)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: use.isError ? "exclamationmark.triangle" : "wrench")
+                    .foregroundStyle(use.isError ? MemoryStyle.danger : Theme.accent)
+                Text(use.shortName).font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button {
+                    UIPasteboard.general.string = "\(use.name)\n\(use.arguments)\n\n\(use.result)"
+                } label: {
+                    Image(systemName: "doc.on.doc").font(.system(size: 13))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.dim)
+                .accessibilityLabel("复制这次调用")
+            }
+            .foregroundStyle(Theme.text)
+            section("参数", Self.pretty(use.arguments))
+            section(use.isError ? "出错了" : "结果",
+                    expanded || result.count <= Self.fold ? result : String(result.prefix(Self.fold)) + "…")
+            if result.count > Self.fold {
+                Button(expanded ? "收起" : "展开全部（\(result.count) 字）") {
+                    withAnimation(.easeOut(duration: 0.2)) { expanded.toggle() }
+                }
+                .font(.system(size: 12.5))
+                .foregroundStyle(Theme.accent)
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MemoryStyle.card))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(MemoryStyle.border, lineWidth: 1))
+    }
+
+    private func section(_ title: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 11.5)).foregroundStyle(Theme.dim)
+            Text(text.isEmpty ? "（空）" : text)
+                .font(.system(size: 12.5, design: .monospaced))
+                .foregroundStyle(Theme.text)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// JSON 排成好读的样子（中文不转义）；不是 JSON 就原样。
+    static func pretty(_ raw: String) -> String {
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              JSONSerialization.isValidJSONObject(object),
+              let out = try? JSONSerialization.data(withJSONObject: object,
+                                                    options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]),
+              let text = String(data: out, encoding: .utf8) else { return raw }
+        return text
     }
 }
 
