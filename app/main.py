@@ -155,6 +155,18 @@ MEMORY_SEARCH_TOOL = {"type": "function", "function": {
         "limit": {"type": "integer", "minimum": 1, "maximum": 10, "description": "How many to return, default 5"},
     }, "required": ["query"], "additionalProperties": False},
 }}
+# Skills：她写的做法说明。他手上只有名字和什么时候用，要用时调这把工具读正文。
+SKILL_TOOL = {"type": "function", "function": {
+    "name": "DwellSkill",
+    "description": (
+        "Open one of the skills Morry wrote for you and read it. A skill is her own write-up of how "
+        "she'd like you to handle a certain kind of situation. The list of skills, with when each one "
+        "applies, is in your context; when the moment matches one, open it before you reply."
+    ),
+    "parameters": {"type": "object", "properties": {
+        "name": {"type": "string", "description": "The skill's name, exactly as listed"},
+    }, "required": ["name"], "additionalProperties": False},
+}}
 MEMORY_SEARCH_DEFAULT = 5
 MEMORY_SEARCH_MAX = 10
 
@@ -2048,6 +2060,7 @@ def _chat_stable_message_parts(
         }]
     # 贴表情、引用不做成工具：写在回复里的记号，系统边说边处理（见 reply_marks）。
     format_preference = format_preference + [{"role": "system", "content": REPLY_MARKS_GUIDE}]
+    format_preference = format_preference + _skills_message(chat_id)
     overview = _chat_overview(chat_id)
     memory_messages = []
     if overview.strip():
@@ -2273,6 +2286,9 @@ async def _chat_tools(chat_id: str, list_tools=None) -> tuple[list[dict], dict[s
     if db.chat_assistant(chat_id) == db.DEFAULT_ASSISTANT:
         tools.append(MEMORY_SEARCH_TOOL)
         tool_map["DwellMemorySearch"] = "builtin:memory"
+        if db.skill_list(enabled_only=True):
+            tools.append(SKILL_TOOL)
+            tool_map["DwellSkill"] = "builtin:skill"
     if db.sigillo_enabled(chat_id):
         tools.extend(SIGILLO_TOOLS)
         for tool in SIGILLO_TOOLS:
@@ -2322,6 +2338,8 @@ async def _run_chat_tool(chat_id: str, name: str, server: object,
             return await asyncio.to_thread(file_tool, chat_id, arguments), False
         if server == "builtin:memory":
             return await _memory_search_tool(chat_id, arguments, message_id), False
+        if server == "builtin:skill":
+            return _skill_tool(arguments), False
         if server == "builtin:diarywake":
             return await _diary_wake_tool(name, arguments)
         if not server:
@@ -2613,6 +2631,8 @@ async def _heartbeat_decide(chat_id: str, now: datetime, interval: int) -> str:
                     result = home_tool(name, arguments, db.chat_assistant(chat_id))
                 elif server == "builtin:memory":
                     result = await _memory_search_tool(chat_id, arguments)
+                elif server == "builtin:skill":
+                    result = _skill_tool(arguments)
                 else:
                     result = await mcp_call_tool(
                         server, name.split("__", 2)[-1], arguments
@@ -3722,6 +3742,41 @@ async def client_report(payload: dict = Body(...)):
     })
     db.system_log_record("client", f"ios_{kind}", "error", detail=summary, report_id=report_id)
     return {"ok": True, "id": report_id}
+
+
+# ---------------------------------------------------------------- Skills
+
+@app.get("/api/skills", dependencies=authed)
+async def skills_get():
+    return {"ok": True, "items": db.skill_list()}
+
+
+@app.post("/api/skills", dependencies=authed)
+async def skills_post(payload: dict = Body(...)):
+    try:
+        item = db.skill_add(payload.get("name"), payload.get("when_text", ""), payload.get("body", ""),
+                            bool(payload.get("enabled", True)))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "item": item}
+
+
+@app.patch("/api/skills/{skill_id}", dependencies=authed)
+async def skills_patch(skill_id: str, payload: dict = Body(...)):
+    try:
+        item = db.skill_update(skill_id, payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not item:
+        raise HTTPException(404, "没有这个 skill")
+    return {"ok": True, "item": item}
+
+
+@app.delete("/api/skills/{skill_id}", dependencies=authed)
+async def skills_delete(skill_id: str):
+    if not db.skill_delete(skill_id):
+        raise HTTPException(404, "没有这个 skill")
+    return {"ok": True}
 
 
 @app.get("/api/failure-reports/{report_id}", dependencies=authed)
@@ -6130,6 +6185,31 @@ async def memory_in_context(chat_id: str):
         raise HTTPException(404, "chat 不存在")
     tracked, ids = _cards_in_session(chat_id)
     return {"ok": True, "tracked": tracked, "ids": ids}
+
+
+def _skill_tool(arguments: dict) -> str:
+    skill = db.skill_find(str(arguments.get("name") or ""))
+    if not skill:
+        names = "、".join(item["name"] for item in db.skill_list(enabled_only=True)) or "（没有）"
+        raise ValueError(f"没有叫这个名字的 skill。现有的：{names}")
+    head = f"Skill「{skill['name']}」, written by Morry"
+    if skill.get("when_text"):
+        head += f" (when: {skill['when_text']})"
+    return head + ". Treat it as her guidance for this kind of moment, in your own voice.\n\n" + skill["body"]
+
+
+def _skills_message(chat_id: str) -> list[dict]:
+    """每轮带给他的 skill 目录：只有名字和什么时候用。只在她改 skill 时才变，不碍缓存。"""
+    if db.chat_assistant(chat_id) != db.DEFAULT_ASSISTANT:
+        return []
+    skills = db.skill_list(enabled_only=True)
+    if not skills:
+        return []
+    lines = [f"- {item['name']}: {item['when_text'] or '(no description)'}" for item in skills]
+    return [{"role": "system", "content": (
+        "[Skills] Morry wrote these for you: how she'd like you to handle certain moments. "
+        "When what's happening matches one, open it with DwellSkill before you reply; "
+        "otherwise leave them closed.\n" + "\n".join(lines))}]
 
 
 def _cards_in_session(chat_id: str) -> tuple[bool, list[str]]:

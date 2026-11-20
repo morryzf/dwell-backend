@@ -60,6 +60,11 @@ struct SettingsView: View {
                         row("square.3.layers.3d", "聊天指令")
                     }
                     NavigationLink {
+                        SkillsPage()
+                    } label: {
+                        row("text.book.closed", "Skills")
+                    }
+                    NavigationLink {
                         RewriteRulesPage()
                     } label: {
                         row("arrow.clockwise", "重写规则")
