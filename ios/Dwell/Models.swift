@@ -61,6 +61,8 @@ struct Message: Identifiable, Equatable {
     var thinking: String
     /// 这次回复用过的工具名，只拿来显示一行小字。
     var tools: [String]
+    /// 每次工具调用的详情（参数、结果），点那颗工具胶囊看。
+    var toolUses: [ToolUse]
     /// 语音回复：画成语音条，文字默认收起。
     var voice: Bool
     /// 这一轮用了多少 token（只记在一轮回复的最后一条上）。
@@ -87,8 +89,9 @@ struct Message: Identifiable, Equatable {
         images = json["images"] as? [String] ?? []
         thinking = (json["thinking"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         // 贴表情也是一次工具调用，但它已经画在消息角上了，不再写进「用过的工具」。
-        tools = (json["tools"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
-            .filter { $0 != "React" }
+        toolUses = (json["tools"] as? [[String: Any]] ?? []).map(ToolUse.init(json:))
+            .filter { $0.name != "React" }
+        tools = toolUses.map(\.name)
         voice = json["voice"] as? Bool ?? false
         usage = MessageUsage(json: json["usage"] as? [String: Any] ?? [:])
         reaction = json["reaction"] as? String ?? ""
@@ -107,6 +110,7 @@ struct Message: Identifiable, Equatable {
         self.images = images
         self.thinking = ""
         self.tools = []
+        self.toolUses = []
         self.voice = false
         self.usage = MessageUsage(json: [:])
         self.reaction = ""
@@ -129,6 +133,26 @@ struct Message: Identifiable, Equatable {
 
     /// 什么都没有的空占位（比如回复还没开始写的那条），不画。
     var isEmpty: Bool { bubbles.isEmpty && images.isEmpty }
+}
+
+/// 一次工具调用：叫的哪把工具、带了什么参数、拿回了什么。
+struct ToolUse: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let arguments: String
+    let result: String
+    let isError: Bool
+
+    init(json: [String: Any]) {
+        id = json["id"] as? String ?? UUID().uuidString
+        name = json["name"] as? String ?? ""
+        arguments = json["arguments"] as? String ?? ""
+        result = json["result"] as? String ?? ""
+        isError = (json["is_error"] as? Int ?? 0) != 0 || (json["is_error"] as? Bool ?? false)
+    }
+
+    /// 外部 MCP 的工具名带着「服务器__」前缀，显示时只留工具名。
+    var shortName: String { name.components(separatedBy: "__").last ?? name }
 }
 
 /// 被引用的那条：id、谁说的、原话副本、什么时候，还有它的第一张图（还在的话）。
