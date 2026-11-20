@@ -4,6 +4,7 @@
 - Web: one file, `static/index.html` (vanilla HTML/CSS/JS, no build step).
 - iOS app: SwiftUI in `ios/` (see `ios/README.md`). Built on GitHub Actions; the owner sideloads it.
 - Deploy: a Tencent Cloud server, updated by running `./deploy.sh` there. Pushing doesn't deploy.
+- `docs/todo.md` lists what the owner and Claude have agreed to do later or still need to confirm. Read it at the start of a session; update it when something is done or newly agreed.
 
 ## iOS constraints
 
