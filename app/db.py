@@ -645,6 +645,13 @@ def init_db():
                 "INSERT INTO settings (key,value) VALUES (?,?)",
                 (cache_scope_key, "1"),
             )
+        # Skills：Morry 写给 Cloudy 的「做某件事的做法」。平时只给他名字和什么时候用，他要用时自己打开读正文。
+        cx.execute(
+            """CREATE TABLE IF NOT EXISTS skills (
+                   id TEXT PRIMARY KEY, name TEXT NOT NULL, when_text TEXT NOT NULL DEFAULT '',
+                   body TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
+                   made INTEGER NOT NULL, updated INTEGER NOT NULL)"""
+        )
         # 失败现场：出错时模型原样回了什么、哪里读不懂、完整的报错。普通日志只记一句话，
         # 这里要能把问题找出来，所以会有聊天原文——只留最近 30 次、14 天。
         cx.execute(
@@ -1057,6 +1064,78 @@ def diary_wanted_mark_seen(ids: list[str]) -> None:
 # ---------------------------------------------------------------- 你的本子
 
 HER_DIARY_CAP = 600
+
+
+# ---------------------------------------------------------------- Skills
+
+SKILL_NAME_MAX = 40
+SKILL_WHEN_MAX = 300
+SKILL_BODY_MAX = 20000
+
+
+def _skill_clean(name, when_text, body) -> dict:
+    name = re.sub(r"\s+", " ", str(name or "")).strip()[:SKILL_NAME_MAX]
+    if not name:
+        raise ValueError("skill 要有名字")
+    return {"name": name, "when_text": str(when_text or "").strip()[:SKILL_WHEN_MAX],
+            "body": str(body or "").strip()[:SKILL_BODY_MAX]}
+
+
+def skill_list(enabled_only: bool = False) -> list[dict]:
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT * FROM skills" + (" WHERE enabled=1" if enabled_only else "") + " ORDER BY made ASC"
+        ).fetchall()
+    return [{**dict(r), "enabled": bool(r["enabled"])} for r in rows]
+
+
+def skill_get(skill_id: str) -> dict | None:
+    with conn() as cx:
+        r = cx.execute("SELECT * FROM skills WHERE id=?", (skill_id,)).fetchone()
+    return {**dict(r), "enabled": bool(r["enabled"])} if r else None
+
+
+def skill_find(name: str) -> dict | None:
+    """按名字找（不分大小写、去掉首尾空格）；他偶尔会写 id，也认。"""
+    wanted = str(name or "").strip().casefold()
+    for item in skill_list(enabled_only=True):
+        if item["name"].casefold() == wanted or item["id"] == str(name or "").strip():
+            return item
+    return None
+
+
+def skill_add(name: str, when_text: str = "", body: str = "", enabled: bool = True) -> dict:
+    clean = _skill_clean(name, when_text, body)
+    now = int(time.time())
+    row = {"id": new_id(), **clean, "enabled": 1 if enabled else 0, "made": now, "updated": now}
+    with conn() as cx:
+        if cx.execute("SELECT 1 FROM skills WHERE name=?", (row["name"],)).fetchone():
+            raise ValueError("已经有一个同名的 skill 了")
+        cx.execute("INSERT INTO skills (id,name,when_text,body,enabled,made,updated) "
+                   "VALUES (:id,:name,:when_text,:body,:enabled,:made,:updated)", row)
+    return skill_get(row["id"])
+
+
+def skill_update(skill_id: str, fields: dict) -> dict | None:
+    current = skill_get(skill_id)
+    if not current:
+        return None
+    clean = _skill_clean(fields.get("name", current["name"]), fields.get("when_text", current["when_text"]),
+                         fields.get("body", current["body"]))
+    enabled = bool(fields.get("enabled", current["enabled"]))
+    with conn() as cx:
+        if cx.execute("SELECT 1 FROM skills WHERE name=? AND id<>?", (clean["name"], skill_id)).fetchone():
+            raise ValueError("已经有一个同名的 skill 了")
+        cx.execute("UPDATE skills SET name=?, when_text=?, body=?, enabled=?, updated=? WHERE id=?",
+                   (clean["name"], clean["when_text"], clean["body"], 1 if enabled else 0,
+                    int(time.time()), skill_id))
+    return skill_get(skill_id)
+
+
+def skill_delete(skill_id: str) -> bool:
+    with conn() as cx:
+        cur = cx.execute("DELETE FROM skills WHERE id=?", (skill_id,))
+    return cur.rowcount > 0
 
 
 def her_diary_add(text: str) -> dict:
