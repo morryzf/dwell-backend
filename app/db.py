@@ -4059,6 +4059,38 @@ def memory_card_usage_record(
             )
 
 
+def memory_card_usage_add(
+    chat_id: str, response_message_id: str, query: str, cards: list[dict]
+) -> None:
+    """往这条回复的带入记录里再添几张（他自己搜出来的），已经记过的不重复。"""
+    if not response_message_id or not cards:
+        return
+    now = int(time.time())
+    with conn() as cx:
+        have = {r["card_id"] for r in cx.execute(
+            "SELECT card_id FROM memory_card_uses WHERE response_message_id=? AND chat_id=?",
+            (response_message_id, chat_id)).fetchall()}
+        for card in cards:
+            if card["id"] in have:
+                continue
+            have.add(card["id"])
+            metadata = {
+                "memory_type": card.get("memory_type"), "topics": card.get("topics") or [],
+                "importance": card.get("importance"), "retention": card.get("retention"),
+                "valid_until": card.get("valid_until"),
+                "source_start_rowid": card.get("source_start_rowid") or 0,
+                "source_end_rowid": card.get("source_end_rowid") or 0, "searched": True,
+            }
+            cx.execute(
+                """INSERT INTO memory_card_uses
+                   (id,chat_id,card_id,response_message_id,content_snapshot,metadata_json,
+                    query_excerpt,score,used_at) VALUES (?,?,?,?,?,?,?,?,?)""",
+                (new_id(), chat_id, card["id"], response_message_id,
+                 str(card.get("content") or "")[:1200], json.dumps(metadata, ensure_ascii=False),
+                 str(query or "")[-500:], float(card.get("selection_score") or 0), now),
+            )
+
+
 def memory_card_last_injection(chat_id: str, response_message_id: str = "") -> dict | None:
     """最近一次带了哪些卡；给了 response_message_id 就是那一条回复带的。"""
     with conn() as cx:
