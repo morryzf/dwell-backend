@@ -79,6 +79,14 @@ class BookmarkTest(unittest.TestCase):
         self.assertEqual((bookmark["label"], bookmark["why"]), ("布丁当闹钟", "她喜欢被布丁叫醒"))
         self.assertEqual(db.memory_card_draft_list(self.chat), [])
 
+    def test_too_many_lines_are_refused_out_loud_not_cut_off(self):
+        ids = [db.message_add(self.chat, "assistant", f"第 {i} 句")["id"] for i in range(db.BOOKMARK_LINES_MAX + 1)]
+        r = self.client.post(f"/api/chats/{self.chat}/bookmarks", json={"message_ids": ids})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn(f"这次选了 {len(ids)} 句", r.json()["detail"])
+        r = self.client.post(f"/api/chats/{self.chat}/bookmarks", json={"message_ids": ids[:60]})
+        self.assertEqual(len(r.json()["item"]["source_rowids"]), 60)
+
     def test_a_label_she_wrote_is_not_overwritten_by_the_late_model(self):
         r = self.client.post(f"/api/chats/{self.chat}/bookmarks", json={"message_ids": [self.a["id"]]})
         draft = r.json()["item"]
