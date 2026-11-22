@@ -160,7 +160,11 @@ struct SearchSheet: View {
     private func jump(_ chatID: String, _ messageID: String) {
         guard !chatID.isEmpty, !messageID.isEmpty else { return }
         dismiss()
-        Task { await store.open(chat: chatID, message: messageID) }
+        // 等搜索这页收下去再换聊天记录：不然后面的气泡会在她眼前跟着动。
+        Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            await store.open(chat: chatID, message: messageID)
+        }
     }
 }
 

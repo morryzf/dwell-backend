@@ -559,11 +559,16 @@ final class ChatStore: ObservableObject {
                 let page = try await api.messageWindow(chatID: chat, around: messageID)
                 guard chat == self.chatID else { return }
                 holdScroll = true
-                shown = [:]
-                messages = page.msgs.filter { !$0.isEmpty }
-                hasMore = page.more
-                hasNewer = page.newer
-                browsing = page.newer
+                // 整段换掉，不演出场：一下就是那一段。
+                var still = Transaction()
+                still.disablesAnimations = true
+                withTransaction(still) {
+                    shown = [:]
+                    messages = page.msgs.filter { !$0.isEmpty }
+                    hasMore = page.more
+                    hasNewer = page.newer
+                    browsing = page.newer
+                }
             } catch {}
         }
         guard messages.contains(where: { $0.id == messageID }) else {
