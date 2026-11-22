@@ -49,6 +49,9 @@ struct ChatView: View {
     /// 贴底之后补的那两下。新的一次贴底、或者她手指一拖，就把上一次没补完的取消掉。
     @State private var settle: Task<Void, Never>?
     @State private var deleting: Message?
+    /// 看旧消息时的「回到最新」：只在手指翻动时露出来。
+    @State private var latestPillShown = false
+    @State private var latestPillHide: Task<Void, Never>?
     /// 流式贴底的节流：记上一次贴底的时刻（不是 @State 的值，改它不会触发重画）。
     @State private var streamScroll = Throttle(interval: 0.15)
     @FocusState private var inputFocused: Bool
@@ -349,6 +352,12 @@ struct ChatView: View {
                 .padding(.top, 14)
             }
             .defaultScrollAnchor(.bottom)
+            // 翻到最上面再往下多拉一截、松手，拿更早的一页（系统的下拉刷新，拉够了才算）。
+            .refreshable {
+                await loadOlderInPlace(proxy)
+            }
+            // 在看一段旧消息时，「回到最新」只在手指翻动时露出来，不挡底下的「更新的消息」。
+            .simultaneousGesture(DragGesture(minimumDistance: 6).onChanged { _ in revealLatestPill() })
             // 正在往右拉侧栏：聊天记录别跟着上下动。
             .scrollDisabled(isOpeningDrawer)
             // 原生 app 最舒服的一点：往下一拖，键盘跟着手指收回去。
@@ -400,8 +409,8 @@ struct ChatView: View {
             .overlay(alignment: .bottom) {
                 // 动画只管这颗箭头的出现和消失，不要连聊天记录的位置变化也一起带上。
                 ZStack {
-                    if store.browsing {
-                        // 在看一段旧消息：一直留着这颗，点了回到平常的聊天。
+                    if store.browsing && latestPillShown {
+                        // 在看一段旧消息：翻动的时候露出来，停下一会儿就收起，点了回到平常的聊天。
                         Button {
                             Task { await store.backToLatest() }
                         } label: {
@@ -438,6 +447,7 @@ struct ChatView: View {
                     }
                 }
                 .animation(.easeOut(duration: 0.2), value: atBottom)
+                .animation(.easeOut(duration: 0.2), value: latestPillShown)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if selection != nil { selectionBar } else { inputBar }
@@ -445,26 +455,30 @@ struct ChatView: View {
         }
     }
 
+    /// 拿更早的一页，插在上面，把原来最上面那条留在原位，免得画面跳。
+    /// 新插进来的那几条要等摆上、量过高度才对得准：当场对一下，摆好后再补两下。
+    private func loadOlderInPlace(_ proxy: ScrollViewProxy) async {
+        guard store.hasMore, !store.loadingOlder else { return }
+        let anchor = store.messages.first?.id
+        await store.loadOlder()
+        guard let anchor else { return }
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) { proxy.scrollTo(anchor, anchor: .top) }
+        for wait in [30, 150] {
+            try? await Task.sleep(for: .milliseconds(wait))
+            withTransaction(still) { proxy.scrollTo(anchor, anchor: .top) }
+        }
+    }
+
+    /// 最上面那一行：提示往下拉；点它也能拿（拉不动的时候兜底）。
     private func olderButton(_ proxy: ScrollViewProxy) -> some View {
         Button {
-            let anchor = store.messages.first?.id
-            Task {
-                await store.loadOlder()
-                // 新的一页插在上面，把原来最上面那条留在原位，免得画面跳。
-                // 新插进来的那几条要等摆上、量过高度才对得准：当场对一下，摆好后再补两下。
-                guard let anchor else { return }
-                var still = Transaction()
-                still.disablesAnimations = true
-                withTransaction(still) { proxy.scrollTo(anchor, anchor: .top) }
-                for wait in [30, 150] {
-                    try? await Task.sleep(for: .milliseconds(wait))
-                    withTransaction(still) { proxy.scrollTo(anchor, anchor: .top) }
-                }
-            }
+            Task { await loadOlderInPlace(proxy) }
         } label: {
             HStack(spacing: 6) {
                 if store.loadingOlder { ProgressView().controlSize(.small) }
-                Text("更早的消息")
+                Text(store.loadingOlder ? "正在拿更早的消息…" : "往下拉，加载更早的消息")
             }
             .font(.footnote)
             .foregroundStyle(Theme.dim)
@@ -1003,6 +1017,17 @@ struct ChatView: View {
             }
         } message: {
             Text("删了之后的聊天不会再读到它们，也找不回来。")
+        }
+    }
+
+    /// 手指在翻：露出「回到最新」，停手 1.5 秒后收起。
+    private func revealLatestPill() {
+        guard store.browsing else { return }
+        if !latestPillShown { latestPillShown = true }
+        latestPillHide?.cancel()
+        latestPillHide = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1500))
+            if !Task.isCancelled { latestPillShown = false }
         }
     }
 
