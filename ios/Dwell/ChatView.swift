@@ -51,6 +51,8 @@ struct ChatView: View {
     @State private var deleting: Message?
     /// 看旧消息时的「回到最新」：只在手指翻动时露出来。
     @State private var latestPillShown = false
+    /// 键盘停稳后的那一下检查（iOS 18+）。
+    @State private var keyboardCheck: Task<Void, Never>?
     @State private var latestPillHide: Task<Void, Never>?
     /// 流式贴底的节流：记上一次贴底的时刻（不是 @State 的值，改它不会触发重画）。
     @State private var streamScroll = Throttle(interval: 0.15)
@@ -354,7 +356,9 @@ struct ChatView: View {
             .defaultScrollAnchor(.bottom)
             // 键盘升起、收起时聊天区域变矮变高：在最底下就贴着底，跟着键盘同一个动画一起动
             // （像被输入框顶上去）；往上翻着看的时候，看的那块不动。
-            .stickToBottomOnResize(atBottom)
+            // 看的是「她有没有自己翻走」，不看底部那一格露没露：键盘起落时重排版，那一格会一闪而过，
+            // 跟着它切成「贴顶」的话，聊天区域一变高，位置就落到内容外面，整屏空掉。
+            .stickToBottomOnResize(!pulledAway)
             // 翻到最上面再往下多拉一截、松手，拿更早的一页（系统的下拉刷新，拉够了才算）。
             .refreshable {
                 await loadOlderInPlace(proxy)
@@ -394,7 +398,18 @@ struct ChatView: View {
             // 键盘收回去：系统不会把聊天记录带下来，会悬在半空、底下空一大截，所以跟着键盘一起落回底。
             .onChange(of: inputFocused) { _, focused in
                 // iOS 18 起贴底交给系统，跟键盘一起动；事后再补滚动反而会多出一下。
-                if #available(iOS 18.0, *) { return }
+                // 只留一道保险：键盘停稳后，她没翻走却不在底下（排版没对上、落到空白里），悄悄贴回去。
+                if #available(iOS 18.0, *) {
+                    guard !pulledAway else { return }
+                    keyboardCheck?.cancel()
+                    keyboardCheck = Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(500))
+                        guard !Task.isCancelled, !pulledAway, !atBottom else { return }
+                        HangWatch.shared.note("keyboard settle: not at bottom, re-pin")
+                        proxy.scrollTo(bottomID, anchor: .bottom)
+                    }
+                    return
+                }
                 guard atBottom else { return }
                 settleAtBottom(proxy, falling: !focused)
             }
