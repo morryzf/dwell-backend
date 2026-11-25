@@ -352,6 +352,9 @@ struct ChatView: View {
                 .padding(.top, 14)
             }
             .defaultScrollAnchor(.bottom)
+            // 键盘升起、收起时聊天区域变矮变高：在最底下就贴着底，跟着键盘同一个动画一起动
+            // （像被输入框顶上去）；往上翻着看的时候，看的那块不动。
+            .stickToBottomOnResize(atBottom)
             // 翻到最上面再往下多拉一截、松手，拿更早的一页（系统的下拉刷新，拉够了才算）。
             .refreshable {
                 await loadOlderInPlace(proxy)
@@ -390,6 +393,8 @@ struct ChatView: View {
             // （已经在底就原地不动）。正往上翻着看的，就别动她的位置。
             // 键盘收回去：系统不会把聊天记录带下来，会悬在半空、底下空一大截，所以跟着键盘一起落回底。
             .onChange(of: inputFocused) { _, focused in
+                // iOS 18 起贴底交给系统，跟键盘一起动；事后再补滚动反而会多出一下。
+                if #available(iOS 18.0, *) { return }
                 guard atBottom else { return }
                 settleAtBottom(proxy, falling: !focused)
             }
@@ -2121,5 +2126,17 @@ final class Throttle {
         guard now.timeIntervalSince(last) >= interval else { return false }
         last = now
         return true
+    }
+}
+
+extension View {
+    /// 滚动区域大小变了（键盘升起收起、内容变多）时贴着哪一头。iOS 18 才有，旧系统维持原样。
+    @ViewBuilder
+    func stickToBottomOnResize(_ atBottom: Bool) -> some View {
+        if #available(iOS 18.0, *) {
+            defaultScrollAnchor(atBottom ? .bottom : .top, for: .sizeChanges)
+        } else {
+            self
+        }
     }
 }
