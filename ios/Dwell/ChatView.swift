@@ -358,7 +358,7 @@ struct ChatView: View {
             // （像被输入框顶上去）；往上翻着看的时候，看的那块不动。
             // 看的是「她有没有自己翻走」，不看底部那一格露没露：键盘起落时重排版，那一格会一闪而过，
             // 跟着它切成「贴顶」的话，聊天区域一变高，位置就落到内容外面，整屏空掉。
-            .stickToBottomOnResize(!pulledAway)
+            .stickToBottomOnResize(following)
             // 翻到最上面再往下多拉一截、松手，拿更早的一页（系统的下拉刷新，拉够了才算）。
             .refreshable {
                 await loadOlderInPlace(proxy)
@@ -400,7 +400,7 @@ struct ChatView: View {
                 // iOS 18 起贴底交给系统，跟键盘一起动；事后再补滚动反而会多出一下。
                 // 只留一道保险：键盘停稳后，她没翻走却不在底下（排版没对上、落到空白里），悄悄贴回去。
                 if #available(iOS 18.0, *) {
-                    guard !pulledAway else { return }
+                    guard following else { return }
                     keyboardCheck?.cancel()
                     keyboardCheck = Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(500))
@@ -1057,6 +1057,11 @@ struct ChatView: View {
                   value.translation.height > abs(value.translation.width) else { return }
             settle?.cancel()
             if !pulledAway { pulledAway = true }
+        }
+        .onEnded { _ in
+            // 手指松开时人还在最底下（只是轻轻带了一下、回弹回来）：不算翻走。
+            // 不清的话，底部那一格一直没消失过，就再也等不到它「重新出现」来清这个标记。
+            if atBottom { pulledAway = false }
         }
     }
 
